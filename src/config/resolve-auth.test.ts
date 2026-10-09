@@ -137,8 +137,8 @@ describe('resolveAuth type', () => {
     expect(failure(() => resolveAuth({ auth: 'digest' }, {}, NO_PROFILE)).message).toBe(
       'Unsupported auth type "digest"',
     );
-    expect(failure(() => resolveAuth({}, { OPERATE_AUTH: 'oauth' }, NO_PROFILE)).message).toBe(
-      'Unsupported auth type "oauth"',
+    expect(failure(() => resolveAuth({}, { OPERATE_AUTH: 'OAuth' }, NO_PROFILE)).message).toBe(
+      'Unsupported auth type "OAuth"',
     );
   });
 });

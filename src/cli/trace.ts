@@ -1,6 +1,7 @@
 /**
  * `--verbose`: formats the structured trace events of the HTTP client as `> METHOD url`,
- * `> Name: value` and `< status text (N ms, M bytes)` lines on stderr, secrets masked.
+ * `> Name: value` and `< status text (N ms, M bytes)` lines on stderr, secrets masked, and notes
+ * about decisions without an answer of their own as `* message` (like `curl -v`).
  */
 
 import type { TraceEvent } from '../http/types.js';
@@ -16,6 +17,7 @@ export function formatTrace(event: TraceEvent, showSecrets: boolean): string {
     ];
     return `${lines.join('\n')}\n`;
   }
+  if (event.type === 'note') return `* ${event.message}\n`;
   const status = [String(event.status), event.statusText].filter((part) => part !== '').join(' ');
   return `< ${status} (${event.durationMs} ms, ${event.bytes} bytes)\n`;
 }

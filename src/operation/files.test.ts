@@ -12,6 +12,7 @@ function failingFs(error: unknown): FileSystem {
     writeFile: () => Promise.resolve(),
     mkdir: () => Promise.resolve(),
     exists: () => Promise.resolve(false),
+    remove: () => Promise.resolve(false),
   };
 }
 

@@ -126,7 +126,7 @@ describe('commanderUsageError', () => {
     root.addCommand(auth);
     auth.option('--auth <type>').option('--auth-user <name>').option('--auth-password-stdin');
     const secret =
-      'Secrets are never flag values: pipe the password into --auth-password-stdin, or set OPERATE_PASSWORD (a profile stores the name of a variable: config set --auth-password-env <VAR>); pass a token with OPERATE_HEADERS. ';
+      'Secrets are never flag values: pipe the password into --auth-password-stdin, or set OPERATE_PASSWORD (a profile stores the name of a variable: config set --auth-password-env <VAR>); pass a token with OPERATE_HEADERS; an OAuth token comes from `operate auth login`. ';
     const help = 'Run "operate ping --help" for the usage.';
     const unknown = (flag: string) =>
       commanderUsageError(

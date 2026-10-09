@@ -84,7 +84,7 @@ describe('changedAuth', () => {
   });
 
   it.each([
-    [{ auth: 'oauth' }, 'Unsupported auth type "oauth"'],
+    [{ auth: 'digest' }, 'Unsupported auth type "digest"'],
     [{ authUser: 'a:b' }, 'The username (from --auth-user) must not contain ":"'],
     [{ authUser: ' ' }, 'The username (from --auth-user) must not be empty'],
     [

@@ -1,13 +1,15 @@
 /**
  * `operate ping` (design §5): `GET /version` and `GET /engine`, printed as
- * `{url, engine, reachable, version, engines, latencyMs, auth}`, plus `user` with Basic auth.
- * Failures are normal errors; a configured engine name that the REST API does not serve is a
- * CONFIG error.
+ * `{url, engine, reachable, version, engines, latencyMs, auth}`, plus `user` with Basic auth and
+ * OAuth. Failures are normal errors; a configured engine name that the REST API does not serve
+ * is a CONFIG error.
  */
 
 import type { Command } from 'commander';
+import type { AuthProvider } from '../../auth/types.js';
 import { findByOperationId } from '../../catalog/catalog.js';
 import type { Catalog, OperationSpec } from '../../catalog/types.js';
+import type { AuthConfig } from '../../config/types.js';
 import { OperateError } from '../../errors.js';
 import { dryRunPreview, sendRequest } from '../../operation/execute.js';
 import { buildRequest, type OperationInput } from '../../operation/request.js';
@@ -66,6 +68,12 @@ export function checkEngine(engine: string | undefined, names: readonly string[]
   });
 }
 
+/** `user`: the Basic auth username, or the user of the OAuth login (null when unknown). */
+function userOf(auth: AuthConfig, provider: AuthProvider): { user?: string | null } {
+  if (auth.type === 'basic') return { user: auth.username };
+  return auth.type === 'oauth' ? { user: provider.principal?.user ?? null } : {};
+}
+
 async function runPing(command: Command, context: CliContext): Promise<void> {
   const { runtime, catalog } = context;
   const session = await openSession(context, readGlobals(command));
@@ -77,8 +85,7 @@ async function runPing(command: Command, context: CliContext): Promise<void> {
   );
   const client = clientOf(session, runtime);
   if (session.globals.dryRun) {
-    const request = dryRunPreview(versionRequest, client.auth);
-    await emitResult({ kind: 'dry-run', request }, session, runtime);
+    await emitResult(await dryRunPreview(versionRequest, client.auth), session, runtime);
     return;
   }
   const started = runtime.now();
@@ -97,7 +104,7 @@ async function runPing(command: Command, context: CliContext): Promise<void> {
     engines: names,
     latencyMs,
     auth: config.auth.type,
-    ...(config.auth.type === 'basic' ? { user: config.auth.username } : {}),
+    ...userOf(config.auth, client.auth),
   };
   await emitResult(
     { kind: 'json', status: 200, value, request: version.request },

@@ -146,6 +146,15 @@ describe('renderResult', () => {
     expect(rendered).toEqual({ stdout: `${JSON.stringify(expected)}\n` });
   });
 
+  it('writes the note of a dry-run to stderr', () => {
+    const rendered = renderResult(
+      { kind: 'dry-run', request: secretRequest, note: 'Not logged in with OAuth' },
+      JSON_OPTIONS,
+    );
+    expect(rendered.stderr).toBe('Note: Not logged in with OAuth\n');
+    expect(rendered.stdout).toContain('"method":"POST"');
+  });
+
   it('shows secrets in dry-run previews with showSecrets', () => {
     const rendered = renderResult(
       { kind: 'dry-run', request: secretRequest },

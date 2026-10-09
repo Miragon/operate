@@ -166,7 +166,7 @@ describe('setProfile', () => {
       { headers: ['Connection: close'] },
       'Header "Connection" cannot be set: the HTTP client manages it',
     ],
-    [{ auth: 'oauth' }, 'Unsupported auth type "oauth"'],
+    [{ auth: 'digest' }, 'Unsupported auth type "digest"'],
     [{ output: 'yaml' }, 'Unknown output format "yaml"'],
     [{ timeout: '0' }, 'Timeout must be a positive number of milliseconds, got "0"'],
     [{ headers: ['nope'] }, 'Invalid header: expected "Name: value"'],
@@ -267,8 +267,69 @@ describe('unsetProfileKeys', () => {
     expect(error.code).toBe('CONFIG');
     expect(error.message).toBe('Unknown profile key "user"');
     expect(error.details.hint).toBe(
-      'Valid keys: url, engine, auth, output, timeout, headers, readOnly.',
+      'Valid keys: url, engine, auth, output, timeout, headers, readOnly; OAuth settings: issuer, endpoints, clientId, clientSecret, scopes, audience, redirectPort.',
     );
+  });
+
+  it('removes single OAuth settings and keeps the others', () => {
+    const auth = {
+      type: 'oauth',
+      issuer: 'https://login.example.com/realms/x',
+      authorizationEndpoint: 'https://login.example.com/auth',
+      tokenEndpoint: 'https://login.example.com/token',
+      clientId: 'cli',
+      clientSecretEnv: 'SECRET',
+      scopes: ['openid'],
+      audience: 'engine-rest',
+      redirectPort: 8765,
+    } as const;
+    const file: ConfigFile = { profiles: { p: { url: 'http://x', auth, readOnly: true } } };
+    const unset = (...keys: string[]) => unsetProfileKeys(file, 'p', keys).profiles.p;
+    expect(unset('audience')).toEqual({
+      url: 'http://x',
+      auth: { ...auth, audience: undefined },
+      readOnly: true,
+    });
+    expect(unset('audience')?.auth).not.toHaveProperty('audience');
+    expect(unset('auth.scopes', 'redirectPort')?.auth).toEqual({
+      type: 'oauth',
+      issuer: auth.issuer,
+      authorizationEndpoint: auth.authorizationEndpoint,
+      tokenEndpoint: auth.tokenEndpoint,
+      clientId: 'cli',
+      clientSecretEnv: 'SECRET',
+      audience: 'engine-rest',
+    });
+    // the endpoints go as a pair, the client secret in either form
+    for (const key of ['endpoints', 'tokenEndpoint', 'authorizationEndpoint']) {
+      expect(Object.keys(unset(key)?.auth ?? {})).toEqual([
+        'type',
+        'issuer',
+        'clientId',
+        'clientSecretEnv',
+        'scopes',
+        'audience',
+        'redirectPort',
+      ]);
+    }
+    for (const key of ['clientSecret', 'clientSecretEnv']) {
+      expect(unset(key)?.auth).not.toHaveProperty('clientSecretEnv');
+    }
+    expect(
+      unsetProfileKeys({ profiles: { p: { auth: { type: 'oauth', clientSecret: 's' } } } }, 'p', [
+        'clientSecretEnv',
+      ]).profiles.p,
+    ).toEqual({ auth: { type: 'oauth' } });
+    expect(unset('issuer', 'clientId')?.auth).not.toHaveProperty('issuer');
+    expect(unset('auth', 'audience')).toEqual({ url: 'http://x', readOnly: true });
+  });
+
+  it('drops an auth object that has nothing left and ignores OAuth keys without auth', () => {
+    expect(
+      unsetProfileKeys({ profiles: { p: { auth: { audience: 'a' } } } }, 'p', ['audience']).profiles
+        .p,
+    ).toEqual({});
+    expect(unsetProfileKeys(TWO, 'dev', ['audience'])).toEqual(TWO);
   });
 
   it('rejects a missing profile with the known profiles as hint', () => {

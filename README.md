@@ -159,7 +159,7 @@ These work on every API command, `api` and `ping`, after the command path
 | `--read-only`           | Refuse every operation that is not a read                                      |
 | `--timeout <ms>`        | Request timeout in milliseconds, default 30000                                 |
 | `-H, --header <header>` | Extra request header `Name: value`; repeatable                                 |
-| `--auth <type>`         | `none` or `basic`; a username alone selects `basic`                            |
+| `--auth <type>`         | `none`, `basic` or `oauth`; a username alone selects `basic`                   |
 | `--auth-user <name>`    | Username for Basic auth                                                        |
 | `--auth-password-stdin` | Read the Basic auth password from the first line of stdin                      |
 | `--verbose`             | Trace requests and responses on stderr                                         |
@@ -176,9 +176,10 @@ These work on every API command, `api` and `ping`, after the command path
 | `OPERATE_CONFIG`    | Config file location; the file must exist                                  |
 | `OPERATE_OUTPUT`    | `json` or `table`                                                          |
 | `OPERATE_TIMEOUT`   | Request timeout in milliseconds                                            |
-| `OPERATE_AUTH`      | Authentication type: `none` or `basic`                                     |
+| `OPERATE_AUTH`      | Authentication type: `none`, `basic` or `oauth`                            |
 | `OPERATE_USERNAME`  | Username for Basic auth                                                    |
 | `OPERATE_PASSWORD`  | Password for Basic auth                                                    |
+| `OPERATE_OAUTH_*`   | OAuth settings, see [OAuth](#oauth)                                        |
 | `OPERATE_HEADERS`   | Extra headers `Name: value`, one per line, e.g. a token                    |
 | `OPERATE_READ_ONLY` | `1`/`true`/`yes`/`on` or `0`/`false`/`no`/`off`; anything else is an error |
 
@@ -209,17 +210,25 @@ is never readable under another mode); you can also edit it by hand:
     },
     "prod": {
       "url": "https://camunda.example.com/engine-rest",
-      "headers": { "Authorization": "Bearer eyJhbGciOi..." },
+      "auth": {
+        "type": "oauth",
+        "issuer": "https://login.example.com/realms/camunda",
+        "clientId": "operate-cli"
+      },
       "readOnly": true
     }
   }
 }
 ```
 
-Profile keys: `url`, `engine`, `auth` (`type`, `username`, and `passwordEnv` or `password`, see
-[Authentication](#authentication)), `output`, `timeout`, `headers`, `readOnly`. URLs with
-credentials (`https://user:pass@host`) or a query string are rejected, and so are header values
-with control characters and connection headers (`Connection`, `Transfer-Encoding`, ...).
+Profile keys: `url`, `engine`, `auth` (`type`, then either the Basic auth keys `username` and
+`passwordEnv` or `password`, or the OAuth keys `issuer`, `authorizationEndpoint`, `tokenEndpoint`,
+`clientId`, `clientSecretEnv` or `clientSecret`, `scopes`, `audience`, `redirectPort`; see
+[Authentication](#authentication)), `output`, `timeout`, `headers`, `readOnly`. Profile names
+use letters, digits, `.`, `_` and `-` and start with a letter or digit, also in a hand-written
+file. URLs with credentials (`https://user:pass@host`) or a query string are rejected, and so are
+header values with control characters and connection headers (`Connection`, `Transfer-Encoding`,
+...).
 
 ### Profiles
 
@@ -236,10 +245,14 @@ operate config delete prod
 
 - `config set <profile>` creates or updates a profile; only the given values change
   (`--url`, `--engine`, `--auth`, `--auth-user`, `--auth-password-env`, `--auth-password-stdin`,
-  `--output`, `--timeout`, `-H/--header`, `--read-only`, `--no-read-only`, `--default`). The
+  the `--oauth-*` options of [OAuth](#oauth), `--output`, `--timeout`, `-H/--header`,
+  `--read-only`, `--no-read-only`, `--default`). The
   first profile becomes the default. Here `--output` is the output format stored in the profile;
   `-o <format>` chooses how the profile is printed, as `-o/--output` does for every other config
-  command. `config unset <profile> auth` removes all auth settings.
+  command. `config unset <profile> auth` removes all auth settings; `config unset <profile>
+audience` (also `issuer`, `endpoints`, `clientId`, `clientSecret`, `scopes`, `redirectPort`)
+  removes a single OAuth setting. `config delete <profile>` also removes the cached OAuth login of
+  the profile (without revoking it).
 - `config use <profile>` makes a profile the default; `--profile` or `OPERATE_PROFILE` pick another
   one per call.
 - `config show` accepts the global configuration flags, so you can see what a combination resolves
@@ -251,26 +264,39 @@ $ operate config show --profile prod -o table
 Config file: /home/me/.config/operate/config.json
 Profile: prod
 
-KEY       VALUE                                    SOURCE
-url       https://camunda.example.com/engine-rest  profile
-engine                                             default
-auth      none                                     default
-username                                           default
-password                                           default
-output                                             default
-timeout   30000                                    default
-headers   {"Authorization":"Bearer ***"}           profile
-readOnly  true                                     profile
+KEY                    VALUE                                     SOURCE
+url                    https://camunda.example.com/engine-rest   profile
+engine                                                           default
+auth                   oauth                                     profile
+username                                                         default
+password                                                         default
+issuer                 https://login.example.com/realms/camunda  profile
+authorizationEndpoint                                            default
+tokenEndpoint                                                    default
+clientId               operate-cli                               profile
+clientSecret                                                     default
+scopes                 openid offline_access                     default
+audience                                                         default
+redirectPort           0                                         default
+output                                                           default
+timeout                30000                                     default
+headers                {}                                        default
+readOnly               true                                      profile
 ```
 
 ## Authentication
 
-`operate` supports HTTP Basic authentication, e.g. for Camunda 7 Run with
-`camunda.bpm.run.auth.enabled=true`, CIB seven Run additionally with
-`camunda.bpm.run.auth.authentication=basic` (its default `pseudo` lets every request in), Operaton
-Run with `operaton.bpm.run.auth.enabled=true`, or a `ProcessEngineAuthenticationFilter` or proxy in
-front of `/engine-rest`. The OAuth 2.0
-authorization code flow with PKCE is planned: [#2](https://github.com/Miragon/operate/issues/2).
+`operate` supports [HTTP Basic authentication](#basic-auth) and [OAuth 2.0](#oauth) with the
+authorization code flow and PKCE, for engines behind a gateway that checks tokens of Keycloak,
+Microsoft Entra ID, Auth0 or another OpenID Connect provider. Other schemes go into
+[headers](#tokens-in-headers).
+
+### Basic auth
+
+Basic auth works e.g. with Camunda 7 Run with `camunda.bpm.run.auth.enabled=true`, CIB seven Run
+additionally with `camunda.bpm.run.auth.authentication=basic` (its default `pseudo` lets every
+request in), Operaton Run with `operaton.bpm.run.auth.enabled=true`, or a
+`ProcessEngineAuthenticationFilter` or proxy in front of `/engine-rest`.
 
 | Value    | Flag                    | Environment        | Profile (`auth` object)                     |
 | -------- | ----------------------- | ------------------ | ------------------------------------------- |
@@ -316,12 +342,129 @@ operate task list --assignee demo
 operate config set staging --url https://staging.example.com/engine-rest --auth basic --auth-user demo --auth-password-env CAMUNDA_PASSWORD
 ```
 
-Other schemes, such as bearer tokens, are passed as headers: per call with `-H`, in the
+### OAuth
+
+A person logs in once with `operate auth login` in a terminal; every other command reads the
+cached tokens, sends `Authorization: Bearer <token>` and refreshes the token on its own. No
+command except `auth login` ever starts a login: without a usable login a command fails with
+`LOGIN_REQUIRED` (exit code 4) and a hint naming the command a person runs, so agents never end up
+waiting for a browser. Client credentials and the device flow are not supported.
+
+Configure the profile (or the `OPERATE_OAUTH_*` variables), then log in:
+
+```sh
+operate config set sso --url https://camunda.example.com/engine-rest --auth oauth --oauth-issuer https://login.example.com/realms/camunda --oauth-client-id operate-cli --oauth-audience engine-rest
+```
+
+```text
+$ operate auth login --profile sso
+Logging in to https://login.example.com/realms/camunda as client operate-cli (profile "sso").
+Open this URL in a browser to log in:
+  https://login.example.com/realms/camunda/protocol/openid-connect/auth?response_type=code&client_id=operate-cli&redirect_uri=...
+Opened the system browser.
+Waiting up to 300 s for the login at http://127.0.0.1:53682/callback (Ctrl+C cancels).
+Logged in as alice (profile "sso").
+{"profile":"sso","issuer":"https://login.example.com/realms/camunda","clientId":"operate-cli","user":"alice","subject":"27c6dbd7-...","scopes":["openid","offline_access","profile","email"],"accessTokenExpiresAt":"2026-10-09T12:05:00.000Z","accessTokenValid":true,"refreshTokenExpiresAt":"2026-11-08T12:00:00.000Z","canRefresh":true,"loggedInAt":"2026-10-09T12:00:00.000Z","refreshedAt":null,"tokenCache":"/home/me/.config/operate/tokens/profile-sso.json"}
+
+$ operate process-instance list --profile sso
+```
+
+| Value         | Environment                                                            | Profile (`auth` object) / `config set` option                                           |
+| ------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| type          | `OPERATE_AUTH=oauth` (or `--auth oauth`)                               | `type: "oauth"` / `--auth oauth`; OAuth is never implied                                |
+| issuer        | `OPERATE_OAUTH_ISSUER`                                                 | `issuer` / `--oauth-issuer <url>`; the endpoints come from OpenID Connect discovery     |
+| endpoints     | `OPERATE_OAUTH_AUTHORIZATION_ENDPOINT`, `OPERATE_OAUTH_TOKEN_ENDPOINT` | `authorizationEndpoint`, `tokenEndpoint` (both or neither) / `--oauth-*-endpoint <url>` |
+| client id     | `OPERATE_OAUTH_CLIENT_ID`                                              | `clientId` / `--oauth-client-id <id>`                                                   |
+| client secret | `OPERATE_OAUTH_CLIENT_SECRET`                                          | `clientSecretEnv` (variable name) or `clientSecret` / `--oauth-client-secret-env <VAR>` |
+| scopes        | `OPERATE_OAUTH_SCOPES` (spaces or commas)                              | `scopes` / `--oauth-scopes <scopes>`; default `openid offline_access`                   |
+| audience      | `OPERATE_OAUTH_AUDIENCE`                                               | `audience` / `--oauth-audience <audience>` (sent as `audience` parameter, Auth0 style)  |
+| redirect port | `OPERATE_OAUTH_REDIRECT_PORT`                                          | `redirectPort` / `--oauth-redirect-port <port>`; default 0 = any free port              |
+
+- The issuer, or both endpoints, from the environment replace those of the profile as a group;
+  every other value resolves on its own (environment > profile > default). URLs must use
+  `https://` (`http://` only for `localhost`, `127.0.0.1` and `[::1]`). A public client (no
+  secret) with PKCE is the normal case; `--oauth-client-secret-stdin` stores a literal secret
+  (with a warning). OAuth together with an `Authorization` header, or with
+  `--auth-password-stdin`, is a configuration error, and so is a missing issuer or client id.
+- `operate auth login [--no-browser] [--login-timeout <ms>]` uses the authorization code flow
+  with PKCE (`S256`) and a random `state`, and listens on `127.0.0.1` only while it waits for
+  the redirect (RFC 8252). It prints the URL before it starts the system browser (`BROWSER`, else
+  `open`, `xdg-open` with a display, or the Windows URL handler), so it also works over SSH:
+  set a fixed `--oauth-redirect-port 8765`, forward it with `ssh -L 8765:127.0.0.1:8765 host` and
+  open the URL in your local browser. A login always replaces the cached one.
+- `operate auth status` shows user, scopes and the expiry of the access and refresh token without
+  network access and exits with 4 (`LOGIN_REQUIRED`) when no command could run without a new
+  login. Tokens are never printed. It reads only the cache: a session revoked at the server is
+  noticed by the next command that refreshes, which records the refusal (`invalid_grant`) in the
+  cache, so `auth status` and later commands then fail with `LOGIN_REQUIRED` at once.
+- `operate auth logout` revokes the refresh token (when the server supports RFC 7009) and removes
+  the cached login. An access token issued before stays valid until it expires at gateways that
+  check tokens offline (JWT gateways such as Envoy); `logout` says until when. Without a
+  revocation endpoint (explicit endpoints, or a provider whose discovery document lists none,
+  such as Microsoft Entra ID) nothing is revoked and `logout` warns: end the session at the
+  provider. A confidential client's login is revoked only with the client secret of the same
+  issuer and client.
+- Tokens are cached per profile in `$XDG_CONFIG_HOME/operate/tokens/profile-<name>.json` (default
+  `~/.config/operate/tokens`, Windows `%APPDATA%\operate\tokens`; without a profile
+  `env-<hash>.json`), written atomically with mode `0600` in a `0700` directory, never next to a
+  config file named by `--config`. A login is kept for the issuer, client, audience and scopes it
+  was made for; changing them needs a new login (`LOGIN_REQUIRED` names what differs and which
+  `OPERATE_OAUTH_*` variable of the environment causes it).
+- Refreshes happen 60 s before the access token expires (at most half its lifetime) and once
+  after a 401; rotated refresh tokens are stored. Commands running in parallel share one refresh
+  through a lock file, so a refresh token is never sent twice (Keycloak ends the session when one
+  is reused). With strict rotation a refresh answer lost on the way (timeout, dropped connection)
+  ends the login, too: run `auth login` again.
+- The gateway must expect exactly the issuer operate logs in with: `http://localhost:8180/realms/x`
+  and `http://127.0.0.1:8180/realms/x` are different issuers to a JWT gateway, and Keycloak issues
+  tokens for the host name the browser and operate used. `UNAUTHORIZED` or `FORBIDDEN` after a
+  successful login are gateway (issuer, audience, clock) or permission problems, not login
+  problems; the hints say what to check, and a 403 never triggers a refresh.
+- `--dry-run` shows the cached token as `Bearer ***` and notes on stderr when there is no usable
+  login; `--verbose` traces token requests too (client credentials always masked) and says
+  when a failed refresh falls back to the still valid token;
+  `--show-secrets` reveals only the Bearer token. `operate ping` reports `"auth": "oauth"` and the
+  user. `config show` lists the OAuth values with their sources (the client secret masked).
+
+Security notes:
+
+- Use `https://` for the engine URL: operate warns on stderr when it sends the access token over
+  plain `http://` to a host other than `localhost`, `127.0.0.1` or `[::1]` (RFC 6750 §5.3).
+- Treat a config file like your own: logins are cached per profile name, so a config file named
+  by `--config` or `OPERATE_CONFIG` whose profile has your profile's name, issuer and client id
+  uses your login and sends your token to its `url` (as `--url` does). Each value resolves on its
+  own, so `OPERATE_OAUTH_CLIENT_SECRET` also goes to the token endpoint of whatever issuer the
+  profile or `OPERATE_OAUTH_ISSUER` names. Point operate (and agents) only at config files and
+  variables you trust.
+- operate rejects a login response whose `iss` (RFC 9207) names another issuer, and requires
+  `iss` when the provider advertises it. A provider that sends no `iss` (Microsoft Entra ID) gives
+  no such mix-up protection: log in only to issuers you trust.
+
+Client registration:
+
+- **Keycloak**: a client with Client authentication off (public), Standard flow on, Direct access
+  grants off, Valid redirect URIs `http://127.0.0.1/callback` (Keycloak accepts any port for
+  loopback redirects) and, under Advanced, the PKCE method `S256`. Users need the
+  `offline_access` role (part of the default roles) for refresh tokens that outlive the browser
+  session. Keycloak ignores the `audience` parameter: add an Audience mapper to the client's
+  dedicated scope so the access token carries the audience the gateway expects.
+- **Microsoft Entra ID**: register a "Mobile and desktop applications" redirect URI
+  `http://127.0.0.1/callback` (Entra ignores the port of loopback redirect URIs; the `http`
+  loopback URI currently has to be added in the application manifest), issuer
+  `https://login.microsoftonline.com/<tenant-id>/v2.0`, and request the API by scope, e.g.
+  `--oauth-scopes 'openid offline_access api://<app-id>/.default'` instead of an audience.
+- **Auth0**: the issuer is `https://<tenant>.auth0.com/` with the trailing slash (operate compares
+  it with the discovery document exactly), the API identifier goes into `--oauth-audience`;
+  register `http://127.0.0.1:8765/callback` with a fixed `--oauth-redirect-port 8765`.
+
+### Tokens in headers
+
+Other schemes, such as bearer tokens from elsewhere, are passed as headers: per call with `-H`, in the
 environment with `OPERATE_HEADERS` (keeps the credential out of the command line and shell
 history), or stored in a profile. Headers merge per name: profile, then `OPERATE_HEADERS`, then
-`-H`. An `Authorization` header together with Basic auth is a configuration error; in a profile,
-`config set` with Basic auth options replaces a stored `Authorization` header (with a notice on
-stderr), and `--auth none` keeps the header and switches Basic auth off. `Authorization`
+`-H`. An `Authorization` header together with Basic auth or OAuth is a configuration error; in a
+profile, `config set` with auth options replaces a stored `Authorization` header (with a notice on
+stderr), and `--auth none` keeps the header and switches the auth off. `Authorization`
 and other secret headers (cookies, names containing `token`, `secret`, `password`, `api-key`) are
 masked as `***` in dry-run, verbose and config output unless `--show-secrets` is given.
 
@@ -542,7 +685,7 @@ validation problems).
 | 1    | internal error                                                                 |
 | 2    | usage error, invalid body (`VALIDATION`), `READ_ONLY`, `CONFIRMATION_REQUIRED` |
 | 3    | configuration error, also an HTTP redirect (`HTTP_REDIRECT`)                   |
-| 4    | authentication or authorization failed (401, 403)                              |
+| 4    | 401, 403, `LOGIN_REQUIRED` (a person must log in), `LOGIN_FAILED`              |
 | 5    | not found (404)                                                                |
 | 6    | other 4xx: the engine rejected the request                                     |
 | 7    | engine error (5xx)                                                             |
@@ -598,6 +741,9 @@ itself:
 - `--dry-run` previews a write before it is sent.
 - `operate api <METHOD> <path>` sends a raw request relative to the REST root with the same
   guards, output and errors, for anything the agent prefers to write by hand.
+- With OAuth, a person logs in once with `operate auth login`; agents never do. A command that
+  needs a new login fails with `LOGIN_REQUIRED` (exit 4) and the hint names the command to run in
+  a terminal; `operate auth status` tells an agent whether the login is usable.
 
 A typical agent workflow is discover, describe, preview, run:
 
@@ -893,7 +1039,7 @@ src/operation/  input building, variables, dates, guards, request building, exec
 src/docs/       commands, describe, examples and the agent guide (pure)
 src/catalog/    catalog access, schema helpers, body validation (pure)
 src/config/     config resolution and profile editing (pure), file store
-src/auth/       auth providers (none, basic)
+src/auth/       auth providers (none, basic, OAuth with token cache, refresh and login; pure)
 src/http/       fetch based HTTP client and error mapping
 src/output/     JSON, tables, field projection, errors, secret masking (pure)
 scripts/        catalog generator
@@ -902,8 +1048,9 @@ test/           fakes for unit tests, Testcontainers integration tests
 
 dependency-cruiser enforces the layering: no cycles or orphans, only `src/bin` imports `src/cli`,
 only `src/cli` imports commander, the pure layers import no Node builtins, `http` does not depend
-on `config`, `cli` or `operation`, and the generated catalog is only read through
-`src/catalog/catalog.ts`.
+on `config`, `cli` or `operation`, `config` does not depend on `auth`, only `operate auth login`
+can reach the interactive login (loopback server, browser), and the generated catalog is only
+read through `src/catalog/catalog.ts`.
 
 ### Quality gates
 
@@ -915,11 +1062,12 @@ on `config`, `cli` or `operation`, and the generated catalog is only read throug
 - **vitest** with v8 coverage thresholds: at least 90 % of lines, statements and functions and
   85 % of branches.
 - **fast-check** property tests for naming, patches, variable parsing, dates, query building,
-  projection, table width, config and auth precedence, the Basic auth header, body validation and
-  secret masking.
+  projection, table width, config and auth precedence, the Basic auth header, PKCE, token expiry,
+  the token cache, body validation and secret masking (also of every OAuth token and secret).
 - **StrykerJS** mutation testing (break threshold 65 %) on `main`, weekly and on demand.
 - **Testcontainers** integration tests against the three engines, with and without Basic auth,
-  plus a packed-tarball smoke test, on every pull request.
+  behind a Keycloak and Envoy JWT gateway for OAuth, plus a packed-tarball smoke test, on every
+  pull request.
 
 ## License
 

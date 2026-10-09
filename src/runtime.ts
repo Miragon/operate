@@ -14,8 +14,31 @@ export interface FileSystem {
   readFile(path: string): Promise<Uint8Array>;
   /** With a `mode`, a private file: written atomically, never readable with another mode. */
   writeFile(path: string, data: string | Uint8Array, options?: { mode?: number }): Promise<void>;
-  mkdir(path: string): Promise<void>;
+  /** Creates the directory and its parents; `mode` applies to the directories it creates. */
+  mkdir(path: string, options?: { mode?: number }): Promise<void>;
   exists(path: string): Promise<boolean>;
+  /** Removes a file; resolves false when it did not exist. */
+  remove(path: string): Promise<boolean>;
+}
+
+/** A request to the loopback server of `operate auth login` (the OAuth callback). */
+export interface LoopbackRequest {
+  readonly method: string;
+  /** The path without the query string. */
+  readonly path: string;
+  readonly query: URLSearchParams;
+}
+
+/** The answer of the loopback server: a static HTML page. */
+export interface LoopbackResponse {
+  readonly status: number;
+  readonly html: string;
+}
+
+export interface LoopbackServer {
+  /** The bound port (the ephemeral one for port 0). */
+  readonly port: number;
+  close(): Promise<void>;
 }
 
 export interface Runtime {
@@ -29,4 +52,24 @@ export interface Runtime {
   readonly platform: string;
   /** Milliseconds since epoch; injectable for deterministic tests. */
   now(): number;
+  /** Cryptographically strong random bytes (WebCrypto getRandomValues). */
+  randomBytes(length: number): Uint8Array;
+  /**
+   * An HTTP server on 127.0.0.1 only (port 0: an ephemeral port); rejects with the listen error
+   * (its `code`, e.g. EADDRINUSE). Only `operate auth login` starts one.
+   */
+  listenLoopback(
+    port: number,
+    handler: (request: LoopbackRequest) => Promise<LoopbackResponse>,
+  ): Promise<LoopbackServer>;
+  /** Starts the system browser without waiting for it; false when there is none to start. Never throws. */
+  openBrowser(url: string): Promise<boolean>;
+  /**
+   * Runs `action` holding an exclusive lock file (0600) at `path`. `holdMs` is how long this
+   * holder may keep it: recorded in the file as `staleAt`; other processes break the lock only
+   * after that. Gives up (rejects; the caller maps it to CONFIG) after waiting `2 × holdMs`.
+   */
+  withLock<T>(path: string, holdMs: number, action: () => Promise<T>): Promise<T>;
+  /** Resolves after `ms`; never keeps the process alive on its own (unref'd timer). */
+  sleep(ms: number): Promise<void>;
 }

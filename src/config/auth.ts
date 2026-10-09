@@ -1,20 +1,15 @@
 /**
- * Validation of the auth settings (design §15): the auth type, Basic auth usernames and passwords
- * (RFC 7617: no control characters, no ":" in the username), the name of a password variable and
- * the auth object of a profile in the config file. Messages never repeat a username or password.
+ * Validation of the auth settings (design §15, §16): the auth type, Basic auth usernames and
+ * passwords (RFC 7617: no control characters, no ":" in the username), the name of a password
+ * variable and the auth object of a profile in the config file (the OAuth rules live in oauth.ts).
+ * Messages never repeat a username or password.
  */
 
 import { isRecord } from '../util.js';
 import { configError } from './config-error.js';
+import { OAUTH_CHECKS, oauthProfileProblem } from './oauth.js';
+import { CONTROL, ENV_NAME, isNonEmptyString } from './syntax.js';
 import { AUTH_TYPES, type AuthType, PROFILE_AUTH_KEYS, type ProfileAuth } from './types.js';
-
-/** OAuth is planned, tracked as a GitHub issue. */
-const OAUTH_ISSUE = 'https://github.com/Miragon/operate/issues/2';
-
-/** Control characters (C0, DEL, C1): RFC 7617 forbids them in user-id and password. */
-const CONTROL = /\p{Cc}/u;
-/** A portable environment variable name. */
-const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const CONTROL_HINT =
   'Remove line breaks, tabs, NUL and other control characters; Basic auth (RFC 7617) does not allow them.';
@@ -22,10 +17,7 @@ const CONTROL_HINT =
 export function validateAuthType(type: string): AuthType {
   const known = AUTH_TYPES.find((candidate) => candidate === type);
   if (known === undefined) {
-    throw configError(
-      `Unsupported auth type "${type}"`,
-      `Supported: ${AUTH_TYPES.join(', ')}. OAuth authorization code (${OAUTH_ISSUE}) is planned.`,
-    );
+    throw configError(`Unsupported auth type "${type}"`, `Supported: ${AUTH_TYPES.join(', ')}.`);
   }
   return known;
 }
@@ -73,20 +65,20 @@ export function validatePasswordEnv(name: string): string {
   return trimmed;
 }
 
-function isNonEmptyString(value: unknown): boolean {
-  return typeof value === 'string' && value.trim() !== '';
-}
-
 type Check = readonly [check: (value: unknown) => boolean, expected: string];
 
 const AUTH_CHECKS: Readonly<Record<keyof ProfileAuth, Check>> = {
-  type: [(value) => typeof value === 'string', AUTH_TYPES.join(' or ')],
+  type: [
+    (value) => typeof value === 'string',
+    `${AUTH_TYPES.slice(0, -1).join(', ')} or ${AUTH_TYPES.at(-1) ?? ''}`,
+  ],
   username: [isNonEmptyString, 'a non-empty string'],
   passwordEnv: [
     (value) => typeof value === 'string' && ENV_NAME.test(value),
     'the name of an environment variable, e.g. CAMUNDA_PASSWORD',
   ],
   password: [isNonEmptyString, 'a non-empty string'],
+  ...OAUTH_CHECKS,
 };
 
 const AUTH_EXAMPLE = '{"type": "basic", "username": "demo", "passwordEnv": "CAMUNDA_PASSWORD"}';
@@ -94,6 +86,7 @@ const AUTH_EXAMPLE = '{"type": "basic", "username": "demo", "passwordEnv": "CAMU
 /**
  * Why the auth object of profile `name` in the config file is invalid, or undefined. The type is
  * only checked to be a string here; resolution names the supported types. Never quotes values.
+ * Values the environment may complete (an OAuth type without issuer or client id) are valid.
  */
 export function profileAuthProblem(name: string, value: unknown): string | undefined {
   if (!isRecord(value)) return `profile "${name}" has an invalid auth (expected ${AUTH_EXAMPLE})`;
@@ -110,5 +103,5 @@ export function profileAuthProblem(name: string, value: unknown): string | undef
   }
   return Object.hasOwn(value, 'password') && Object.hasOwn(value, 'passwordEnv')
     ? `profile "${name}" sets both auth.password and auth.passwordEnv; keep one (passwordEnv is recommended)`
-    : undefined;
+    : oauthProfileProblem(name, value);
 }

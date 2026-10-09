@@ -4,7 +4,15 @@
  */
 
 import { createAuthProvider } from '../auth/index.js';
-import { configFilePath, explicitConfigPath, readConfigFile } from '../config/file.js';
+import type { OAuthDeps } from '../auth/oauth/types.js';
+import {
+  configFilePath,
+  explicitConfigPath,
+  readConfigFile,
+  tokenDirectory,
+  tokenPath,
+} from '../config/file.js';
+import { plainHttpHost } from '../config/oauth.js';
 import { resolveConfig } from '../config/resolve.js';
 import { ENV, type OutputFormat, type ResolvedConfig } from '../config/types.js';
 import type { ClientOptions } from '../http/client.js';
@@ -38,6 +46,13 @@ export function isExplicit(runtime: Runtime, flag: string | undefined): boolean 
   return explicitConfigPath(runtime.env, flag) !== undefined;
 }
 
+export interface SessionOptions {
+  /** `--body -`: stdin holds the body, so `--auth-password-stdin` is refused. */
+  readonly bodyFromStdin?: boolean;
+  /** `operate auth login|status`: hints never suggest switching OAuth off. */
+  readonly authCommand?: boolean;
+}
+
 /**
  * Resolves the configuration and records the output format for error rendering. Reads the
  * password from stdin for `--auth-password-stdin`; `bodyFromStdin` (`--body -`) refuses that.
@@ -45,14 +60,16 @@ export function isExplicit(runtime: Runtime, flag: string | undefined): boolean 
 export async function openSession(
   context: CliContext,
   globals: GlobalOptions,
-  bodyFromStdin = false,
+  options: SessionOptions = {},
 ): Promise<Session> {
   const { runtime } = context;
-  checkStdinUse(globals.authPasswordStdin, bodyFromStdin);
+  checkStdinUse(globals.authPasswordStdin, options.bodyFromStdin === true);
   const path = configPath(runtime, globals.config);
   const file = await readConfigFile(runtime.fs, path, isExplicit(runtime, globals.config));
   const password = globals.authPasswordStdin ? await readStdinPassword(runtime) : undefined;
-  const config = resolveConfig(configFlags(globals, password), runtime.env, file);
+  const config = resolveConfig(configFlags(globals, password), runtime.env, file, {
+    authCommand: options.authCommand === true,
+  });
   const format = config.output ?? terminalFormat(runtime);
   context.state.format = format;
   return {
@@ -70,11 +87,55 @@ export function targetOf(session: Session): Target {
   return engine === undefined ? { baseUrl: url, headers } : { baseUrl: url, engine, headers };
 }
 
+/**
+ * What OAuth needs from the runtime: fetch, files, clock, lock, the token directory and the
+ * request timeout; with `--verbose` token requests are traced like engine requests.
+ */
+export function oauthDeps(
+  runtime: Runtime,
+  options: { readonly timeoutMs: number; readonly verbose: boolean; readonly showSecrets: boolean },
+): OAuthDeps {
+  const tokenDir = tokenDirectory(runtime.env, runtime);
+  const deps: OAuthDeps = {
+    fetch: runtime.fetch,
+    fs: runtime.fs,
+    now: () => runtime.now(),
+    withLock: (path, holdMs, action) => runtime.withLock(path, holdMs, action),
+    tokenDir,
+    tokenPath: (fileName) => tokenPath(tokenDir, fileName, runtime.platform),
+    timeoutMs: options.timeoutMs,
+  };
+  return options.verbose
+    ? { ...deps, trace: traceWriter(runtime.stderr, options.showSecrets) }
+    : deps;
+}
+
+/** `oauthDeps` for a resolved session. */
+export function sessionOAuthDeps(session: Session, runtime: Runtime): OAuthDeps {
+  const { verbose, showSecrets } = session.globals;
+  return oauthDeps(runtime, { timeoutMs: session.config.timeoutMs, verbose, showSecrets });
+}
+
+/**
+ * The warning for OAuth over plain http to a host beyond loopback: the Bearer token is readable
+ * and reusable on the way (RFC 6750 §5.3: clients MUST use TLS). Not for --dry-run (nothing is
+ * sent).
+ */
+function plainHttpWarning(session: Session): string | undefined {
+  const { config, globals } = session;
+  const host = config.auth.type === 'oauth' ? plainHttpHost(config.url) : undefined;
+  if (host === undefined || globals.dryRun) return undefined;
+  return `Warning: operate sends the OAuth access token over plain http to ${host}; anyone on the network path can read and reuse it. Use https:// for the engine URL (RFC 6750 §5.3).`;
+}
+
+/** The HTTP client of a command; the auth provider reads the token cache lazily (OAuth). */
 export function clientOf(session: Session, runtime: Runtime): ClientOptions {
   const { config, globals } = session;
+  const warning = plainHttpWarning(session);
+  if (warning !== undefined) runtime.stderr.write(`${warning}\n`);
   const client: ClientOptions = {
     fetch: runtime.fetch,
-    auth: createAuthProvider(config.auth),
+    auth: createAuthProvider(config.auth, sessionOAuthDeps(session, runtime)),
     timeoutMs: config.timeoutMs,
     now: () => runtime.now(),
   };

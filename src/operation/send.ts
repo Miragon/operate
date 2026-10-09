@@ -1,7 +1,7 @@
 /**
  * Sends a prepared request and decodes the response; HTTP error statuses become OperateErrors
- * whose hints name `ref`, the command that sent the request, when given, and the user whose Basic
- * auth credentials were sent.
+ * whose hints name `ref`, the command that sent the request, when given, the user whose Basic
+ * auth credentials were sent, or the auth provider's own hint for a rejected token (OAuth).
  */
 
 import { type ClientOptions, send } from '../http/client.js';
@@ -17,10 +17,17 @@ export async function sendRequest(
   ref?: CommandRef,
 ): Promise<OperationResult> {
   const response = await send(request, client);
+  const { auth } = client;
   if (response.status >= 400) {
-    const { principal, off } = client.auth;
-    throw httpError(response, { ...request, principal, authOff: off }, ref);
+    const { principal, off } = auth;
+    const rejectedHint =
+      response.status === 401 || response.status === 403
+        ? auth.rejectedHint?.(response.status)
+        : undefined;
+    throw httpError(response, { ...request, principal, authOff: off, rejectedHint }, ref);
   }
-  if (response.status >= 300) throw redirectError(response, request);
+  if (response.status >= 300) {
+    throw redirectError(response, { ...request, loginStatusCommand: auth.loginStatusCommand });
+  }
   return decodeResponse(response, previewRequest(request));
 }

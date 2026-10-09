@@ -85,9 +85,9 @@ describe('basicAuth', () => {
     });
   });
 
-  it('knows its headers without network access, for dry-run previews', () => {
-    expect(basicAuth(config('demo', 'demo')).previewHeaders?.()).toEqual({
-      Authorization: 'Basic ZGVtbzpkZW1v',
+  it('knows its headers without network access, for dry-run previews, without a note', async () => {
+    await expect(basicAuth(config('demo', 'demo')).preview?.()).resolves.toEqual({
+      headers: { Authorization: 'Basic ZGVtbzpkZW1v' },
     });
   });
 

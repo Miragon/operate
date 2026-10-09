@@ -29,6 +29,7 @@ function fakeFs(files: Record<string, string>): FileSystem & { reads: string[] }
     writeFile: () => Promise.resolve(),
     mkdir: () => Promise.resolve(),
     exists: (path) => Promise.resolve(path in files),
+    remove: () => Promise.resolve(false),
   };
 }
 

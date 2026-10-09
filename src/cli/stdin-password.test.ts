@@ -115,3 +115,29 @@ describe('readStdinPassword', () => {
     );
   });
 });
+
+describe('another secret from stdin', () => {
+  const secret = {
+    flag: '--oauth-client-secret-stdin',
+    noun: 'client secret',
+    example: 'printf x | operate',
+  };
+
+  it('names the flag and the secret in its errors', async () => {
+    const empty = await usage(readStdinPassword(fakeRuntime({ stdin: ' \n' }), secret));
+    expect(empty.message).toBe('--oauth-client-secret-stdin read an empty client secret');
+    expect(empty.details.hint).toBe(
+      'Pipe the client secret into the command, e.g. printf x | operate.',
+    );
+    const latin1 = await usage(
+      Promise.resolve().then(() => firstLine(Uint8Array.of(0xe4), secret)),
+    );
+    expect(latin1.message).toBe('--oauth-client-secret-stdin read bytes that are not valid UTF-8');
+    expect(latin1.details.hint).toBe(
+      'Re-encode the client secret as UTF-8, e.g. with iconv -f latin1 -t utf-8; operate sends it UTF-8 encoded.',
+    );
+    await expect(readStdinPassword(fakeRuntime({ stdin: 's3cret\n' }), secret)).resolves.toBe(
+      's3cret',
+    );
+  });
+});

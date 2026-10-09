@@ -3,9 +3,9 @@
  * distribution, started with Testcontainers and reachable through a mapped port.
  */
 
-import { GenericContainer, Wait } from 'testcontainers';
+import { GenericContainer, type StartedNetwork, Wait } from 'testcontainers';
 
-const ENGINE_NAMES = ['operaton', 'cibseven', 'camunda'] as const;
+export const ENGINE_NAMES = ['operaton', 'cibseven', 'camunda'] as const;
 export type EngineName = (typeof ENGINE_NAMES)[number];
 
 export interface EngineDefinition {
@@ -101,6 +101,10 @@ export function isEngineEnabled(name: EngineName, env: NodeJS.ProcessEnv = proce
 export interface StartOptions {
   /** Protect the REST API with HTTP Basic authentication ({@link EngineDefinition.basicAuthEnv}). */
   readonly basicAuth?: boolean;
+  /** A Docker network to join (the OAuth topology puts a gateway in front of the engine). */
+  readonly network?: StartedNetwork;
+  /** Host name of the engine inside {@link network}. */
+  readonly alias?: string;
 }
 
 /**
@@ -114,14 +118,16 @@ export async function startEngine(
   const definition = ENGINES[name];
   const basicAuth = options.basicAuth === true;
   const ready = Wait.forHttp(`${definition.restPath}/version`, definition.port).forStatusCode(200);
-  const container = await new GenericContainer(definition.image)
+  const image = new GenericContainer(definition.image)
     .withExposedPorts(definition.port)
     .withEnvironment(basicAuth ? definition.basicAuthEnv : {})
     .withWaitStrategy(
       basicAuth ? ready.withBasicCredentials(ADMIN.username, ADMIN.password) : ready,
     )
-    .withStartupTimeout(STARTUP_TIMEOUT_MS)
-    .start();
+    .withStartupTimeout(STARTUP_TIMEOUT_MS);
+  if (options.network !== undefined) image.withNetwork(options.network);
+  if (options.alias !== undefined) image.withNetworkAliases(options.alias);
+  const container = await image.start();
   const url = `http://${container.getHost()}:${container.getMappedPort(definition.port)}${definition.restPath}`;
   return {
     name,

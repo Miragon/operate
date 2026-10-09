@@ -10,7 +10,7 @@ import {
   describeResult,
   type EnvOverrides,
   type ProcessResult,
-  runProcess,
+  startProcess,
 } from './process.js';
 
 export const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
@@ -57,6 +57,21 @@ export interface CliOptions {
 }
 
 export type Cli = (args: readonly string[], options?: CliOptions) => Promise<CliResult>;
+
+/** A CLI run that is still going: stderr can be watched (e.g. for the login URL) while it runs. */
+export interface RunningCli {
+  readonly command: string;
+  /** Everything the CLI wrote to stderr so far. */
+  stderr(): string;
+  /** Resolves with the first match of `pattern` in stderr; rejects when the CLI ends first. */
+  waitForStderr(pattern: RegExp): Promise<RegExpExecArray>;
+  /** Waits for the CLI to end. */
+  result(): Promise<CliResult>;
+  /** Kills the CLI (SIGKILL). */
+  kill(): void;
+}
+
+export type StartCli = (args: readonly string[], options?: CliOptions) => RunningCli;
 
 /** Fails with an actionable message when the CLI bundle has not been built. */
 export function assertCliBuilt(): void {
@@ -113,25 +128,46 @@ function toCliResult(result: ProcessResult): CliResult {
   };
 }
 
-/** Runs `node dist/operate.js <args>` and captures exit code, stdout and stderr. */
-async function runCli(args: readonly string[], options: CliOptions = {}): Promise<CliResult> {
+/** Starts `node dist/operate.js <args>`; stderr can be watched while it runs. */
+function startCli(args: readonly string[], options: CliOptions = {}): RunningCli {
   assertCliBuilt();
   const env = cleanEnv({
     ...(options.url === undefined ? {} : { OPERATE_URL: options.url }),
     ...(options.configFile === undefined ? {} : { OPERATE_CONFIG: options.configFile }),
     ...options.env,
   });
-  const result = await runProcess(process.execPath, [CLI_PATH, ...args], {
+  const running = startProcess(process.execPath, [CLI_PATH, ...args], {
     env,
     cwd: options.cwd ?? REPO_ROOT,
     ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
   });
-  return toCliResult(result);
+  return {
+    command: running.command,
+    stderr: () => running.stderr(),
+    waitForStderr: (pattern) => running.waitForStderr(pattern),
+    result: async () => toCliResult(await running.result),
+    kill: () => {
+      running.kill();
+    },
+  };
+}
+
+/** Runs `node dist/operate.js <args>` and captures exit code, stdout and stderr. */
+function runCli(args: readonly string[], options: CliOptions = {}): Promise<CliResult> {
+  return startCli(args, options).result();
+}
+
+function mergeOptions(defaults: CliOptions, options: CliOptions): CliOptions {
+  return { ...defaults, ...options, env: { ...defaults.env, ...options.env } };
 }
 
 /** A {@link runCli} with suite defaults (engine URL, config file); per-call options win. */
 export function bindCli(defaults: CliOptions): Cli {
-  return (args, options = {}) =>
-    runCli(args, { ...defaults, ...options, env: { ...defaults.env, ...options.env } });
+  return (args, options = {}) => runCli(args, mergeOptions(defaults, options));
+}
+
+/** A {@link startCli} with suite defaults, like {@link bindCli}. */
+export function bindStartCli(defaults: CliOptions): StartCli {
+  return (args, options = {}) => startCli(args, mergeOptions(defaults, options));
 }

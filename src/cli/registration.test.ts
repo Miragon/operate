@@ -118,6 +118,7 @@ describe('registration of every catalog operation', () => {
       'api',
       'ping',
       'config',
+      'auth',
       ...catalog.groups.map((group) => group.name).toSorted(),
     ]);
   });

@@ -7,12 +7,14 @@ import {
   rm,
   stat,
   symlink,
+  utimes,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OperateError } from '../errors.js';
+import { browserCommand, openBrowser } from './browser.js';
 import { createNodeRuntime } from './node-runtime.js';
 
 const original = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
@@ -115,3 +117,205 @@ describe.skipIf(process.platform === 'win32')(
     });
   },
 );
+
+describe('createNodeRuntime OAuth parts', () => {
+  const runtime = createNodeRuntime();
+
+  it('serves the loopback handler on 127.0.0.1 only, with the security headers, until closed', async () => {
+    const seen: string[] = [];
+    const server = await runtime.listenLoopback(0, (request) => {
+      seen.push(`${request.method} ${request.path} ${request.query.get('state') ?? ''}`);
+      return Promise.resolve({ status: 200, html: '<p>ok</p>' });
+    });
+    expect(server.port).toBeGreaterThan(0);
+    const response = await fetch(`http://127.0.0.1:${server.port}/callback?state=s1`);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('<p>ok</p>');
+    expect(Object.fromEntries(response.headers)).toMatchObject({
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+      'referrer-policy': 'no-referrer',
+      'x-content-type-options': 'nosniff',
+      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+    });
+    expect(seen).toEqual(['GET /callback s1']);
+    await expect(fetch(`http://[::1]:${server.port}/callback`)).rejects.toThrow();
+    await server.close();
+    await expect(fetch(`http://127.0.0.1:${server.port}/callback`)).rejects.toThrow();
+  });
+
+  it('answers a failing handler with 500 and rejects a port in use with its code', async () => {
+    const server = await runtime.listenLoopback(0, () => Promise.reject(new Error('boom')));
+    expect((await fetch(`http://127.0.0.1:${server.port}/`)).status).toBe(500);
+    const error: unknown = await runtime
+      .listenLoopback(server.port, () => Promise.resolve({ status: 200, html: '' }))
+      .then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+    expect(error).toMatchObject({ code: 'EADDRINUSE' });
+    await server.close();
+  });
+
+  it('gives strong random bytes of the requested length, also beyond 64 KiB', () => {
+    const first = runtime.randomBytes(32);
+    expect(first).toHaveLength(32);
+    expect(runtime.randomBytes(32)).not.toEqual(first);
+    expect(runtime.randomBytes(70_000)).toHaveLength(70_000);
+  });
+
+  it('resolves sleep after the delay', async () => {
+    const started = Date.now();
+    await runtime.sleep(20);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(15);
+  });
+});
+
+describe('browserCommand', () => {
+  const url = 'https://login.example.com/auth?a=1&b=2';
+
+  it('runs BROWSER as one executable with the URL as its only argument', () => {
+    expect(browserCommand(url, { BROWSER: '/opt/my browser' }, 'linux')).toEqual([
+      '/opt/my browser',
+      [url],
+    ]);
+    expect(browserCommand(url, { BROWSER: ' ' }, 'darwin')).toEqual(['open', [url]]);
+  });
+
+  it('uses the platform opener, xdg-open only in a graphical session', () => {
+    expect(browserCommand(url, {}, 'win32')).toEqual([
+      'rundll32.exe',
+      ['url.dll,FileProtocolHandler', url],
+    ]);
+    expect(browserCommand(url, {}, 'linux')).toBeUndefined();
+    expect(browserCommand(url, { DISPLAY: ':0' }, 'linux')).toEqual(['xdg-open', [url]]);
+    expect(browserCommand(url, { WAYLAND_DISPLAY: 'wayland-0' }, 'freebsd')).toEqual([
+      'xdg-open',
+      [url],
+    ]);
+  });
+
+  it('starts nothing for non-http URLs or a missing browser, never throws', async () => {
+    await expect(
+      openBrowser('file:///etc/passwd', { BROWSER: '/bin/echo' }, 'linux'),
+    ).resolves.toBe(false);
+    await expect(openBrowser(url, {}, 'linux')).resolves.toBe(false);
+    await expect(openBrowser(url, { BROWSER: '/nonexistent/browser' }, 'linux')).resolves.toBe(
+      false,
+    );
+  });
+
+  it.skipIf(process.platform === 'win32')('reports a started browser', async () => {
+    await expect(openBrowser(url, { BROWSER: 'true' }, 'linux')).resolves.toBe(true);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('withLock and the file system', () => {
+  let dir = '';
+  const runtime = createNodeRuntime();
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'operate-lock-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('serializes two holders and removes the lock afterwards', async () => {
+    const path = join(dir, 'a.lock');
+    const events: string[] = [];
+    const hold = (name: string) =>
+      runtime.withLock(path, 5_000, async () => {
+        events.push(`${name} in`);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        events.push(`${name} out`);
+        return name;
+      });
+    await expect(Promise.all([hold('a'), hold('b')])).resolves.toEqual(['a', 'b']);
+    // either may win the race for the file; the holders never overlap
+    expect([
+      ['a in', 'a out', 'b in', 'b out'],
+      ['b in', 'b out', 'a in', 'a out'],
+    ]).toContainEqual(events);
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it('writes the holder and its staleAt into a private lock file', async () => {
+    const path = join(dir, 'b.lock');
+    await runtime.withLock(path, 7_000, async () => {
+      const content = JSON.parse(await readFile(path, 'utf8')) as { pid: number; staleAt: number };
+      expect(content.pid).toBe(process.pid);
+      expect(content.staleAt).toBeGreaterThan(Date.now() + 6_000);
+      expect((await stat(path)).mode & 0o777).toBe(0o600);
+    });
+  });
+
+  it("does not break a live holder's lock before its staleAt, whatever its own holdMs", async () => {
+    const path = join(dir, 'c.lock');
+    const content = JSON.stringify({ pid: 1, staleAt: Date.now() + 60_000 });
+    await writeFile(path, content);
+    let ran = false;
+    await expect(
+      runtime.withLock(path, 100, () => {
+        ran = true;
+        return Promise.resolve();
+      }),
+    ).rejects.toThrow('Timed out after 200 ms waiting for the lock');
+    expect(ran).toBe(false);
+    expect(await readFile(path, 'utf8')).toBe(content);
+  });
+
+  it('breaks a lock whose staleAt passed', async () => {
+    const path = join(dir, 'd.lock');
+    await writeFile(path, JSON.stringify({ pid: 1, staleAt: Date.now() - 1 }));
+    await expect(runtime.withLock(path, 1_000, () => Promise.resolve('taken'))).resolves.toBe(
+      'taken',
+    );
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it('breaks an unreadable lock only once it is older than 60 s', async () => {
+    const fresh = join(dir, 'e.lock');
+    await writeFile(fresh, '');
+    await expect(runtime.withLock(fresh, 50, () => Promise.resolve())).rejects.toThrow();
+    const old = join(dir, 'f.lock');
+    await writeFile(old, '{');
+    const past = new Date(Date.now() - 120_000);
+    await utimes(old, past, past);
+    await expect(runtime.withLock(old, 1_000, () => Promise.resolve('taken'))).resolves.toBe(
+      'taken',
+    );
+  });
+
+  it("never removes the next holder's lock when an overrunning holder releases", async () => {
+    const path = join(dir, 'g.lock');
+    let firstDone: () => void = () => undefined;
+    const released = new Promise<void>((resolve) => {
+      firstDone = resolve;
+    });
+    const first = runtime
+      .withLock(path, 50, () => new Promise((resolve) => setTimeout(resolve, 200)))
+      .then(firstDone);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const second = runtime.withLock(path, 5_000, async () => {
+      await released;
+      // the first holder released after its staleAt; this holder's lock must still be there
+      return (JSON.parse(await readFile(path, 'utf8')) as { staleAt: number }).staleAt;
+    });
+    await first;
+    await expect(second).resolves.toBeGreaterThan(Date.now());
+  });
+
+  it('removes files, telling whether there was one, and creates directories with a mode', async () => {
+    const file = join(dir, 'x.json');
+    await writeFile(file, '{}');
+    await expect(runtime.fs.remove(file)).resolves.toBe(true);
+    await expect(runtime.fs.remove(file)).resolves.toBe(false);
+    const tokens = join(dir, 'operate', 'tokens');
+    await runtime.fs.mkdir(tokens, { mode: 0o700 });
+    expect((await stat(tokens)).mode & 0o777).toBe(0o700);
+    await runtime.fs.mkdir(tokens, { mode: 0o755 });
+    expect((await stat(tokens)).mode & 0o777).toBe(0o700);
+  });
+});

@@ -1,7 +1,8 @@
 /**
- * Resolves the authentication (design §15). Type: `--auth` > OPERATE_AUTH > the profile's
+ * Resolves the authentication (design §15, §16). Type: `--auth` > OPERATE_AUTH > the profile's
  * auth.type; without a type anywhere, a username from any source or `--auth-password-stdin`
- * selects Basic auth, otherwise none. Username: `--auth-user` > OPERATE_USERNAME > the profile's auth.username. Password:
+ * selects Basic auth, otherwise none (OAuth is never implied; resolve-oauth.ts resolves it).
+ * Username: `--auth-user` > OPERATE_USERNAME > the profile's auth.username. Password:
  * `--auth-password-stdin` > OPERATE_PASSWORD > the variable named by the profile's auth.passwordEnv
  * > the profile's auth.password. Basic auth needs both values; errors never show a secret.
  */
@@ -9,7 +10,9 @@
 import type { OperateError } from '../errors.js';
 import { validateAuthType, validatePassword, validateUsername } from './auth.js';
 import { configError } from './config-error.js';
+import { hasOAuthKeys } from './oauth.js';
 import { type Env, nonEmpty, pick } from './pick.js';
+import { oauthEnvVariable, resolveOAuth } from './resolve-oauth.js';
 import {
   type AuthConfig,
   type AuthType,
@@ -185,21 +188,37 @@ function unusedPassword({ env, selected }: Context): string | undefined {
   return profile.auth?.password === undefined ? undefined : `auth.password of profile "${name}"`;
 }
 
-/** No credentials, and why when that may surprise: an explicit none, or an unused password. */
+/** Why nothing is sent although settings exist: an unused password, or OAuth env values. */
+function unusedSettings(context: Context): string | undefined {
+  const password = unusedPassword(context);
+  if (password !== undefined) return `a password is set (${password}), but no username`;
+  const variable = oauthEnvVariable(context.env);
+  return variable === undefined
+    ? undefined
+    : `OAuth settings are set (from ${variable}), but no auth type selects OAuth; set ${ENV.auth}=oauth or --auth oauth`;
+}
+
+/**
+ * No credentials, and why when that may surprise: an explicit none (switching off the OAuth
+ * settings of the profile, else Basic auth), an unused password or OAuth values in the env.
+ */
 function withoutAuth(type: Found<AuthType> | undefined, context: Context): NoAuthConfig {
   if (type !== undefined) {
-    return { type: 'none', off: `Basic auth is switched off by ${type.label}` };
+    const family = hasOAuthKeys(context.selected.profile?.auth) ? 'OAuth' : 'Basic auth';
+    return { type: 'none', off: `${family} is switched off by ${type.label}` };
   }
-  const password = unusedPassword(context);
-  return password === undefined
-    ? { type: 'none' }
-    : { type: 'none', off: `a password is set (${password}), but no username` };
+  const off = unusedSettings(context);
+  return off === undefined ? { type: 'none' } : { type: 'none', off };
 }
 
 export function resolveAuth(flags: ConfigFlags, env: Env, selected: SelectedProfile): ResolvedAuth {
   const context: Context = { flags, env, selected };
+  const explicit = pickType(context);
+  if (explicit?.value === 'oauth') {
+    return { auth: resolveOAuth(context, explicit.label), source: explicit.source };
+  }
   const username = pickUsername(context);
-  const type = pickType(context) ?? impliedType(username, flags);
+  const type = explicit ?? impliedType(username, flags);
   if (type?.value !== 'basic') {
     return { auth: withoutAuth(type, context), source: type?.source ?? 'default' };
   }
@@ -214,17 +233,41 @@ function headerOrigin(source: Source, profile: string | undefined): string {
 }
 
 /**
- * Basic auth and an explicit Authorization header (`-H`, OPERATE_HEADERS, profile headers) would
- * fight over the same header: a CONFIG error asks to drop one.
+ * Basic auth or OAuth and an explicit Authorization header (`-H`, OPERATE_HEADERS, profile
+ * headers) would fight over the same header: a CONFIG error asks to drop one. For `operate auth`
+ * commands (`authCommand`), whose purpose is OAuth, only the header can go.
  */
 export function authorizationConflict(
   auth: AuthConfig,
   authorization: Source | undefined,
   profile: string | undefined,
+  authCommand = false,
 ): OperateError | undefined {
-  if (auth.type !== 'basic' || authorization === undefined) return undefined;
+  if (auth.type === 'none' || authorization === undefined) return undefined;
+  const name = auth.type === 'basic' ? 'Basic auth' : 'OAuth';
+  const origin = headerOrigin(authorization, profile);
   return configError(
-    'Basic auth and an Authorization header are both configured',
-    `Drop one: remove the Authorization header (${headerOrigin(authorization, profile)}), or switch Basic auth off with --auth none, ${ENV.auth}=none or \`operate config unset ${profile ?? '<profile>'} auth\`.`,
+    `${name} and an Authorization header are both configured`,
+    authCommand
+      ? `Remove the Authorization header (${origin}): with OAuth, operate sends the access token in it.`
+      : `Drop one: remove the Authorization header (${origin}), or switch ${name} off with --auth none, ${ENV.auth}=none or \`operate config unset ${profile ?? '<profile>'} auth\`.`,
   );
+}
+
+/**
+ * The auth type a command would use, without resolving credentials (no password variable is
+ * read): the explicit type, else basic for a username or `--auth-password-stdin`, else none.
+ * Undefined for an unknown type (resolution reports it).
+ */
+export function selectedAuthType(
+  flags: ConfigFlags,
+  env: Env,
+  selected: SelectedProfile,
+): AuthType | undefined {
+  const context: Context = { flags, env, selected };
+  try {
+    return (pickType(context) ?? impliedType(pickUsername(context), flags))?.value ?? 'none';
+  } catch {
+    return undefined;
+  }
 }

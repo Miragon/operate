@@ -37,6 +37,7 @@ function memoryFs(files: Record<string, string> = {}) {
       return Promise.resolve();
     },
     exists: (path) => Promise.resolve(Object.hasOwn(files, path)),
+    remove: () => Promise.resolve(false),
   };
   return { fs, writes, dirs };
 }
@@ -170,6 +171,31 @@ describe('parseConfigFile', () => {
     );
   });
 
+  it('rejects profile names that config set would refuse (they name token files)', () => {
+    const rule =
+      'use letters, digits, ".", "_" and "-", starting with a letter or digit; rename it in the file';
+    expect(parseFailure('{"profiles":{"x/../../victim/package":{}}}').message).toBe(
+      `Invalid config file ${PATH}: invalid profile name "x/../../victim/package" (${rule})`,
+    );
+    expect(parseFailure('{"profiles":{"a\\nb":{}}}').message).toBe(
+      `Invalid config file ${PATH}: invalid profile name "a\\nb" (${rule})`,
+    );
+    expect(parseFailure('{"profiles":{"ok":{}},"defaultProfile":" ../x "}').message).toBe(
+      `Invalid config file ${PATH}: invalid defaultProfile "../x" (${rule})`,
+    );
+    for (const name of ['.hidden', '-x', 'a b', 'p;rm', '']) {
+      expect(parseFailure(JSON.stringify({ profiles: { [name]: {} } })).message).toContain(
+        `invalid profile name ${JSON.stringify(name)}`,
+      );
+    }
+  });
+
+  it('accepts valid names and a blank defaultProfile', () => {
+    expect(
+      parseConfigFile('{"defaultProfile":" ","profiles":{"prod-EU_1.x":{},"9":{}}}', PATH),
+    ).toEqual({ defaultProfile: ' ', profiles: { 'prod-EU_1.x': {}, 9: {} } });
+  });
+
   it.each(['[]', 'null', '"a"'])('rejects profiles = %s', (profiles) => {
     expect(parseFailure(`{"profiles":${profiles}}`).message).toBe(
       `Invalid config file ${PATH}: profiles must be an object`,
@@ -232,11 +258,11 @@ describe('parseConfigFile', () => {
     ],
     [
       { type: 'basic', user: 'demo', pass: 'x' },
-      `Invalid config file ${PATH}: unknown key(s) user, pass in the auth of profile "prod" (allowed: type, username, passwordEnv, password)`,
+      `Invalid config file ${PATH}: unknown key(s) user, pass in the auth of profile "prod" (allowed: type, username, passwordEnv, password, issuer, authorizationEndpoint, tokenEndpoint, clientId, clientSecretEnv, clientSecret, scopes, audience, redirectPort)`,
     ],
     [
       { type: 1 },
-      `Invalid config file ${PATH}: profile "prod" has an invalid auth.type (expected none or basic)`,
+      `Invalid config file ${PATH}: profile "prod" has an invalid auth.type (expected none, basic or oauth)`,
     ],
     [
       { username: ' ' },

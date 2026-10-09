@@ -18,12 +18,12 @@ import {
   parseReadOnly,
   parseTimeout,
   resolveConfig,
-  redactUrl,
   selectProfile,
   validateEngine,
   validateOutput,
   validateUrl,
 } from './resolve.js';
+import { redactUrl } from './redact.js';
 import type { ConfigFile, ConfigFlags, Profile } from './types.js';
 
 function failure(action: () => unknown): OperateError {
@@ -245,8 +245,8 @@ describe('resolveConfig precedence', () => {
     expect(failure(() => resolveConfig({}, { OPERATE_TIMEOUT: 'soon' }, undefined)).message).toBe(
       'Timeout must be a positive number of milliseconds, got "soon"',
     );
-    expect(failure(() => resolveConfig({}, { OPERATE_AUTH: 'oauth' }, undefined)).message).toBe(
-      'Unsupported auth type "oauth"',
+    expect(failure(() => resolveConfig({}, { OPERATE_AUTH: 'digest' }, undefined)).message).toBe(
+      'Unsupported auth type "digest"',
     );
     expect(failure(() => resolveConfig({ auth: 'Basic' }, {}, undefined)).message).toBe(
       'Unsupported auth type "Basic"',
@@ -261,9 +261,9 @@ describe('resolveConfig precedence', () => {
   });
 
   it('rejects an unsupported auth type stored in the profile', () => {
-    const config = file({ auth: { type: 'oauth' } as unknown as NonNullable<Profile['auth']> });
+    const config = file({ auth: { type: 'digest' } as unknown as NonNullable<Profile['auth']> });
     expect(failure(() => resolveConfig({}, {}, config)).message).toBe(
-      'Unsupported auth type "oauth"',
+      'Unsupported auth type "digest"',
     );
   });
 

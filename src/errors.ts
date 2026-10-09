@@ -20,6 +20,8 @@ export type ErrorCode =
   | 'VALIDATION'
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'
+  | 'LOGIN_REQUIRED'
+  | 'LOGIN_FAILED'
   | 'NOT_FOUND'
   | 'HTTP_CLIENT_ERROR'
   | 'HTTP_SERVER_ERROR'
@@ -36,6 +38,9 @@ const EXIT_CODE_BY_ERROR: Readonly<Record<ErrorCode, number>> = {
   VALIDATION: EXIT_CODES.usage,
   UNAUTHORIZED: EXIT_CODES.auth,
   FORBIDDEN: EXIT_CODES.auth,
+  // a person must run `operate auth login` (agents cannot), or that login failed
+  LOGIN_REQUIRED: EXIT_CODES.auth,
+  LOGIN_FAILED: EXIT_CODES.auth,
   NOT_FOUND: EXIT_CODES.notFound,
   HTTP_CLIENT_ERROR: EXIT_CODES.client,
   HTTP_SERVER_ERROR: EXIT_CODES.server,
