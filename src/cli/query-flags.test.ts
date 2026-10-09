@@ -57,29 +57,39 @@ function cases(): [string, OperationSpec, ParamSpec][] {
     );
 }
 
+/** Runs one flag through the program; returns a failure line, or undefined when it arrived. */
+async function check([label, operation, param]: [string, OperationSpec, ParamSpec]) {
+  const pathArgs = operation.params.filter((p) => p.in === 'path').map((p) => p.enum?.[0] ?? 'p1');
+  const { words, expected } = sample(param);
+  const args = [
+    operation.group,
+    operation.name,
+    ...pathArgs,
+    ...words,
+    ...requiredWords(operation, param),
+    ...(operation.body?.kind === 'json' ? ['--no-validate'] : []),
+    '--dry-run',
+  ];
+  const result = await execute(run, args, fakeRuntime());
+  const url = result.code === 0 ? (JSON.parse(result.stdout) as { url: string }).url : '';
+  const actual = url === '' ? undefined : new URL(url).searchParams.get(param.name);
+  return actual === expected ? undefined : `${label}: ${actual ?? result.stderr}`;
+}
+
+const all = cases();
+const groups = [...new Set(all.map(([, operation]) => operation.group))];
+
 describe('query flags parsed by the real program', () => {
-  it('reach the request under their wire names', async () => {
-    const all = cases();
+  it('cover every query parameter of the catalog', () => {
     expect(all.length).toBeGreaterThan(900);
+  });
+
+  // One test per group keeps each test fast on slow CI runners and names the broken group.
+  it.each(groups)('reach the request under their wire names: %s', async (group) => {
     const failed: string[] = [];
-    for (const [label, operation, param] of all) {
-      const pathArgs = operation.params
-        .filter((p) => p.in === 'path')
-        .map((p) => p.enum?.[0] ?? 'p1');
-      const { words, expected } = sample(param);
-      const args = [
-        operation.group,
-        operation.name,
-        ...pathArgs,
-        ...words,
-        ...requiredWords(operation, param),
-        ...(operation.body?.kind === 'json' ? ['--no-validate'] : []),
-        '--dry-run',
-      ];
-      const result = await execute(run, args, fakeRuntime());
-      const url = result.code === 0 ? (JSON.parse(result.stdout) as { url: string }).url : '';
-      const actual = url === '' ? undefined : new URL(url).searchParams.get(param.name);
-      if (actual !== expected) failed.push(`${label}: ${actual ?? result.stderr}`);
+    for (const entry of all.filter(([, operation]) => operation.group === group)) {
+      const failure = await check(entry);
+      if (failure !== undefined) failed.push(failure);
     }
     expect(failed).toEqual([]);
   });
