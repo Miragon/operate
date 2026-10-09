@@ -771,10 +771,10 @@ organization `miragon` with 2FA:
 3. **Release token** (optional, recommended): CI runs on pull requests opened with `GITHUB_TOKEN`
    only after a maintainer approves them. With one of these, CI runs on the release pull request
    by itself and step 2 is not needed:
-   - a GitHub App (preferred), installed on `Miragon/operate` only, with the repository
-     permissions Contents, Issues and Pull requests set to read and write. Store its Client ID as
-     the Actions variable `RELEASE_PLEASE_APP_CLIENT_ID` and a private key as the secret
-     `RELEASE_PLEASE_APP_PRIVATE_KEY`;
+   - a GitHub App (preferred) with the repository permissions Contents and Pull requests set to
+     read and write. Its Client ID goes into the Actions variable `RELEASE_PLEASE_APP_CLIENT_ID`,
+     a private key into the secret `RELEASE_PLEASE_APP_PRIVATE_KEY`. The Miragon organization
+     provides both for its app `miragon-release-please`, so nothing is needed for this repository;
    - or a fine-grained personal access token for `Miragon/operate` with the same permissions, as
      the secret `RELEASE_PLEASE_TOKEN` (renew it before it expires).
 4. **Environment** (Settings → Environments): create `npm` before the first release (the first run
