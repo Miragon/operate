@@ -10,6 +10,16 @@ export interface OutputStream {
   readonly columns?: number;
 }
 
+/** What a path names; symbolic links are resolved, so a link to a directory is `other`. */
+export type PathKind = 'file' | 'directory' | 'missing' | 'other';
+
+/** One entry of a directory listing. */
+export interface DirectoryEntry {
+  readonly name: string;
+  /** `other` for everything that is neither a file nor a directory, also symlinked directories. */
+  readonly kind: 'file' | 'directory' | 'other';
+}
+
 export interface FileSystem {
   readFile(path: string): Promise<Uint8Array>;
   /** With a `mode`, a private file: written atomically, never readable with another mode. */
@@ -19,6 +29,10 @@ export interface FileSystem {
   exists(path: string): Promise<boolean>;
   /** Removes a file; resolves false when it did not exist. */
   remove(path: string): Promise<boolean>;
+  /** The entries of a directory, in no particular order. */
+  readdir(path: string): Promise<DirectoryEntry[]>;
+  /** What `path` is; never throws for a missing path. */
+  kind(path: string): Promise<PathKind>;
 }
 
 /** A request to the loopback server of `operate auth login` (the OAuth callback). */
@@ -70,6 +84,14 @@ export interface Runtime {
    * after that. Gives up (rejects; the caller maps it to CONFIG) after waiting `2 × holdMs`.
    */
   withLock<T>(path: string, holdMs: number, action: () => Promise<T>): Promise<T>;
-  /** Resolves after `ms`; never keeps the process alive on its own (unref'd timer). */
+  /**
+   * Resolves after `ms` without keeping the process alive (an unref'd timer): a time limit raced
+   * against other work, such as the wait for the OAuth login callback.
+   */
+  deadline(ms: number): Promise<void>;
+  /**
+   * Waits `ms` milliseconds and keeps the process alive meanwhile, like any pending work (the
+   * polling of the workflow commands; the fake runtime advances its clock instead).
+   */
   sleep(ms: number): Promise<void>;
 }

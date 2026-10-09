@@ -119,6 +119,13 @@ describe('registration of every catalog operation', () => {
       'ping',
       'config',
       'auth',
+      'completion',
+      'inspect',
+      'wait',
+      'advance',
+      'retry',
+      'deploy',
+      'status',
       ...catalog.groups.map((group) => group.name).toSorted(),
     ]);
   });

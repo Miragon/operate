@@ -204,7 +204,7 @@ async function announce(flow: Flow, url: string, options: LoginOptions): Promise
 
 /** Waits for an accepted callback; the timeout no longer applies once one arrived. */
 async function wait(flow: Flow, accepted: Promise<Accepted>, timeoutMs: number) {
-  const timeout = flow.deps.sleep(timeoutMs).then(() => undefined);
+  const timeout = flow.deps.deadline(timeoutMs).then(() => undefined);
   const winner = await Promise.race([accepted, timeout]);
   if (winner !== undefined) return winner.completion;
   throw loginFailed(

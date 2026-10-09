@@ -4,6 +4,7 @@
  */
 
 import type { Catalog, Effect, OperationSpec } from '../catalog/types.js';
+import { WORKFLOW_DOCS, WORKFLOW_GROUP, type WorkflowDoc } from './workflow.js';
 
 export interface GroupSummary {
   readonly group: string;
@@ -63,10 +64,10 @@ function searchableTexts(operation: OperationSpec): string[] {
   ];
 }
 
-function matchesSearch(operation: OperationSpec, search: string | undefined): boolean {
+function matchesWords(texts: readonly string[], search: string | undefined): boolean {
   if (search === undefined) return true;
   // one line per text, so that a word never matches across two of them
-  const haystack = searchableTexts(operation).join('\n').toLowerCase();
+  const haystack = texts.join('\n').toLowerCase();
   // runs of blanks give empty words, which match everything
   const words = search.toLowerCase().split(/\s/);
   return words.every((word) => haystack.includes(word));
@@ -76,7 +77,7 @@ function matches(operation: OperationSpec, filter: CommandFilter): boolean {
   return (
     (filter.group === undefined || operation.group === filter.group) &&
     (filter.effect === undefined || operation.effect === filter.effect) &&
-    matchesSearch(operation, filter.search)
+    matchesWords(searchableTexts(operation), filter.search)
   );
 }
 
@@ -101,4 +102,50 @@ export function listCommands(catalog: Catalog, filter: CommandFilter): CommandSu
       (left, right) => compareText(left.group, right.group) || compareText(left.name, right.name),
     )
     .map(toSummary);
+}
+
+/**
+ * A workflow command in `operate commands`: no operationId, method and path (`operate describe
+ * <command>` lists the requests it may send).
+ */
+interface WorkflowSummary {
+  readonly command: string;
+  readonly aliases: readonly string[];
+  readonly effect: Effect;
+  readonly summary: string;
+  readonly deprecated: false;
+}
+
+export type CommandRow = WorkflowSummary | CommandSummary;
+
+/** The groups of `operate commands`: the catalog groups and the `workflow` pseudo group. */
+export function discoveryGroups(catalog: Catalog): GroupSummary[] {
+  return [...listGroups(catalog), WORKFLOW_GROUP].sort((left, right) =>
+    compareText(left.group, right.group),
+  );
+}
+
+function workflowSummary(doc: WorkflowDoc): WorkflowSummary {
+  return {
+    command: doc.name,
+    aliases: [],
+    effect: doc.effect,
+    summary: doc.summary,
+    deprecated: false,
+  };
+}
+
+function workflowMatches(doc: WorkflowDoc, filter: CommandFilter): boolean {
+  return (
+    (filter.group === undefined || filter.group === WORKFLOW_GROUP.group) &&
+    (filter.effect === undefined || doc.effect === filter.effect) &&
+    matchesWords([doc.name, doc.summary, doc.description], filter.search)
+  );
+}
+
+/** The workflow commands matching the filter first, then the catalog commands. */
+export function findCommands(catalog: Catalog, filter: CommandFilter): CommandRow[] {
+  const workflow = WORKFLOW_DOCS.filter((doc) => workflowMatches(doc, filter)).map(workflowSummary);
+  const catalogRows = filter.group === WORKFLOW_GROUP.group ? [] : listCommands(catalog, filter);
+  return [...workflow, ...catalogRows];
 }

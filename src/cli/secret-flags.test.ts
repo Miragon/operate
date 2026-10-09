@@ -59,7 +59,7 @@ describe('secretHint', () => {
   it('says where --show-secrets works instead of the secret hint', () => {
     for (const name of ['--show-secrets', '--Show-Secrets']) {
       expect(secretHint(name)).toBe(
-        '--show-secrets works where operate prints credentials: --dry-run and --verbose of API commands, api and ping, and config show. `operate auth` commands never print a token. ',
+        '--show-secrets works where operate prints credentials: --dry-run and --verbose of API and workflow commands, api and ping, and config show. `operate auth` commands never print a token. ',
       );
     }
     expect(secretHint('--show-secret')).toMatch(/^Secrets are never flag values/);

@@ -88,6 +88,8 @@ export const ROOT_DESCRIPTION = [
   '  operate commands                    list the API groups',
   '  operate commands --search <text>    find a command',
   '  operate describe <group> <command>  options, body, responses, examples',
+  '  operate inspect <id>                where an instance waits and why',
+  '  operate status                      incidents, jobs and workers at a glance',
   '  operate guide                       usage guide for agents (markdown)',
 ].join('\n');
 
@@ -102,13 +104,34 @@ const EXIT_CODE_MEANINGS: Readonly<Record<keyof typeof EXIT_CODES, string>> = {
   client: 'other 4xx: the engine rejected the request',
   server: 'engine error (5xx)',
   network: 'network error or timeout',
+  outcome:
+    'the process did not reach the expected state (WAIT_TIMEOUT, INCIDENT, INSTANCE_ENDED, JOB_FAILED, CHECK_FAILED)',
 };
+
+/** Width of the exit code table: meanings wrap below themselves to stay within 80 columns. */
+const EXIT_TABLE_WIDTH = 80;
+
+/** `  <code>  <meaning>`, continued on lines indented below the meaning. */
+function exitCodeEntry(code: number, meaning: string): string[] {
+  const lines: string[] = [];
+  let line = `  ${code} `;
+  for (const word of meaning.split(' ')) {
+    if (line.length + 1 + word.length > EXIT_TABLE_WIDTH) {
+      lines.push(line);
+      line = '    ';
+    }
+    line += ` ${word}`;
+  }
+  return [...lines, line];
+}
 
 /** The exit code table of the root help, ordered by code. */
 export function exitCodeLines(): string[] {
   return Object.entries(EXIT_CODES)
     .sort(([, left], [, right]) => left - right)
-    .map(([key, code]) => `  ${code}  ${EXIT_CODE_MEANINGS[key as keyof typeof EXIT_CODES]}`);
+    .flatMap(([key, code]) =>
+      exitCodeEntry(code, EXIT_CODE_MEANINGS[key as keyof typeof EXIT_CODES]),
+    );
 }
 
 /** Text after the root help: where to look next and the exit codes. */

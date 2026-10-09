@@ -1,15 +1,27 @@
 /**
  * The Runtime on Node.js: process streams (a closed pipe such as `| head` ends output quietly),
- * stdin, the file system, fetch, the environment, and for OAuth random bytes, the loopback
- * server, the browser, the lock file and timers.
+ * stdin, the file system, fetch, the environment, timers, and for OAuth random bytes, the
+ * loopback server, the browser and the lock file.
  */
 
 import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
+import {
+  chmod,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { usageError } from '../errors.js';
-import type { FileSystem, OutputStream, Runtime } from '../runtime.js';
+import type { DirectoryEntry, FileSystem, OutputStream, PathKind, Runtime } from '../runtime.js';
 import { openBrowser } from './browser.js';
 import { withLock } from './lock.js';
 import { listenLoopback } from './loopback.js';
@@ -136,6 +148,34 @@ async function remove(path: string): Promise<boolean> {
   }
 }
 
+/** What a path names, symlinks followed; a missing path (or a file in the way) is `missing`. */
+async function pathKind(path: string): Promise<PathKind> {
+  try {
+    const info = await stat(path);
+    if (info.isFile()) return 'file';
+    return info.isDirectory() ? 'directory' : 'other';
+  } catch (error) {
+    const code = errorCode(error);
+    if (code === 'ENOENT' || code === 'ENOTDIR') return 'missing';
+    throw error;
+  }
+}
+
+/** A directory entry; a link to a file counts as a file, a link to a directory is not followed. */
+async function entryKind(directory: string, entry: Dirent): Promise<DirectoryEntry['kind']> {
+  if (entry.isDirectory()) return 'directory';
+  if (entry.isFile()) return 'file';
+  if (!entry.isSymbolicLink()) return 'other';
+  return (await pathKind(join(directory, entry.name))) === 'file' ? 'file' : 'other';
+}
+
+async function directoryEntries(path: string): Promise<DirectoryEntry[]> {
+  const entries = await readdir(path, { withFileTypes: true });
+  return Promise.all(
+    entries.map(async (entry) => ({ name: entry.name, kind: await entryKind(path, entry) })),
+  );
+}
+
 const nodeFileSystem: FileSystem = {
   readFile: async (path) => new Uint8Array(await readFile(path)),
   async writeFile(path, data, options) {
@@ -150,6 +190,8 @@ const nodeFileSystem: FileSystem = {
   },
   exists,
   remove,
+  readdir: directoryEntries,
+  kind: pathKind,
 };
 
 /** Cryptographically strong random bytes from WebCrypto, in chunks it accepts. */
@@ -162,7 +204,7 @@ function strongRandomBytes(length: number): Uint8Array {
 }
 
 /** Resolves after `ms` without keeping the process alive. */
-function sleep(ms: number): Promise<void> {
+function deadline(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms).unref());
 }
 
@@ -181,6 +223,7 @@ export function createNodeRuntime(): Runtime {
     listenLoopback,
     openBrowser: (url) => openBrowser(url, process.env, process.platform),
     withLock,
-    sleep,
+    deadline,
+    sleep: (ms) => delay(ms),
   };
 }

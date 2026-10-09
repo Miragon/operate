@@ -61,7 +61,8 @@ function binaryFields(spec: MultipartBodySpec, flags: Flags, fs: FileSystem) {
   });
 }
 
-interface Resource {
+/** A deployment resource: the file to read and the resource name it is deployed under. */
+export interface Resource {
   readonly file: string;
   readonly name: string;
 }
@@ -79,15 +80,13 @@ function checkNotField(spec: MultipartBodySpec, name: string, file: string): voi
   );
 }
 
-function resources(
-  spec: MultipartBodySpec,
-  files: readonly string[],
-  baseDir: string | undefined,
-): Resource[] {
-  if (files.length === 0) throw usageError('At least one resource file is required', RESOURCE_HINT);
+/**
+ * Resource names must be unique and must not be the name of a form field of the deployment
+ * (shared by `deployment create` and `operate deploy`).
+ */
+export function checkResourceNames(spec: MultipartBodySpec, resources: readonly Resource[]): void {
   const seen = new Map<string, string>();
-  return files.map((file) => {
-    const name = resourceName(file, baseDir);
+  for (const { file, name } of resources) {
     checkNotField(spec, name, file);
     const previous = seen.get(name);
     if (previous !== undefined) {
@@ -97,8 +96,18 @@ function resources(
       );
     }
     seen.set(name, file);
-    return { file, name };
-  });
+  }
+}
+
+function resources(
+  spec: MultipartBodySpec,
+  files: readonly string[],
+  baseDir: string | undefined,
+): Resource[] {
+  if (files.length === 0) throw usageError('At least one resource file is required', RESOURCE_HINT);
+  const named = files.map((file) => ({ file, name: resourceName(file, baseDir) }));
+  checkResourceNames(spec, named);
+  return named;
 }
 
 function resourceParts(

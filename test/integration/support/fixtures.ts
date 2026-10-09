@@ -13,6 +13,17 @@ export const FIXTURES = {
   approvalDecision: fixture('approval.dmn'),
   /** small text file used as a binary (Bytes) variable */
   attachment: fixture('attachment.txt'),
+  /**
+   * `workflow-parent`: call activity (`workflow-child`, user task `approve`) → external task
+   * `charge` → message `paid` → timer `cool-down` → async `book` (fails while failBooking) →
+   * receive task `wait-signal`
+   */
+  workflow: fixture('workflow.bpmn'),
+  /**
+   * `race-end`: user task `review` → async `go` → end (ends right after the task is completed);
+   * `paused`: async `work` → user task `hold` (its job definition gets suspended)
+   */
+  workflowEdges: fixture('workflow-edges.bpmn'),
 } as const;
 
 export const PROCESS_KEY = 'order-process';

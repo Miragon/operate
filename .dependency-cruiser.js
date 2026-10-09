@@ -9,7 +9,7 @@
 const TEST_CODE = ['[.]test[.]ts$', '^test/'];
 
 /** Layers that must stay pure (no Node built-ins; WebCrypto and timers are globals). */
-const PURE_LAYERS = '^src/(?:auth|catalog|docs|output)/|^src/(?:errors|util)[.]ts$';
+const PURE_LAYERS = '^src/(?:auth|catalog|docs|output|workflow)/|^src/(?:errors|util)[.]ts$';
 
 /** The interactive OAuth login: loopback server, browser, callback pages. */
 const INTERACTIVE_LOGIN = '^src/auth/oauth/(?:login|callback|pages)[.]ts$';
@@ -105,7 +105,8 @@ export default {
     {
       name: 'pure-layers-no-builtins',
       severity: 'error',
-      comment: 'auth, catalog, docs, output, errors and util are pure: no Node built-in modules.',
+      comment:
+        'auth, catalog, docs, output, workflow, errors and util are pure: no Node built-in modules.',
       from: { path: PURE_LAYERS, pathNot: TEST_CODE },
       to: { dependencyTypes: ['core'] },
     },
@@ -151,6 +152,21 @@ export default {
         pathNot: [INTERACTIVE_LOGIN, '^src/cli/commands/auth[.]ts$', ...TEST_CODE],
       },
       to: { path: INTERACTIVE_LOGIN },
+    },
+    {
+      name: 'workflow-not-to-cli-config-auth-bin',
+      severity: 'error',
+      comment:
+        'The workflow commands (src/workflow) build on catalog, operation, http, output, errors and util; never on cli, config, auth or bin.',
+      from: { path: '^src/workflow/', pathNot: TEST_CODE },
+      to: { path: '^src/(?:cli|config|auth|bin)/' },
+    },
+    {
+      name: 'workflow-only-from-cli',
+      severity: 'error',
+      comment: 'Only the CLI layer (src/cli) uses the workflow commands; output and docs never do.',
+      from: { path: '^src/', pathNot: ['^src/(?:cli|workflow)/', ...TEST_CODE] },
+      to: { path: '^src/workflow/' },
     },
     {
       name: 'http-not-to-config-cli-operation',

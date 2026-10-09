@@ -24,7 +24,8 @@ describe('GUIDE', () => {
     const headings = lines.filter((line) => line.startsWith('## '));
     expect(headings).toEqual([
       '## Setup',
-      '## Workflow: discover, describe, preview, run',
+      '## Discover, describe, preview, run',
+      '## Workflow commands',
       '## Invocation conventions',
       '## Output',
       '## Errors and exit codes',
@@ -46,6 +47,35 @@ describe('GUIDE', () => {
       expect(GUIDE).toContain(text);
     }
     expect(GUIDE).toContain('flag > environment variable > profile > default');
+  });
+
+  it('explains the workflow commands, the dev loop and the rules agents need', () => {
+    for (const text of [
+      'operate inspect',
+      'operate wait',
+      'operate advance',
+      'operate retry',
+      'operate deploy',
+      'operate status',
+      'instead of `sleep`',
+      '`advance` needs `--activity-id`',
+      'still send their reads',
+      'Exit code 9',
+      'still prints the view',
+      '--wait-timeout',
+    ]) {
+      expect(GUIDE).toContain(text);
+    }
+    expect(GUIDE).toContain(
+      [
+        'operate deploy bpmn --start --business-key B-1 --var amount=250',
+        'operate inspect --business-key B-1',
+        'operate advance --business-key B-1 --var approved=true --wait',
+        'operate retry --business-key B-1 --now',
+        'operate wait --business-key B-1 --until ended',
+        'operate status',
+      ].join('\n'),
+    );
   });
 
   it('documents every exit code', () => {
@@ -119,6 +149,7 @@ describe('skills/operate/SKILL.md', () => {
       'REST API',
       'external tasks',
       'incidents',
+      'workflow commands',
     ]) {
       expect(description).toContain(text);
     }
