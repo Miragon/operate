@@ -1,0 +1,173 @@
+/**
+ * Global options (design §2.1): registered on every operation command, `api` and `ping`, shown
+ * under "Global Options:" in the help. `GLOBAL_OPTION_FLAGS` must equal `GLOBAL_FLAGS` of the
+ * catalog generator (scripts/catalog/flags.ts), which keeps body field flags clear of them.
+ */
+
+import { type Command, Option } from 'commander';
+import type { ConfigFlags } from '../config/types.js';
+import { compact } from '../util.js';
+import { collect } from './options.js';
+
+export interface GlobalOptionSpec {
+  /** Long flag without dashes. */
+  readonly long: string;
+  /** Short flag letter. */
+  readonly short?: string;
+  /** Placeholder of the option argument; absent for flags without one. */
+  readonly value?: string;
+  readonly repeatable?: boolean;
+  readonly description: string;
+}
+
+export const GLOBAL_GROUP = 'Global Options:';
+
+export const GLOBAL_OPTIONS: readonly GlobalOptionSpec[] = [
+  {
+    long: 'url',
+    value: '<url>',
+    description: 'REST API root, e.g. http://localhost:8080/engine-rest (env OPERATE_URL)',
+  },
+  {
+    long: 'engine',
+    value: '<name>',
+    description: 'Named process engine, adds /engine/<name> to the path (env OPERATE_ENGINE)',
+  },
+  {
+    long: 'profile',
+    value: '<name>',
+    description: 'Profile of the config file (env OPERATE_PROFILE)',
+  },
+  { long: 'config', value: '<path>', description: 'Config file location (env OPERATE_CONFIG)' },
+  {
+    long: 'output',
+    short: 'o',
+    value: '<format>',
+    description: 'json or table; default: table on a terminal, else json (env OPERATE_OUTPUT)',
+  },
+  {
+    long: 'fields',
+    value: '<list>',
+    description:
+      'Comma separated fields to keep, e.g. id,name,variables.amount; also table columns',
+  },
+  { long: 'pretty', description: 'Indent JSON output (default on a terminal)' },
+  { long: 'dry-run', description: 'Print the request instead of sending it' },
+  { long: 'yes', short: 'y', description: 'Confirm delete and bulk operations' },
+  {
+    long: 'read-only',
+    description: 'Refuse every operation that is not a read (env OPERATE_READ_ONLY)',
+  },
+  {
+    long: 'timeout',
+    value: '<ms>',
+    description: 'Request timeout in milliseconds, default 30000 (env OPERATE_TIMEOUT)',
+  },
+  {
+    long: 'header',
+    short: 'H',
+    value: '<header>',
+    repeatable: true,
+    description: 'Extra request header "Name: value"; repeatable',
+  },
+  { long: 'verbose', description: 'Trace requests and responses on stderr' },
+  { long: 'out-file', value: '<path>', description: 'Write the response body to a file' },
+  {
+    long: 'show-secrets',
+    description: 'Do not mask secret headers in dry-run, verbose and config output',
+  },
+  { long: 'help', short: 'h', description: 'Display help for command' },
+];
+
+/** Long flag names of the global options, in help order. */
+export const GLOBAL_OPTION_FLAGS: readonly string[] = GLOBAL_OPTIONS.map((spec) => spec.long);
+
+/** Values of the global options; flags that were not given are absent or false. */
+export interface GlobalOptions {
+  readonly url?: string;
+  readonly engine?: string;
+  readonly profile?: string;
+  readonly config?: string;
+  readonly output?: string;
+  readonly fields?: string;
+  readonly timeout?: string;
+  readonly outFile?: string;
+  readonly headers: readonly string[];
+  readonly pretty: boolean;
+  readonly dryRun: boolean;
+  readonly yes: boolean;
+  readonly readOnly: boolean;
+  readonly verbose: boolean;
+  readonly showSecrets: boolean;
+}
+
+/** commander flags of a spec, e.g. `-o, --output <format>`. */
+export function optionFlags(spec: GlobalOptionSpec): string {
+  const short = spec.short === undefined ? '' : `-${spec.short}, `;
+  const value = spec.value === undefined ? '' : ` ${spec.value}`;
+  return `${short}--${spec.long}${value}`;
+}
+
+function createOption(spec: GlobalOptionSpec, group: string): Option {
+  const option = new Option(optionFlags(spec), spec.description).helpGroup(group);
+  return spec.repeatable === true ? option.argParser(collect) : option;
+}
+
+/**
+ * Registers global options on a command: all of them by default, or the named subset (config
+ * commands). `group` is the help heading.
+ */
+export function addGlobalOptions(
+  command: Command,
+  names: readonly string[] = GLOBAL_OPTION_FLAGS,
+  group: string = GLOBAL_GROUP,
+): Command {
+  for (const spec of GLOBAL_OPTIONS.filter((candidate) => names.includes(candidate.long))) {
+    const option = createOption(spec, group);
+    if (spec.long === 'help') command.addHelpOption(option);
+    else command.addOption(option);
+  }
+  return command;
+}
+
+/** Reads the global option values of a parsed command. */
+export function readGlobals(command: Command): GlobalOptions {
+  const opts = command.opts<Record<string, unknown>>();
+  const text = (key: string) => {
+    const value = opts[key];
+    return typeof value === 'string' ? value : undefined;
+  };
+  const flag = (key: string) => opts[key] === true;
+  return {
+    ...compact({
+      url: text('url'),
+      engine: text('engine'),
+      profile: text('profile'),
+      config: text('config'),
+      output: text('output'),
+      fields: text('fields'),
+      timeout: text('timeout'),
+      outFile: text('outFile'),
+    }),
+    headers: Array.isArray(opts.header) ? (opts.header as string[]) : [],
+    pretty: flag('pretty'),
+    dryRun: flag('dryRun'),
+    yes: flag('yes'),
+    readOnly: flag('readOnly'),
+    verbose: flag('verbose'),
+    showSecrets: flag('showSecrets'),
+  };
+}
+
+/** The config related global options as input for `resolveConfig`. */
+export function configFlags(globals: GlobalOptions): ConfigFlags {
+  return compact({
+    url: globals.url,
+    engine: globals.engine,
+    profile: globals.profile,
+    output: globals.output,
+    timeout: globals.timeout,
+    headers: globals.headers.length > 0 ? globals.headers : undefined,
+    readOnly: globals.readOnly ? true : undefined,
+  });
+}

@@ -1,0 +1,187 @@
+/**
+ * Drift protection between the docs and the real command line: every `operate` command of the guide
+ * and of the README and every example of every operation must run in the CLI with exit code 0 (examples with
+ * --dry-run, whose preview must show the method and path of the operation).
+ * src/cli/command-lines.test.ts checks them against the catalog; this test runs them.
+ */
+
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { json } from '../../test/support/fake-fetch.js';
+import { execute, type FakeRuntime, fakeRuntime } from '../../test/support/fake-runtime.js';
+import { loadCatalog } from '../catalog/catalog.js';
+import type { OperationSpec } from '../catalog/types.js';
+import { examplesFor } from '../docs/examples.js';
+import { GUIDE } from '../docs/guide.js';
+import { commandWords } from '../docs/text.js';
+import { run } from './run.js';
+
+const catalog = loadCatalog();
+const README = readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
+
+const SHELL_OPERATORS = new Set(['|', '||', '&&', ';', '>', '>>', '<', '2>']);
+
+/** Shell words without their single quotes, as the shell passes them. */
+function shellWords(line: string): string[] {
+  return commandWords(line).map((word) => word.replaceAll("'", ''));
+}
+
+function operateSegments(words: readonly string[]): string[][] {
+  const segments: string[][] = [[]];
+  for (const word of words) {
+    if (SHELL_OPERATORS.has(word)) segments.push([]);
+    else segments.at(-1)?.push(word);
+  }
+  return segments.filter((segment) => segment[0] === 'operate');
+}
+
+/**
+ * `operate` commands in the shell code blocks (```sh) of markdown, split at shell operators.
+ * Other blocks hold transcripts and syntax summaries.
+ */
+function fencedCommands(markdown: string): string[][] {
+  const commands: string[][] = [];
+  let fence: string | undefined;
+  for (const line of markdown.split('\n')) {
+    if (line.startsWith('```')) fence = fence === undefined ? line.slice(3) : undefined;
+    else if (fence === 'sh') commands.push(...operateSegments(shellWords(line)));
+  }
+  return commands;
+}
+
+/** Files the command lines refer to (`invoice.bpmn`, `@start.json`), with minimal content. */
+function referencedFiles(words: readonly string[]): Record<string, string> {
+  const paths = words
+    .map((word) => word.replace(/^@/, ''))
+    .filter((word) => /\.(?:json|bpmn|dmn|form|pdf)$/.test(word));
+  return Object.fromEntries(paths.map((path) => [path, path.endsWith('.json') ? '{}' : '<x/>']));
+}
+
+/**
+ * A runtime whose engine answers paged requests (`--all`) with an empty list and every other
+ * request with `{}`, with the referenced files.
+ */
+function documentedRuntime(words: readonly string[]): FakeRuntime {
+  return fakeRuntime({
+    fetch: (input) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      return Promise.resolve(json(url.includes('maxResults=') ? [] : {}));
+    },
+    stdin: '{}',
+    files: referencedFiles(words),
+  });
+}
+
+/** Runs the command lines one after the other on `runtime`; returns the failed ones. */
+async function failures(lines: readonly (readonly string[])[], runtime: FakeRuntime) {
+  const failed: string[] = [];
+  for (const words of lines) {
+    runtime.stdout.chunks.length = 0;
+    runtime.stderr.chunks.length = 0;
+    const result = await execute(run, words.slice(1), runtime);
+    if (result.code !== 0) failed.push(`${words.join(' ')}: ${result.stderr}`);
+  }
+  return failed;
+}
+
+/** Method and URL of a dry-run preview: JSON, or the curl line of `-o table`. */
+function previewOf(stdout: string): { method: string; url: string } {
+  if (!stdout.startsWith('curl ')) return JSON.parse(stdout) as { method: string; url: string };
+  const method = /-X ([A-Z]+)/.exec(stdout)?.[1] ?? 'GET';
+  return { method, url: /'(http[^']*)'/.exec(stdout)?.[1] ?? '' };
+}
+
+/** The path of an operation as a pattern: `{id}` matches one non-empty segment. */
+function pathPattern(operation: OperationSpec): RegExp {
+  const segments = operation.path
+    .replace(/[.*+?^$()|[\]\\]/g, '\\$&')
+    .replace(/\{[^}]+\}/g, '[^/]+');
+  return new RegExp(`^/engine-rest${segments}$`);
+}
+
+/**
+ * Runs the dry-run examples; returns those that fail or whose preview does not show the method
+ * and path of their operation (a flag swallowed by another option would still exit with 0).
+ */
+async function previewFailures(examples: readonly (readonly [OperationSpec, readonly string[]])[]) {
+  const runtime = documentedRuntime(examples.flatMap(([, words]) => words));
+  const failed: string[] = [];
+  for (const [operation, words] of examples) {
+    runtime.stdout.chunks.length = 0;
+    runtime.stderr.chunks.length = 0;
+    const result = await execute(run, words.slice(1), runtime);
+    const preview = result.code === 0 ? previewOf(result.stdout) : undefined;
+    const matches =
+      preview?.method === operation.method &&
+      pathPattern(operation).test(new URL(preview.url).pathname);
+    if (!matches) failed.push(`${words.join(' ')}: ${result.stdout}${result.stderr}`);
+  }
+  return failed;
+}
+
+describe('documented command lines run in the CLI', () => {
+  it('finds the operate commands of fenced code blocks', () => {
+    const markdown =
+      "text operate x\n```sh\necho '{}' | operate guide && operate ping -o 'json'\n```\n```text\noperate <group>\n```";
+    expect(fencedCommands(markdown)).toEqual([
+      ['operate', 'guide'],
+      ['operate', 'ping', '-o', 'json'],
+    ]);
+    expect(referencedFiles(['--body', '@a.json', 'b.bpmn', 'c.txt'])).toEqual({
+      'a.json': '{}',
+      'b.bpmn': '<x/>',
+    });
+  });
+
+  it('runs the commands of the guide in order', async () => {
+    const guide = fencedCommands(GUIDE);
+    expect(guide.length).toBeGreaterThan(50);
+    expect(await failures(guide, documentedRuntime(guide.flat()))).toEqual([]);
+  });
+
+  it('runs the commands of the README in order', async () => {
+    const readme = fencedCommands(README);
+    expect(readme.length).toBeGreaterThan(40);
+    expect(await failures(readme, documentedRuntime(readme.flat()))).toEqual([]);
+  });
+
+  it('runs every example of every operation with --dry-run, previewing its request', async () => {
+    const examples = catalog.operations.flatMap((operation) =>
+      examplesFor(operation, catalog.schemas).map(
+        (example) => [operation, [...shellWords(example), '--dry-run']] as const,
+      ),
+    );
+    expect(examples.length).toBeGreaterThan(catalog.operations.length);
+    expect(await previewFailures(examples)).toEqual([]);
+  });
+
+  it('notices an example whose preview does not match its operation', async () => {
+    const list = catalog.operations.find((operation) => operation.operationId === 'getTasks')!;
+    const count = catalog.operations.find(
+      (operation) => operation.operationId === 'getTasksCount',
+    )!;
+    const words = ['operate', 'task', 'count', '--dry-run'];
+    expect(await previewFailures([[count, words]])).toEqual([]);
+    expect(await previewFailures([[list, words]])).toHaveLength(1);
+    const table = ['operate', 'task', 'delete', 't1', '--dry-run', '-o', 'table'];
+    const remove = catalog.operations.find((operation) => operation.operationId === 'deleteTask')!;
+    expect(await previewFailures([[remove, table]])).toEqual([]);
+  });
+
+  it('reports the command lines that fail', async () => {
+    const lines = [
+      ['operate', 'task', 'list', '--no-such-flag'],
+      ['operate', 'guide'],
+    ];
+    expect(await failures(lines, documentedRuntime([]))).toEqual([
+      `operate task list --no-such-flag: ${JSON.stringify({
+        error: {
+          code: 'USAGE',
+          exitCode: 2,
+          message: 'Unknown option "--no-such-flag"',
+          hint: 'Run "operate task list --help" for the usage.',
+        },
+      })}\n`,
+    ]);
+  });
+});

@@ -1,0 +1,772 @@
+# operate
+
+[![CI](https://github.com/Miragon/operate/actions/workflows/ci.yml/badge.svg)](https://github.com/Miragon/operate/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@miragon/operate)](https://www.npmjs.com/package/@miragon/operate)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+`operate` is a command line interface for the Camunda 7 REST API (`/engine-rest`). It works with
+[Operaton](https://operaton.org), [CIB seven](https://cibseven.org) and Camunda 7 CE/EE. It is built
+for coding agents first (Claude Code, Codex, ...), then for humans in a terminal and for shell
+scripts and CI jobs: it never prompts, prints JSON when stdout is not a terminal, reports errors as
+one JSON line on stderr and uses stable exit codes.
+
+- **The whole REST API.** Every GET, POST, PUT and DELETE operation is a command generated from the
+  OpenAPI spec: 396 commands in 52 groups, from `deployment create` to
+  `historic-job-log get-stacktrace`. The OPTIONS operations (HATEOAS link discovery) are reachable
+  with `operate api OPTIONS <path>`.
+- **JSON for agents and scripts, tables for humans.** Output format follows the terminal, with
+  `--fields` projection, `-o table` and `--pretty`.
+- **Guard rails.** `--dry-run` prints the request and a `curl` line, `delete` and `bulk` commands
+  need `--yes`, and read-only mode (flag, environment or profile) refuses every change.
+- **Self-describing.** `operate commands`, `operate describe` and `operate guide` tell an agent
+  which commands exist, what they accept and how to use them, so it never has to guess.
+- **Typed input.** Process variables with auto typing (`--var amount=250`), lenient date-time
+  input, client side body validation with "did you mean" hints, multipart uploads and pagination.
+
+## Contents
+
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Authentication](#authentication)
+- [Command structure](#command-structure)
+- [Output](#output)
+- [Errors and exit codes](#errors-and-exit-codes)
+- [Safety](#safety)
+- [Using operate from AI agents](#using-operate-from-ai-agents)
+- [Recipes](#recipes)
+- [Compatibility](#compatibility)
+- [Development](#development)
+- [License](#license)
+
+## Installation
+
+Requires Node.js >= 22.12.
+
+```sh
+npm install -g @miragon/operate
+operate --version
+```
+
+Or run it without installing:
+
+```sh
+npx @miragon/operate --help
+```
+
+## Quick start
+
+Start an engine; its REST API is served at `http://localhost:8080/engine-rest` after a few
+seconds:
+
+```sh
+docker run -d --name engine -p 8080:8080 operaton/operaton:2.1.5
+# or camunda/camunda-bpm-platform:run-7.24.0, or cibseven/cibseven:run-2.2.0
+```
+
+Check the connection. `http://localhost:8080/engine-rest` is the default, so no configuration is
+needed:
+
+```sh
+operate ping --pretty
+```
+
+```json
+{
+  "url": "http://localhost:8080/engine-rest",
+  "engine": null,
+  "reachable": true,
+  "version": "2.1.5",
+  "engines": ["default"],
+  "latencyMs": 21,
+  "auth": "none"
+}
+```
+
+Create a small process with one user task:
+
+```sh
+cat > order.bpmn <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+    xmlns:camunda="http://camunda.org/schema/1.0/bpmn" targetNamespace="https://example.com/order">
+  <bpmn:process id="order" name="Order" isExecutable="true" camunda:historyTimeToLive="30">
+    <bpmn:startEvent id="received" />
+    <bpmn:sequenceFlow id="f1" sourceRef="received" targetRef="review" />
+    <bpmn:userTask id="review" name="Review order" camunda:candidateGroups="sales" />
+    <bpmn:sequenceFlow id="f2" sourceRef="review" targetRef="done" />
+    <bpmn:endEvent id="done" />
+  </bpmn:process>
+</bpmn:definitions>
+EOF
+```
+
+Deploy it, start an instance, and work on the task:
+
+```sh
+operate deployment create order.bpmn --deployment-name order
+operate process-definition start order --business-key ORD-1001 --var amount=250
+operate task list --process-definition-key order --fields id,name,created -o table
+```
+
+```text
+id                                    name          created
+4e3d858c-c35f-11f1-80fb-aa0e0285a34c  Review order  2026-10-08T21:29:12.716+0000
+```
+
+```sh
+TASK_ID=$(operate task list --process-definition-key order --fields id | jq -r '.[0].id')
+operate task complete "$TASK_ID" --var approved=true
+```
+
+```text
+Done: POST /task/4e3d858c-c35f-11f1-80fb-aa0e0285a34c/complete → 204 No Content
+```
+
+```sh
+operate historic-process-instance list --process-definition-key order --finished --fields id,businessKey,state -o table
+```
+
+```text
+id                                    businessKey  state
+4e3d5e77-c35f-11f1-80fb-aa0e0285a34c  ORD-1001     COMPLETED
+```
+
+Where next: `operate commands` lists the API groups, `operate describe <group> <command>` explains
+a command and `operate guide` prints the usage guide.
+
+## Configuration
+
+Every setting is resolved per value with the precedence **flag > environment variable > profile >
+default**. `operate config show` prints the effective values and where each one comes from.
+
+### Global options
+
+These work on every API command, `api` and `ping`, after the command path
+(`operate task list -o table`):
+
+| Option                  | Meaning                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------ |
+| `--url <url>`           | REST API root, default `http://localhost:8080/engine-rest`                     |
+| `--engine <name>`       | Named process engine, adds `/engine/<name>` to the path                        |
+| `--profile <name>`      | Profile of the config file                                                     |
+| `--config <path>`       | Config file location                                                           |
+| `-o, --output <format>` | `json` or `table`; default: `table` on a terminal, else `json`                 |
+| `--fields <list>`       | Comma separated fields to keep, e.g. `id,name,variables.amount`; table columns |
+| `--pretty`              | Indent JSON output (default on a terminal)                                     |
+| `--dry-run`             | Print the request instead of sending it                                        |
+| `-y, --yes`             | Confirm `delete` and `bulk` operations                                         |
+| `--read-only`           | Refuse every operation that is not a read                                      |
+| `--timeout <ms>`        | Request timeout in milliseconds, default 30000                                 |
+| `-H, --header <header>` | Extra request header `Name: value`; repeatable                                 |
+| `--verbose`             | Trace requests and responses on stderr                                         |
+| `--out-file <path>`     | Write the response body to a file                                              |
+| `--show-secrets`        | Do not mask secret headers in dry-run, verbose and config output               |
+
+### Environment variables
+
+| Variable            | Meaning                                                                    |
+| ------------------- | -------------------------------------------------------------------------- |
+| `OPERATE_URL`       | REST API root                                                              |
+| `OPERATE_ENGINE`    | Named process engine                                                       |
+| `OPERATE_PROFILE`   | Profile to use instead of the default profile                              |
+| `OPERATE_CONFIG`    | Config file location; the file must exist                                  |
+| `OPERATE_OUTPUT`    | `json` or `table`                                                          |
+| `OPERATE_TIMEOUT`   | Request timeout in milliseconds                                            |
+| `OPERATE_AUTH`      | Authentication type; only `none` in this version                           |
+| `OPERATE_HEADERS`   | Extra headers `Name: value`, one per line, e.g. credentials                |
+| `OPERATE_READ_ONLY` | `1`/`true`/`yes`/`on` or `0`/`false`/`no`/`off`; anything else is an error |
+
+### Config file
+
+The config file is looked up in this order: `--config <path>`, `OPERATE_CONFIG`,
+`$XDG_CONFIG_HOME/operate/config.json`, `~/.config/operate/config.json` (Windows:
+`%APPDATA%\operate\config.json`). `operate config path` prints the location. A file named with
+`--config` or `OPERATE_CONFIG` must exist (`operate config set` creates it), so a typo never drops a
+profile and its read-only setting silently. `operate` writes the file with mode `0600` and
+validates every value before storing it; you can also edit it by hand:
+
+```json
+{
+  "defaultProfile": "local",
+  "profiles": {
+    "local": {
+      "url": "http://localhost:8080/engine-rest",
+      "engine": "default",
+      "auth": { "type": "none" },
+      "output": "table",
+      "timeout": 10000
+    },
+    "prod": {
+      "url": "https://camunda.example.com/engine-rest",
+      "headers": { "Authorization": "Bearer eyJhbGciOi..." },
+      "readOnly": true
+    }
+  }
+}
+```
+
+Profile keys: `url`, `engine`, `auth`, `output`, `timeout`, `headers`, `readOnly`. URLs with
+credentials (`https://user:pass@host`) or a query string are rejected, and so are header values
+with control characters and connection headers (`Connection`, `Transfer-Encoding`, ...).
+
+### Profiles
+
+```sh
+operate config set local --url http://localhost:8080/engine-rest --default
+operate config set prod --url https://camunda.example.com/engine-rest --read-only
+operate config list
+operate config show --profile prod
+operate config use prod
+operate ping --profile local
+operate config unset prod readOnly
+operate config delete prod
+```
+
+- `config set <profile>` creates or updates a profile; only the given values change
+  (`--url`, `--engine`, `--auth`, `--output`, `--timeout`, `-H/--header`, `--read-only`,
+  `--no-read-only`, `--default`). The first profile becomes the default. Here `--output` is the
+  output format stored in the profile; `-o <format>` chooses how the profile is printed, as
+  `-o/--output` does for every other config command.
+- `config use <profile>` makes a profile the default; `--profile` or `OPERATE_PROFILE` pick another
+  one per call.
+- `config show` accepts the global configuration flags, so you can see what a combination resolves
+  to. Its `-o` only formats the output: the `output` row shows what an operation command resolves
+  without it (`OPERATE_OUTPUT`, the profile or the default):
+
+```text
+$ operate config show --profile prod -o table
+Config file: /home/me/.config/operate/config.json
+Profile: prod
+
+KEY       VALUE                                    SOURCE
+url       https://camunda.example.com/engine-rest  profile
+engine                                             default
+auth      none                                     default
+output                                             default
+timeout   30000                                    default
+headers   {"Authorization":"Bearer ***"}           profile
+readOnly  true                                     profile
+```
+
+## Authentication
+
+Version 1 sends no credentials of its own (`auth: none`). Planned:
+
+- Basic auth: [#1](https://github.com/Miragon/operate/issues/1)
+- OAuth 2.0 authorization code flow with PKCE: [#2](https://github.com/Miragon/operate/issues/2)
+
+Until then, pass the header yourself: per call with `-H`, in the environment with
+`OPERATE_HEADERS` (keeps the credential out of the command line and shell history), or stored in a
+profile. Headers merge per name: profile, then `OPERATE_HEADERS`, then `-H`. `Authorization` and
+other secret headers (cookies, names containing `token`, `secret`, `password`, `api-key`) are
+masked as `***` in dry-run, verbose and config output unless `--show-secrets` is given.
+
+```sh
+operate task list -H 'Authorization: Basic ZGVtbzpkZW1v'
+export OPERATE_HEADERS='Authorization: Bearer eyJhbGciOi...'
+operate config set prod --header 'Authorization: Bearer eyJhbGciOi...'
+```
+
+An HTTP 401 says which case applies: without an `Authorization` header the hint shows these ways to
+send credentials, with one it says the engine rejected them.
+
+## Command structure
+
+```text
+operate <group> <command> [path-args...] [options] [global options]
+operate commands [group] [--search <text>] [--effect <effect>]
+operate describe <group> [command]  |  operate describe <operationId>
+operate api <METHOD> <path> [--query key=value]... [--body <json|@file|->]
+operate ping
+operate guide
+operate config path | show | list | set | unset | use | delete
+```
+
+### Names
+
+- **Group**: the kebab-case OpenAPI tag (`process-instance`, `historic-task-instance`, ...).
+- **Command**: the operationId without the tag noun: `getProcessInstances` →
+  `process-instance list`, `startProcessInstanceByKey` → `process-definition start`. The
+  kebab-case operationId is always an alias (`operate task get-tasks` = `operate task list`), and
+  `operate describe getTasks` works too. Collections are `list`, single resources `get <id>`;
+  every command has a summary that is unique in its group (`operate commands <group>`).
+- **Effect**: every command is a `read`, `write`, `delete` or `bulk` operation. `operate commands`
+  and `operate describe` show it; it drives the [safety](#safety) checks.
+
+### Arguments and options
+
+- **Path parameters** are positional arguments in path order:
+  `operate process-instance get-variable <id> <var-name>`.
+- **Query parameters and body properties** are kebab-case flags: `businessKey` →
+  `--business-key`. Integers, numbers and enums are validated before sending.
+- **Booleans**: `--with-incident` sends `true`, `--no-with-incident` sends `false`. Filters the
+  engine only applies when true (`--active`, `--unfinished`, ...) have no `--no-` form, and
+  parameters whose name starts with "no" are a single flag (`job list --no-retries-left`).
+- **Arrays** are comma separated or repeated:
+  `--process-instance-ids a,b --process-instance-ids c` → `["a","b","c"]`.
+
+### Variables
+
+Variable maps are repeatable `--var name=value` flags. Values are auto typed:
+
+| Input           | Type                                         |
+| --------------- | -------------------------------------------- |
+| `true`, `false` | `Boolean`                                    |
+| integer         | `Integer`, or `Long` outside the int32 range |
+| decimal         | `Double`                                     |
+| `null`          | `Null`                                       |
+| anything else   | `String`                                     |
+
+Force a type with `name:Type=value`, where `Type` is one of `String`, `Integer`, `Short`, `Long`,
+`Double`, `Boolean`, `Date`, `Json`, `Xml`, `Null`. `Date` values accept the
+[date-time forms](#date-time-values).
+
+```sh
+operate process-definition start invoice --var amount=250 --var zip:String=01234 --var due:Date=2024-06-01T12:00+02:00 --var 'order:Json={"id":42}' --dry-run
+```
+
+sends
+
+```json
+{
+  "variables": {
+    "amount": { "value": 250, "type": "Integer" },
+    "zip": { "value": "01234", "type": "String" },
+    "due": { "value": "2024-06-01T12:00:00.000+0200", "type": "Date" },
+    "order": { "value": "{\"id\":42}", "type": "Json" }
+  }
+}
+```
+
+Other variable maps have their own flags with the same syntax: `--local-var`, `--correlation-key`,
+`--local-correlation-key`, `--triggered-scope-var`. Commands that set a single variable
+(`process-instance set-variable`, `task-variable set`, ...) take `--value <raw>` plus an optional
+`--type <Type>`; without `--type` the value is auto typed like `--var`. Integers beyond 2^53
+(`Long` values up to 9223372036854775807) are sent and printed exactly.
+
+```sh
+operate process-instance set-variable $INSTANCE_ID amount --value 300
+operate process-instance set-variable $INSTANCE_ID dueDate --value 2024-06-01T12:00 --type Date
+```
+
+### Request bodies
+
+- `--body <json>`, `--body @file.json` or `--body -` (stdin) is the base JSON body. Flags are
+  merged on top: field flags override properties, `--var` entries win per variable name. Use it
+  for nested structures such as start instructions, topics or sorting.
+- The final body is validated against the API schema before it is sent; `--no-validate` skips the
+  check (e.g. for engine extensions the spec does not know):
+
+```text
+$ operate process-definition start invoice --body '{"businesKey":"INV-1"}'
+{"error":{"code":"VALIDATION","exitCode":2,"message":"Invalid request body: $: unknown property \"businesKey\", did you mean \"businessKey\"?","hint":"Run `operate describe process-definition start` to see the body schema, or pass --no-validate to skip this check.","data":[{"path":"$","message":"unknown property \"businesKey\", did you mean \"businessKey\"?"}]}}
+```
+
+```sh
+operate process-definition start invoice --body @start.json --business-key INV-1002
+echo '{"businessKey":"INV-1003"}' | operate process-definition start invoice --body -
+```
+
+### Files (multipart)
+
+- `deployment create` takes the resource files as arguments. The resource name is the file name,
+  or the path relative to `--base-dir <dir>`:
+
+```sh
+operate deployment create invoice.bpmn invoice-approval.dmn --deployment-name invoice
+operate deployment create bpmn/invoice.bpmn forms/approve.form --base-dir . --deploy-changed-only
+```
+
+- Binary and file variables upload a file with `--data <path>`:
+
+```sh
+operate process-instance set-variable-binary $INSTANCE_ID contract --data contract.pdf --value-type File
+operate process-instance get-variable-binary $INSTANCE_ID contract --out-file contract.pdf
+```
+
+### Pagination
+
+List commands with `--max-results` also take `--all`: `operate` fetches page after page
+(page size `--max-results`, default 500, starting at `--first-result`) and prints one list.
+
+```sh
+operate process-instance list --process-definition-key invoice --all --fields id,businessKey
+```
+
+### Date-time values
+
+Options shown as `<date-time>` in `--help` and `Date` variables accept several forms and are
+converted to the engine format `yyyy-MM-dd'T'HH:mm:ss.SSSZ`. Times without an offset are UTC;
+invalid dates (`2024-02-30`) are usage errors. This includes the date filters of `task list` and
+`task count` (`--due-date`, `--created-after`, `--follow-up-before`, ...), which the OpenAPI spec
+does not mark as dates; their `...-expression` variants take an expression and stay unchanged.
+
+| Input                          | Sent                           |
+| ------------------------------ | ------------------------------ |
+| `2024-05-01`                   | `2024-05-01T00:00:00.000+0000` |
+| `2024-05-01T10:00`             | `2024-05-01T10:00:00.000+0000` |
+| `2024-05-01T10:00:00Z`         | `2024-05-01T10:00:00.000+0000` |
+| `2024-05-01T10:00:00.5+02:00`  | `2024-05-01T10:00:00.500+0200` |
+| `2024-05-01T10:00:00.000+0200` | unchanged                      |
+
+## Output
+
+- **Format**: JSON when stdout is not a terminal, a table on a terminal. `-o json|table`,
+  `OPERATE_OUTPUT` or the profile setting override it.
+- **JSON** is exactly the engine response: compact when piped, indented on a terminal or with
+  `--pretty`, always ending with a newline.
+- **`--fields id,name,variables.amount`** keeps only these properties (of every element of a
+  list); in table format they are the columns. A field that matches nothing gets a warning on
+  stderr listing the existing fields. Count responses print a plain number as a table.
+- **Tables** without `--fields` show the identifying columns first (`id`, `key`, `name`,
+  `version`, `businessKey`, `incidentType`, ...) and drop trailing columns to fit the terminal
+  (120 characters when piped).
+- **XML commands** (`process-definition xml`, `decision-definition xml`, ...) print the raw XML
+  unless `-o json` or `--fields` is given.
+- **Text responses** (`job get-stacktrace`, ...) print raw. **Binary responses** (diagrams,
+  files, binary variables) print raw bytes when piped and need `--out-file` on a terminal.
+- **`--out-file <path>`** writes the response body to a file exactly as received (projected with
+  `--fields`; XML commands write the XML) and prints a summary:
+  `{"outFile":"/tmp/order.xml","bytes":644,"contentType":"application/xml"}`.
+- **Terminals** never receive raw control characters from response data: escape sequences in text
+  responses are replaced by `�` on a terminal, pipes and files get the bytes unchanged.
+- **No content** (HTTP 204): stdout stays empty, stderr gets
+  `Done: <METHOD> <path> → 204 No Content`; the path is relative to the REST root (with the
+  query), as `operate api` takes it: `Done: POST /task/<id>/complete → 204 No Content`.
+- **`--dry-run`** prints the request instead of sending it; `-o table` prints only the `curl`
+  command line:
+
+```text
+$ operate process-definition start invoice --var amount=250 --dry-run
+{"method":"POST","url":"http://localhost:8080/engine-rest/process-definition/key/invoice/start","headers":{"Accept":"application/json","Content-Type":"application/json"},"body":{"variables":{"amount":{"value":250,"type":"Integer"}}},"curl":"curl -X POST 'http://localhost:8080/engine-rest/process-definition/key/invoice/start' -H 'Accept: application/json' -H 'Content-Type: application/json' --data-raw '{\"variables\":{\"amount\":{\"value\":250,\"type\":\"Integer\"}}}'"}
+
+$ operate task list --assignee demo --dry-run -o table
+curl 'http://localhost:8080/engine-rest/task?assignee=demo' -H 'Accept: application/json'
+```
+
+- **`--verbose`** traces the request and response on stderr (secret headers masked):
+
+```text
+$ operate process-definition list --key order --fields id,key,version --verbose
+> GET http://localhost:8080/engine-rest/process-definition?key=order
+> Accept: application/json
+< 200 OK (22 ms, 349 bytes)
+[{"id":"order:1:4e24cd66-c35f-11f1-80fb-aa0e0285a34c","key":"order","version":1}]
+```
+
+## Errors and exit codes
+
+Errors go to stderr as one JSON line (`-o table` or a terminal prints readable text). `hint`
+names the fix (for unknown commands, options and body properties it starts with "Did you mean
+...?"); `engineMessage` carries the engine's own explanation, also when the engine answers with
+plain text (such as JSON deserialization errors).
+
+```text
+$ operate process-instance get abc
+{"error":{"code":"NOT_FOUND","exitCode":5,"message":"HTTP 404 Not Found: Process instance with id abc does not exist","status":404,"engineType":"InvalidRequestException","engineMessage":"Process instance with id abc does not exist","hint":"Check the id or key. List the existing ones with `operate process-instance list`.","request":{"method":"GET","url":"http://localhost:8080/engine-rest/process-instance/abc"}}}
+
+$ operate process-instance get abc -o table
+Error: HTTP 404 Not Found: Process instance with id abc does not exist
+  Engine: InvalidRequestException
+  Request: GET http://localhost:8080/engine-rest/process-instance/abc
+  Hint: Check the id or key. List the existing ones with `operate process-instance list`.
+```
+
+Fields: `code`, `exitCode`, `message`, and when available `status`, `engineType`,
+`engineMessage`, `engineCode`, `hint`, `request` (`method`, `url`) and `data` (e.g. the list of
+validation problems).
+
+| Exit | Meaning                                                                        |
+| ---- | ------------------------------------------------------------------------------ |
+| 0    | success                                                                        |
+| 1    | internal error                                                                 |
+| 2    | usage error, invalid body (`VALIDATION`), `READ_ONLY`, `CONFIRMATION_REQUIRED` |
+| 3    | configuration error, also an HTTP redirect (`HTTP_REDIRECT`)                   |
+| 4    | authentication or authorization failed (401, 403)                              |
+| 5    | not found (404)                                                                |
+| 6    | other 4xx: the engine rejected the request                                     |
+| 7    | engine error (5xx)                                                             |
+| 8    | network error or timeout                                                       |
+
+Camunda 7 engines report many rule violations as HTTP 500 (exit 7), e.g. a task that is already
+completed or a deployment that still has running instances. Read `engineMessage` and fix the cause
+instead of retrying. A query value the engine cannot read (`maxResults=abc`) comes back as 404
+`QueryParamException`; `operate` reports it as exit 6, not as a missing resource.
+
+`operate` never follows redirects: a write redirected to a login page must not look successful,
+and credential headers must not travel to another host. A 3xx answer is the error `HTTP_REDIRECT`
+naming the target; point `--url` at the REST API root itself (e.g. `https://`).
+
+## Safety
+
+- **`--dry-run`** prints the request without sending it. It works in read-only mode too.
+- **`--yes`**: commands with effect `delete` (delete a resource, resolve an incident) or `bulk`
+  (batches, query based updates, all versions of a key) refuse to run without it:
+
+```text
+$ operate process-instance delete abc
+{"error":{"code":"CONFIRMATION_REQUIRED","exitCode":2,"message":"`operate process-instance delete` is a delete operation and needs confirmation","hint":"Re-run with --yes to confirm, or --dry-run to preview."}}
+```
+
+- **Read-only mode**: `--read-only`, `OPERATE_READ_ONLY=1` or a profile created with `--read-only`
+  refuse every command whose effect is not `read` (exit 2, `READ_ONLY`). Use read-only profiles for
+  production engines:
+
+```sh
+operate config set prod --url https://camunda.example.com/engine-rest --read-only
+operate process-instance list --profile prod --with-incident
+```
+
+- `operate commands --effect delete` and `operate commands --effect bulk` list the guarded
+  commands.
+- `operate api` normalizes the path before it checks the effect and sends the request
+  (`/process-instance/./delete/` is `/process-instance/delete`, a bulk operation that needs `--yes`);
+  paths with `#` or `;` are refused.
+
+## Using operate from AI agents
+
+`operate` is designed to be driven by coding agents. Everything an agent needs is in the CLI
+itself:
+
+- `operate guide` prints a concise Markdown usage guide (workflow, conventions, output, exit codes,
+  safety, recipes). Point your agent at it, e.g. in `AGENTS.md` or `CLAUDE.md`: "Run
+  `operate guide` before using `operate`."
+- `operate commands`, `operate commands <group>` and `operate commands --search <words>` list
+  commands with method, path, effect and summary.
+- `operate describe <group> <command>` returns arguments, options, the request body schema,
+  responses and examples as JSON (readable text on a terminal or with `-o table`).
+- `--dry-run` previews a write before it is sent.
+- `operate api <METHOD> <path>` sends a raw request relative to the REST root with the same
+  guards, output and errors, for anything the agent prefers to write by hand.
+
+A typical agent workflow is discover, describe, preview, run:
+
+```sh
+operate commands --search 'process instance'
+operate describe process-definition start
+operate process-definition start invoice --var amount=250 --dry-run
+operate process-definition start invoice --var amount=250
+```
+
+### Claude Code skill
+
+[`skills/operate/SKILL.md`](skills/operate/SKILL.md) is the guide packaged as a Claude Code
+skill (YAML frontmatter plus the text of `operate guide`); it ships with the npm package.
+Install it for all your projects or for one project:
+
+```sh
+mkdir -p ~/.claude/skills/operate
+cp "$(npm root -g)/@miragon/operate/skills/operate/SKILL.md" ~/.claude/skills/operate/
+
+mkdir -p .claude/skills/operate
+curl -fsSL https://raw.githubusercontent.com/Miragon/operate/main/skills/operate/SKILL.md -o .claude/skills/operate/SKILL.md
+```
+
+Claude Code then loads it whenever a task needs to read or change the state of a Camunda 7,
+Operaton or CIB seven engine.
+
+## Recipes
+
+The recipes use the variables `$INSTANCE_ID`, `$TASK_ID`, ... for ids from earlier commands.
+
+### Deploy
+
+```sh
+operate deployment create invoice.bpmn invoice-approval.dmn --deployment-name invoice
+operate deployment create bpmn/invoice.bpmn forms/approve.form --base-dir . --deploy-changed-only
+operate process-definition list --key invoice --latest-version
+operate process-definition xml invoice
+```
+
+### Start with variables
+
+```sh
+operate process-definition start invoice --business-key INV-1001 --var amount=250 --var approved=false
+operate process-definition start invoice --var 'order:Json={"id":42}' --var due:Date=2024-06-01
+operate process-instance list --process-definition-key invoice --business-key INV-1001
+operate process-instance get-variables $INSTANCE_ID
+```
+
+### Find and complete user tasks
+
+```sh
+operate task list --candidate-group accounting --unassigned
+operate task list --process-instance-id $INSTANCE_ID --fields id,name,assignee
+operate task claim $TASK_ID --user-id demo
+operate task complete $TASK_ID --var approved=true
+```
+
+### External task worker
+
+The worker id must match the one that locked the task.
+
+```sh
+operate external-task fetch-and-lock --worker-id worker-1 --max-tasks 5 --body '{"topics":[{"topicName":"send-invoice","lockDuration":60000}]}'
+operate external-task complete $EXTERNAL_TASK_ID --worker-id worker-1 --var invoiceSent=true
+operate external-task handle-failure $EXTERNAL_TASK_ID --worker-id worker-1 --error-message 'SMTP timeout' --retries 2 --retry-timeout 60000
+operate external-task handle-bpmn-error $EXTERNAL_TASK_ID --worker-id worker-1 --error-code INVALID_ADDRESS
+```
+
+### Incidents and job retries
+
+Failed job and external task incidents disappear when retries are set again; `incident resolve`
+only resolves custom incidents.
+
+```sh
+operate incident list --process-instance-id $INSTANCE_ID --fields id,incidentType,activityId,incidentMessage
+operate job list --process-instance-id $INSTANCE_ID --with-exception
+operate job get-stacktrace $JOB_ID
+operate job set-retries $JOB_ID --retries 1
+operate external-task set-retries $EXTERNAL_TASK_ID --retries 1
+operate incident set-annotation $INCIDENT_ID --annotation 'Mail server fixed'
+```
+
+### Change running instances
+
+```sh
+operate process-instance modify $INSTANCE_ID --body '{"instructions":[{"type":"startBeforeActivity","activityId":"reviewInvoice"}]}' --dry-run
+operate process-instance suspend $INSTANCE_ID
+operate process-instance activate $INSTANCE_ID
+operate process-instance delete $INSTANCE_ID --yes
+```
+
+### History
+
+```sh
+operate historic-process-instance list --process-definition-key invoice --finished --started-after 2024-05-01
+operate historic-activity-instance list --process-instance-id $INSTANCE_ID --sort-by startTime --sort-order asc
+operate historic-variable-instance list --process-instance-id $INSTANCE_ID
+```
+
+### Messages and signals
+
+```sh
+operate message correlate --message-name PaymentReceived --business-key INV-1001 --var paid=true
+operate message correlate --message-name PaymentReceived --correlation-key orderId=A-17 --result-enabled
+operate signal throw --name invoice-cancelled
+```
+
+### Decisions
+
+```sh
+operate decision-definition evaluate-by-key invoice-approval --var amount=250 --var category=travel
+operate decision-definition list --key invoice-approval --latest-version
+```
+
+### Raw requests
+
+```sh
+operate api GET /process-instance/count --query processDefinitionKey=invoice
+operate api POST /process-instance --body '{"processDefinitionKey":"invoice","withIncident":true}'
+operate api DELETE /process-instance/$INSTANCE_ID --yes
+```
+
+## Compatibility
+
+`operate` targets the Camunda 7 REST API as implemented by:
+
+| Engine    | Tested in CI with                         |
+| --------- | ----------------------------------------- |
+| Operaton  | `operaton/operaton:2.1.5`                 |
+| CIB seven | `cibseven/cibseven:run-2.2.0`             |
+| Camunda 7 | `camunda/camunda-bpm-platform:run-7.24.0` |
+
+The integration tests start each engine with Testcontainers and run the built CLI against it.
+Commands for features an engine does not offer fail with the engine's error. Property names that
+differ between the engines are both accepted (`operatonFormRef` for Operaton, `camundaFormRef` for
+Camunda 7 and CIB seven). Camunda 8 is not supported (it has a different API).
+
+## Development
+
+Requires Node.js 24 (`.nvmrc`; the package supports >= 22.12) and Docker for the integration
+tests.
+
+```sh
+npm ci
+npx tsx src/bin/operate.ts --help
+```
+
+| Script                     | What it does                                                                       |
+| -------------------------- | ---------------------------------------------------------------------------------- |
+| `npm run build`            | Bundle `dist/operate.js` with tsdown                                               |
+| `npm run generate`         | Regenerate `src/generated/catalog.json` from the spec (`generate:check` for drift) |
+| `npm run check`            | Every fast gate: typecheck, lint, format, architecture, knip, catalog, coverage    |
+| `npm test`                 | Unit and property tests (vitest)                                                   |
+| `npm run test:coverage`    | Unit tests with v8 coverage thresholds                                             |
+| `npm run test:mutation`    | Mutation testing with StrykerJS                                                    |
+| `npm run test:integration` | Build, then run the Testcontainers tests against real engines                      |
+
+`test:integration` runs all engines; `OPERATE_IT_ENGINES=operaton,camunda` selects a comma
+separated subset (`operaton`, `cibseven`, `camunda`), and `OPERATE_IT_SKIP_PACK=1` skips the
+packed-tarball smoke test (`npm pack`, install, run).
+
+### Catalog generation
+
+The command surface is data, not hand-written code:
+
+1. `spec/operaton-rest-api.json` is the vendored OpenAPI spec of the Camunda 7 / Operaton REST API.
+2. `spec/patches.json` corrects it with RFC 6902 JSON patches (each with a `test` guard and a
+   `reason`).
+3. `npm run generate` (`scripts/generate-catalog.ts`, `scripts/catalog/*`) turns it into
+   `src/generated/catalog.json`: operations with group, command name, aliases, effect, parameters,
+   body and response descriptions, plus the referenced schemas. Naming overrides live in
+   `scripts/catalog/overrides.ts`, summaries in `scripts/catalog/summaries.ts`, effects in
+   `scripts/catalog/effects.ts`. The generator fails on unresolvable `$ref`s, unknown HTTP methods
+   and command names or summaries that are not unique in their group.
+4. The catalog is committed; `npm run generate:check` (part of `npm run check`) fails when it is
+   out of date.
+
+At runtime the same catalog drives command registration, help, `describe`, input building and
+body validation, so help, docs and behavior cannot drift apart. Unit tests also run every command
+line of the guide and this README and every example against the CLI, and parse every query flag
+of every operation through the real program.
+
+### Releasing
+
+1. The GitHub repository must be public: npm provenance (`npm publish --provenance`) refuses
+   private source repositories, and the CLI hints and this README link to its issues. The release
+   workflow fails early for a private repository.
+2. Bump `version` in `package.json`, run `npm run check` and `npm run test:integration`.
+3. Publish a GitHub release whose tag is `v<version>`; the Release workflow publishes to npm
+   (prereleases with the `next` dist-tag).
+
+### Architecture
+
+```text
+src/bin/        entry point and the Node runtime (fs, stdio, fetch, env)
+src/cli/        commander wiring and the utility commands; the only layer that imports commander
+src/operation/  input building, variables, dates, guards, request building, execution, pagination
+src/docs/       commands, describe, examples and the agent guide (pure)
+src/catalog/    catalog access, schema helpers, body validation (pure)
+src/config/     config resolution and profile editing (pure), file store
+src/auth/       auth providers (none)
+src/http/       fetch based HTTP client and error mapping
+src/output/     JSON, tables, field projection, errors, secret masking (pure)
+scripts/        catalog generator
+test/           fakes for unit tests, Testcontainers integration tests
+```
+
+dependency-cruiser enforces the layering: no cycles or orphans, only `src/bin` imports `src/cli`,
+only `src/cli` imports commander, the pure layers import no Node builtins, `http` does not depend
+on `config`, `cli` or `operation`, and the generated catalog is only read through
+`src/catalog/catalog.ts`.
+
+### Quality gates
+
+- **TypeScript** strict, **ESLint** with typescript-eslint `strictTypeChecked` and size budgets
+  (complexity 10, 300 lines per file, 60 lines per function, 20 statements, depth 3, 4
+  parameters), **Prettier**.
+- **dependency-cruiser** for the architecture rules, **knip** for unused files, exports and
+  dependencies.
+- **vitest** with v8 coverage thresholds: at least 90 % of lines, statements and functions and
+  85 % of branches.
+- **fast-check** property tests for naming, patches, variable parsing, dates, query building,
+  projection, table width, config precedence, body validation and secret masking.
+- **StrykerJS** mutation testing (break threshold 65 %) on `main`, weekly and on demand.
+- **Testcontainers** integration tests against the three engines plus a packed-tarball smoke test,
+  on every pull request.
+
+## License
+
+[MIT](LICENSE) © Miragon GmbH
