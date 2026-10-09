@@ -3,23 +3,27 @@
 import type { ConfigView } from '../../config/edit.js';
 import { findProfile } from '../../config/resolve.js';
 import type { ConfigFile } from '../../config/types.js';
-import { maskHeaders } from '../../output/secrets.js';
+import { MASK, maskHeaders } from '../../output/secrets.js';
 
-/** A stored profile with its name and default flag; header values masked. */
+/** A stored profile with its name and default flag; header values and the password masked. */
 export function profileView(file: ConfigFile, name: string): Record<string, unknown> {
   const profile = findProfile(file, name) ?? {};
   const headers =
     profile.headers === undefined ? {} : { headers: maskHeaders(profile.headers, false) };
-  return { name, default: file.defaultProfile === name, ...profile, ...headers };
+  const auth =
+    profile.auth?.password === undefined ? {} : { auth: { ...profile.auth, password: MASK } };
+  return { name, default: file.defaultProfile === name, ...profile, ...headers, ...auth };
 }
 
-/** The `config show` view with header values masked unless `showSecrets`. */
+/** The `config show` view with header values and the password masked unless `showSecrets`. */
 export function maskedView(view: ConfigView, showSecrets: boolean): ConfigView {
-  const { headers } = view.values;
+  const { headers, password } = view.values;
+  const hidden = showSecrets || password.value === null ? password.value : MASK;
   return {
     ...view,
     values: {
       ...view.values,
+      password: { ...password, value: hidden },
       headers: { ...headers, value: maskHeaders(headers.value, showSecrets) },
     },
   };

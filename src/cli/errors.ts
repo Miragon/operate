@@ -14,6 +14,7 @@ import type { CliState } from './context.js';
 import { commandPath } from './help.js';
 import { envFormat, profileFormat, terminalFormat } from './output-format.js';
 import { didYouMean } from './commands/suggest.js';
+import { authFlagFor, mentionsSecret, optionName, secretHint, stdinHint } from './secret-flags.js';
 
 /** commander exits that are answers, not errors. */
 const DISPLAY_CODES: ReadonlySet<string> = new Set([
@@ -52,41 +53,77 @@ function unknownName(message: string): string {
   return /'([^']*)'/.exec(message)?.[1] ?? '';
 }
 
-/** Names and aliases of the subcommands, or the long flags of the options of `command`. */
-function knownNames(command: Command, code: string): string[] {
-  if (code === 'commander.unknownCommand') {
-    return command.commands.flatMap((sub) => [sub.name(), ...sub.aliases()]);
-  }
+/** Names and aliases of the subcommands of `command`. */
+function subcommandNames(command: Command): string[] {
+  return command.commands.flatMap((sub) => [sub.name(), ...sub.aliases()]);
+}
+
+/** The long flags of the options of `command`. */
+function optionNames(command: Command): string[] {
   return command.options.flatMap((option) => (option.long === undefined ? [] : [option.long]));
 }
 
-function helpHint(command: Command, exit: CommanderError): string {
-  const help = `Run "${commandPath(command)} --help"`;
-  if (exit.code !== 'commander.unknownCommand') return `${help} for the usage.`;
-  const word = command.args[0] ?? '';
-  return `${help} for the commands, or search all commands with "operate commands --search ${word}".`;
+function usageHint(command: Command): string {
+  return `Run "${commandPath(command)} --help" for the usage.`;
 }
 
-const UNKNOWN_CODES: ReadonlySet<string> = new Set([
-  'commander.unknownCommand',
-  'commander.unknownOption',
-]);
+function commandsHint(command: Command): string {
+  const word = command.args[0] ?? '';
+  return `Run "${commandPath(command)} --help" for the commands, or search all commands with "operate commands --search ${word}".`;
+}
+
+function capitalized(text: string): string {
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+}
+
+/**
+ * Too many arguments. Next to an option about a secret the extra values are left out: the most
+ * likely one is a password given to `--auth-password-stdin`, which takes no value.
+ */
+function excessArguments(text: string, command: Command, argv: readonly string[]): OperateError {
+  const hint = `${stdinHint(argv)}${usageHint(command)}`;
+  if (!mentionsSecret(argv)) return usageError(capitalized(text), hint);
+  return usageError(capitalized(text.replace(/: .*/s, '.')), hint);
+}
+
+/**
+ * An unknown option, without the value of `--name=value` (it may be a password). A known option
+ * with a value is a flag that takes none (`--dry-run=x`, `--auth-password-stdin=<password>`).
+ * Suggestions: the `--auth-*` flag of a renamed name (`--username`), then close spellings.
+ */
+function unknownOption(text: string, command: Command): OperateError {
+  const name = optionName(unknownName(text));
+  const known = optionNames(command);
+  const help = usageHint(command);
+  if (known.includes(name)) {
+    return usageError(`Option "${name}" takes no value`, `${secretHint(name)}${help}`);
+  }
+  const renamed = authFlagFor(name, known);
+  const suggestions = didYouMean([...new Set([...renamed, ...closeNames(name, known)])]);
+  const secret = renamed.length > 0 ? '' : secretHint(name);
+  return usageError(`Unknown option "${name}"`, `${suggestions}${secret}${help}`);
+}
 
 /**
  * commander's message without its `error: ` prefix and capitalized. Unknown commands and options
  * read `Unknown command "tsk"`; their suggestions (the same `closeNames` rule as everywhere) go
- * into the hint, like the suggestions of `commands` and `describe`.
+ * into the hint, like the suggestions of `commands` and `describe`. `argv` tells whether the
+ * command line has an option about a secret.
  */
-export function commanderUsageError(error: CommandExit): OperateError {
+export function commanderUsageError(
+  error: CommandExit,
+  argv: readonly string[] = [],
+): OperateError {
   const { exit, command } = error;
   const text = exit.message.replace(/^error: /, '').replace(/\n\(Did you mean[^)]*\)$/, '');
-  if (!UNKNOWN_CODES.has(exit.code)) {
-    return usageError(`${text.charAt(0).toUpperCase()}${text.slice(1)}`, helpHint(command, exit));
+  if (exit.code === 'commander.excessArguments') return excessArguments(text, command, argv);
+  if (exit.code === 'commander.unknownOption') return unknownOption(text, command);
+  if (exit.code !== 'commander.unknownCommand') {
+    return usageError(capitalized(text), usageHint(command));
   }
   const name = unknownName(text);
-  const kind = exit.code === 'commander.unknownCommand' ? 'command' : 'option';
-  const suggestions = didYouMean(closeNames(name, knownNames(command, exit.code)));
-  return usageError(`Unknown ${kind} "${name}"`, `${suggestions}${helpHint(command, exit)}`);
+  const suggestions = didYouMean(closeNames(name, subcommandNames(command)));
+  return usageError(`Unknown command "${name}"`, `${suggestions}${commandsHint(command)}`);
 }
 
 /**
@@ -116,7 +153,7 @@ export async function reportError(
 ): Promise<number> {
   if (isDisplayExit(error)) return 0;
   const operateError =
-    error instanceof CommandExit ? commanderUsageError(error) : toOperateError(error);
+    error instanceof CommandExit ? commanderUsageError(error, argv) : toOperateError(error);
   const format = await errorFormat(argv, runtime, state);
   const text = renderError(operateError, format, verboseRequested(argv));
   runtime.stderr.write(runtime.stderr.isTTY ? terminalSafe(text) : text);

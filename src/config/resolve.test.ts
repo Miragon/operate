@@ -20,7 +20,6 @@ import {
   resolveConfig,
   redactUrl,
   selectProfile,
-  validateAuth,
   validateEngine,
   validateOutput,
   validateUrl,
@@ -122,7 +121,7 @@ describe('resolveConfig precedence', () => {
       profile: 'p',
       url: 'http://profile:8080/engine-rest',
       engine: 'profile-engine',
-      auth: { type: 'none' },
+      auth: { type: 'none', off: 'Basic auth is switched off by the auth.type of profile "p"' },
       output: 'table',
       timeoutMs: 3000,
       headers: { 'X-Profile': 'p' },
@@ -246,8 +245,11 @@ describe('resolveConfig precedence', () => {
     expect(failure(() => resolveConfig({}, { OPERATE_TIMEOUT: 'soon' }, undefined)).message).toBe(
       'Timeout must be a positive number of milliseconds, got "soon"',
     );
-    expect(failure(() => resolveConfig({}, { OPERATE_AUTH: 'basic' }, undefined)).message).toBe(
-      'Unsupported auth type "basic"',
+    expect(failure(() => resolveConfig({}, { OPERATE_AUTH: 'oauth' }, undefined)).message).toBe(
+      'Unsupported auth type "oauth"',
+    );
+    expect(failure(() => resolveConfig({ auth: 'Basic' }, {}, undefined)).message).toBe(
+      'Unsupported auth type "Basic"',
     );
     expect(failure(() => resolveConfig({}, { OPERATE_URL: 'nope' }, undefined)).message).toBe(
       'Invalid engine URL "nope"',
@@ -479,7 +481,7 @@ describe('validateUrl', () => {
       expect(error.message).toBe('Engine URL must not contain credentials');
       expect(error.message).not.toContain('secret');
       expect(error.details.hint).toBe(
-        'Remove the user info from the URL. Basic auth is planned, see https://github.com/Miragon/operate/issues/1.',
+        'Remove the user info from the URL and use Basic auth: --auth basic --auth-user <name> with the password from --auth-password-stdin or OPERATE_PASSWORD.',
       );
     },
   );
@@ -624,6 +626,9 @@ describe('parseHeader', () => {
     (name) => {
       const error = failure(() => parseHeader(`${name}: x`));
       expect(error.message).toBe(`Header "${name}" cannot be set: the HTTP client manages it`);
+      expect(error.details.hint).toBe(
+        'Remove it. Not allowed: connection, content-length, expect, keep-alive, transfer-encoding, upgrade.',
+      );
       expect(isHeaderName(name)).toBe(false);
     },
   );
@@ -680,24 +685,6 @@ describe('parseHeader', () => {
     expect(parseHeaders(['A: 1', 'B: 2', 'a: 3'])).toEqual({ B: '2', a: '3' });
     expect(parseHeaders([])).toEqual({});
   });
-});
-
-describe('validateAuth', () => {
-  it('accepts none', () => {
-    expect(validateAuth('none')).toEqual({ type: 'none' });
-  });
-
-  it.each(['basic', 'oauth', 'NONE', ''])(
-    'rejects %j and links the planned auth issues',
-    (type) => {
-      const error = failure(() => validateAuth(type));
-      expect(error.code).toBe('CONFIG');
-      expect(error.message).toBe(`Unsupported auth type "${type}"`);
-      expect(error.details.hint).toBe(
-        'Supported: none. Basic auth (https://github.com/Miragon/operate/issues/1) and OAuth authorization code (https://github.com/Miragon/operate/issues/2) are planned.',
-      );
-    },
-  );
 });
 
 describe('parseReadOnly', () => {

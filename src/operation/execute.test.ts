@@ -7,7 +7,7 @@ import {
   checkEffect,
   executeOperation,
   type ExecuteOptions,
-  previewRequest,
+  dryRunPreview,
   sendRequest,
 } from './execute.js';
 import type { OperationInput } from './request.js';
@@ -77,7 +77,7 @@ const remove = op('deleteProcessInstance');
 describe('executeOperation', () => {
   it('re-exports the shared helpers', () => {
     expect(typeof checkEffect).toBe('function');
-    expect(typeof previewRequest).toBe('function');
+    expect(typeof dryRunPreview).toBe('function');
     expect(typeof sendRequest).toBe('function');
   });
 

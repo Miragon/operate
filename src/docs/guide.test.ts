@@ -79,11 +79,17 @@ describe('GUIDE', () => {
       'Done: <METHOD> <path>',
       '--out-file <path>',
       'operate api',
-      'https://github.com/Miragon/operate/issues/1',
+      'OPERATE_USERNAME',
+      'OPERATE_PASSWORD',
+      '--auth-password-env <VAR>',
+      'OPERATE_AUTH=none',
       'https://github.com/Miragon/operate/issues/2',
     ]) {
       expect(GUIDE).toContain(text);
     }
+    // Basic auth is built in: no workaround header and no link to its issue
+    expect(GUIDE).not.toContain('https://github.com/Miragon/operate/issues/1');
+    expect(GUIDE).not.toContain('Authorization: Basic');
   });
 });
 

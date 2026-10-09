@@ -9,14 +9,14 @@ import type { CommandRef } from '../http/errors.js';
 import { checkEffect, type GuardOptions } from './guards.js';
 import { isPaginated } from '../catalog/rules.js';
 import { fetchAllPages, firstPageInput } from './paginate.js';
-import { previewRequest } from './preview.js';
+import { dryRunPreview } from './preview.js';
 import { buildRequest, type OperationInput, type Target } from './request.js';
 import type { OperationResult } from './result.js';
 import { sendRequest } from './send.js';
 import { checkBody } from './validation.js';
 
 export { checkEffect } from './guards.js';
-export { previewRequest } from './preview.js';
+export { dryRunPreview } from './preview.js';
 export { sendRequest } from './send.js';
 
 export interface ExecuteOptions extends GuardOptions {
@@ -42,7 +42,10 @@ export async function executeOperation(
     const pageInput = paginate ? firstPageInput(input) : input;
     return {
       kind: 'dry-run',
-      request: previewRequest(buildRequest(operation, pageInput, options.target)),
+      request: dryRunPreview(
+        buildRequest(operation, pageInput, options.target),
+        options.client.auth,
+      ),
     };
   }
   if (paginate) return fetchAllPages(operation, input, options);

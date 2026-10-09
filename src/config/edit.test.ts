@@ -71,6 +71,19 @@ describe('setProfile', () => {
     });
   });
 
+  it('never stores Basic auth together with an Authorization header', () => {
+    const file: ConfigFile = { profiles: { p: { headers: { Authorization: 'Basic eDp5' } } } };
+    expect(setProfile(file, 'p', { authUser: 'demo' }).profiles.p).toEqual({
+      auth: { username: 'demo' },
+    });
+    const error = failure(() =>
+      setProfile(file, 'p', { url: 'http://x', authUser: 'demo', headers: ['Authorization: x'] }),
+    );
+    expect(error.message).toBe(
+      'Profile "p" would have both Basic auth and an Authorization header',
+    );
+  });
+
   it('makes the first profile of an empty file the default even when it is empty', () => {
     expect(setProfile({ profiles: {} }, 'a', {})).toEqual({
       defaultProfile: 'a',
@@ -153,7 +166,7 @@ describe('setProfile', () => {
       { headers: ['Connection: close'] },
       'Header "Connection" cannot be set: the HTTP client manages it',
     ],
-    [{ auth: 'basic' }, 'Unsupported auth type "basic"'],
+    [{ auth: 'oauth' }, 'Unsupported auth type "oauth"'],
     [{ output: 'yaml' }, 'Unknown output format "yaml"'],
     [{ timeout: '0' }, 'Timeout must be a positive number of milliseconds, got "0"'],
     [{ headers: ['nope'] }, 'Invalid header: expected "Name: value"'],
@@ -187,7 +200,9 @@ describe('setProfile', () => {
       {
         url: fc.constantFrom('http://localhost:8080/engine-rest/', 'https://x.example/rest'),
         engine: fc.stringMatching(/^[a-z][a-z0-9-]{0,10}$/),
-        auth: fc.constant('none'),
+        auth: fc.constantFrom('none', 'basic'),
+        authUser: fc.stringMatching(/^[a-z][a-z0-9.@-]{0,10}$/),
+        authPasswordEnv: fc.stringMatching(/^[A-Z_][A-Z0-9_]{0,10}$/),
         output: fc.constantFrom('json', 'table'),
         timeout: fc.oneof(fc.integer({ min: 1, max: 600000 }), fc.integer({ min: 1 }).map(String)),
         headers: fc.array(
@@ -364,6 +379,8 @@ describe('showConfig', () => {
         url: { value: 'http://localhost:8080/engine-rest', source: 'profile' },
         engine: { value: null, source: 'default' },
         auth: { value: 'none', source: 'default' },
+        username: { value: null, source: 'default' },
+        password: { value: null, source: 'default' },
         output: { value: 'json', source: 'flag' },
         timeout: { value: 1000, source: 'env' },
         headers: { value: { 'X-Flag': '1' }, source: 'flag' },
@@ -384,5 +401,75 @@ describe('showConfig', () => {
     expect(view.profile).toBe('prod');
     expect(view.values.engine).toEqual({ value: 'main', source: 'profile' });
     expect(view.values.headers).toEqual({ value: { 'X-Tenant': 'acme' }, source: 'profile' });
+  });
+});
+
+describe('Basic auth in profiles', () => {
+  it('stores type, username and the password variable', () => {
+    const result = setProfile(TWO, 'dev', {
+      auth: 'basic',
+      authUser: 'demo',
+      authPasswordEnv: 'CAMUNDA_PASSWORD',
+    });
+    expect(result.profiles.dev).toEqual({
+      url: 'http://localhost:8080/engine-rest',
+      auth: { type: 'basic', username: 'demo', passwordEnv: 'CAMUNDA_PASSWORD' },
+      readOnly: false,
+    });
+    expect(parseConfigFile(JSON.stringify(result), 'c.json')).toEqual(result);
+  });
+
+  it('switches the stored type none to basic when only credentials are given', () => {
+    const result = setProfile(TWO, 'prod', { authUser: 'demo', authPassword: 'pw' });
+    expect(result.profiles.prod?.auth).toEqual({
+      type: 'basic',
+      username: 'demo',
+      password: 'pw',
+    });
+  });
+
+  it('keeps the auth object when other values change', () => {
+    const stored = setProfile(undefined, 'p', { authUser: 'demo', authPasswordEnv: 'PW' });
+    expect(setProfile(stored, 'p', { timeout: 5 }).profiles.p?.auth).toEqual({
+      username: 'demo',
+      passwordEnv: 'PW',
+    });
+  });
+
+  it('removes every auth setting with unset auth', () => {
+    const stored = setProfile(undefined, 'p', { auth: 'basic', authUser: 'demo', url: 'http://x' });
+    expect(unsetProfileKeys(stored, 'p', ['auth']).profiles.p).toEqual({ url: 'http://x' });
+  });
+
+  it('lists a profile with a username as basic', () => {
+    const file: ConfigFile = {
+      profiles: {
+        implied: { auth: { username: 'demo' } },
+        explicit: { auth: { type: 'none', username: 'demo' } },
+        empty: { auth: {} },
+      },
+    };
+    expect(listProfiles(file).map(({ name, auth }) => [name, auth])).toEqual([
+      ['empty', null],
+      ['explicit', 'none'],
+      ['implied', 'basic'],
+    ]);
+  });
+
+  it('shows username and password with their sources', () => {
+    const file: ConfigFile = {
+      defaultProfile: 'p',
+      profiles: { p: { auth: { username: 'demo', passwordEnv: 'PW' } } },
+    };
+    const view = showConfig(resolveConfig({}, { PW: 's3cret' }, file), 'c.json');
+    expect(view.values.auth).toEqual({ value: 'basic', source: 'profile' });
+    expect(view.values.username).toEqual({ value: 'demo', source: 'profile' });
+    expect(view.values.password).toEqual({ value: 's3cret', source: 'profile' });
+    const fromEnv = showConfig(
+      resolveConfig({ authUser: 'cli' }, { OPERATE_PASSWORD: 'x', PW: 'y' }, file),
+      'c.json',
+    );
+    expect(fromEnv.values.username).toEqual({ value: 'cli', source: 'flag' });
+    expect(fromEnv.values.password).toEqual({ value: 'x', source: 'env' });
   });
 });

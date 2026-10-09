@@ -1,14 +1,15 @@
 /**
- * Extra request headers (`-H`, OPERATE_HEADERS, profile headers): parsing and validation. A value
- * must be sendable by fetch (ISO-8859-1, no control characters but tab) and connection management
- * headers are refused, so that a bad header fails as CONFIG error naming it instead of as a
- * network error. Messages never repeat a value, it may be a credential.
+ * Extra request headers (`-H`, OPERATE_HEADERS, profile headers): parsing, validation and
+ * resolution. A value must be sendable by fetch (ISO-8859-1, no control characters but tab) and
+ * connection management headers are refused, so that a bad header fails as CONFIG error naming it
+ * instead of as a network error. Messages never repeat a value, it may be a credential.
  */
 
 import { OperateError } from '../errors.js';
 import { mergeHeaders } from '../util.js';
 import { configError } from './config-error.js';
-import { ENV } from './types.js';
+import type { Env } from './pick.js';
+import { type ConfigFlags, ENV, type Profile, type Source } from './types.js';
 
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 /** Control characters (line breaks, NUL, ESC, DEL, ...): not part of an HTTP field value. */
@@ -101,4 +102,44 @@ export function parseEnvHeaders(value: string | undefined): Record<string, strin
       `Example: ${ENV.headers}='Authorization: Bearer <token>'; separate several headers with line breaks.`,
     );
   }
+}
+
+/**
+ * The merged extra headers, the most specific source that contributed one, and the most specific
+ * source of an `Authorization` header (Basic auth refuses to replace it).
+ */
+export interface ResolvedHeaders {
+  readonly value: Record<string, string>;
+  readonly source: Source;
+  readonly authorization?: Source;
+}
+
+type Layer = readonly [Source, Readonly<Record<string, string>>];
+
+/** True when the headers contain an `Authorization` header (names are case-insensitive). */
+export function hasAuthorization(headers: Readonly<Record<string, string>>): boolean {
+  return Object.keys(headers).some((name) => name.toLowerCase() === 'authorization');
+}
+
+/** Headers merge per name: profile, then OPERATE_HEADERS, then -H flags (later wins). */
+export function resolveHeaders(
+  flags: ConfigFlags,
+  env: Env,
+  profile: Profile | undefined,
+): ResolvedHeaders {
+  const fromFlags = parseHeaders(flags.headers ?? []);
+  const fromEnv = parseEnvHeaders(env[ENV.headers]);
+  const fromProfile = profile?.headers ?? {};
+  // most specific first
+  const layers: readonly Layer[] = [
+    ['flag', fromFlags],
+    ['env', fromEnv],
+    ['profile', fromProfile],
+  ];
+  const authorization = layers.find(([, headers]) => hasAuthorization(headers))?.[0];
+  return {
+    value: mergeHeaders(fromProfile, fromEnv, fromFlags),
+    source: layers.find(([, headers]) => Object.keys(headers).length > 0)?.[0] ?? 'default',
+    ...(authorization === undefined ? {} : { authorization }),
+  };
 }

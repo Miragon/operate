@@ -26,6 +26,7 @@ const NONE: GlobalOptions = {
   readOnly: false,
   verbose: false,
   showSecrets: false,
+  authPasswordStdin: false,
 };
 
 describe('global options', () => {
@@ -47,6 +48,9 @@ describe('global options', () => {
       '--read-only',
       '--timeout <ms>',
       '-H, --header <header>',
+      '--auth <type>',
+      '--auth-user <name>',
+      '--auth-password-stdin',
       '--verbose',
       '--out-file <path>',
       '--show-secrets',
@@ -107,6 +111,11 @@ describe('readGlobals', () => {
         'A: 1',
         '--header',
         'B: 2',
+        '--auth',
+        'basic',
+        '--auth-user',
+        'demo',
+        '--auth-password-stdin',
         '--verbose',
         '--out-file',
         '/o',
@@ -121,6 +130,8 @@ describe('readGlobals', () => {
       fields: 'id',
       timeout: '10',
       outFile: '/o',
+      auth: 'basic',
+      authUser: 'demo',
       headers: ['A: 1', 'B: 2'],
       pretty: true,
       dryRun: true,
@@ -128,6 +139,7 @@ describe('readGlobals', () => {
       readOnly: true,
       verbose: true,
       showSecrets: true,
+      authPasswordStdin: true,
     });
   });
 });
@@ -145,6 +157,9 @@ describe('configFlags', () => {
         headers: ['A: 1'],
         readOnly: true,
         fields: 'id',
+        auth: 'basic',
+        authUser: 'demo',
+        authPasswordStdin: true,
       }),
     ).toEqual({
       url: 'http://u',
@@ -154,6 +169,14 @@ describe('configFlags', () => {
       timeout: '5',
       headers: ['A: 1'],
       readOnly: true,
+      auth: 'basic',
+      authUser: 'demo',
+    });
+  });
+
+  it('passes the password read from stdin', () => {
+    expect(configFlags({ ...NONE, authPasswordStdin: true }, 'p:w')).toEqual({
+      authPassword: 'p:w',
     });
   });
 

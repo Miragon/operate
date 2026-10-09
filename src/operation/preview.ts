@@ -1,7 +1,8 @@
 /** Request previews for `--dry-run` and results: JSON bodies parsed, multipart parts summarized. */
 
+import type { AuthProvider } from '../auth/types.js';
 import type { HttpRequest } from '../http/types.js';
-import { parseJson } from '../util.js';
+import { mergeHeaders, parseJson } from '../util.js';
 import type { MultipartPartPreview, RequestPreview } from './result.js';
 
 /** The JSON body as value (large integers kept), or the text when it is not JSON. */
@@ -24,4 +25,13 @@ export function previewRequest(request: HttpRequest): RequestPreview {
   if (request.body === undefined) return preview;
   const body = typeof request.body === 'string' ? bodyValue(request.body) : partsOf(request.body);
   return { ...preview, body };
+}
+
+/**
+ * The `--dry-run` preview: the request with the auth headers the provider knows without network
+ * access (Basic). The output layer masks them unless --show-secrets.
+ */
+export function dryRunPreview(request: HttpRequest, auth: AuthProvider): RequestPreview {
+  const headers = auth.previewHeaders?.() ?? {};
+  return previewRequest({ ...request, headers: mergeHeaders(request.headers, headers) });
 }

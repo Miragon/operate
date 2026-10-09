@@ -3,17 +3,53 @@
 export const OUTPUT_FORMATS = ['json', 'table'] as const;
 export type OutputFormat = (typeof OUTPUT_FORMATS)[number];
 
-export const AUTH_TYPES = ['none'] as const;
+export const AUTH_TYPES = ['none', 'basic'] as const;
 export type AuthType = (typeof AUTH_TYPES)[number];
 
-export interface AuthConfig {
-  readonly type: AuthType;
+/**
+ * Auth settings of a profile as stored in the config file. Without `type`, a `username` selects
+ * Basic auth. `passwordEnv` names an environment variable holding the password; a literal
+ * `password` is possible but discouraged. The two exclude each other.
+ */
+export interface ProfileAuth {
+  readonly type?: AuthType;
+  readonly username?: string;
+  readonly passwordEnv?: string;
+  readonly password?: string;
 }
+
+/** Keys of a profile's auth object, in the order they are written to the config file. */
+export const PROFILE_AUTH_KEYS = [
+  'type',
+  'username',
+  'passwordEnv',
+  'password',
+] as const satisfies readonly (keyof ProfileAuth)[];
+
+/** Basic auth credentials and where each value came from. */
+export interface BasicAuthConfig {
+  readonly type: 'basic';
+  readonly username: string;
+  readonly password: string;
+  readonly sources: { readonly username: Source; readonly password: Source };
+}
+
+/**
+ * No credentials. `off` says why when Basic auth was switched off or a password is set without a
+ * username (`Basic auth is switched off by OPERATE_AUTH=none`), for the hint of a 401.
+ */
+export interface NoAuthConfig {
+  readonly type: 'none';
+  readonly off?: string;
+}
+
+/** The resolved authentication: none, or complete Basic auth credentials. */
+export type AuthConfig = NoAuthConfig | BasicAuthConfig;
 
 export interface Profile {
   readonly url?: string;
   readonly engine?: string;
-  readonly auth?: AuthConfig;
+  readonly auth?: ProfileAuth;
   readonly output?: OutputFormat;
   readonly timeout?: number;
   readonly headers?: Readonly<Record<string, string>>;
@@ -32,6 +68,11 @@ export const PROFILE_KEYS = [
 ] as const satisfies readonly (keyof Profile)[];
 export type ProfileKey = (typeof PROFILE_KEYS)[number];
 
+/** The profile a command uses: none, or a profile of the config file with its name. */
+export type SelectedProfile =
+  | { readonly name?: undefined; readonly profile?: undefined }
+  | { readonly name: string; readonly profile: Profile };
+
 export interface ConfigFile {
   readonly defaultProfile?: string;
   readonly profiles: Readonly<Record<string, Profile>>;
@@ -46,6 +87,12 @@ export interface ConfigFlags {
   readonly timeout?: string;
   readonly headers?: readonly string[];
   readonly readOnly?: boolean;
+  /** `--auth <type>` */
+  readonly auth?: string;
+  /** `--auth-user <name>` */
+  readonly authUser?: string;
+  /** The password read from stdin for `--auth-password-stdin`. */
+  readonly authPassword?: string;
 }
 
 export type Source = 'flag' | 'env' | 'profile' | 'default';
@@ -54,6 +101,7 @@ export interface ResolvedConfig {
   readonly profile?: string;
   readonly url: string;
   readonly engine?: string;
+  /** `sources.auth` is where the auth type came from; Basic credentials carry their own sources. */
   readonly auth: AuthConfig;
   /** Undefined means: choose by terminal (table on a TTY, JSON otherwise). */
   readonly output?: OutputFormat;
@@ -76,6 +124,8 @@ export const ENV = {
   output: 'OPERATE_OUTPUT',
   timeout: 'OPERATE_TIMEOUT',
   auth: 'OPERATE_AUTH',
+  username: 'OPERATE_USERNAME',
+  password: 'OPERATE_PASSWORD',
   headers: 'OPERATE_HEADERS',
   readOnly: 'OPERATE_READ_ONLY',
 } as const;

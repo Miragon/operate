@@ -206,9 +206,22 @@ const CONFIG_FLAGS: Flags = withFlags(OUTPUT_FLAGS, {
   auth: {
     takesValue: true,
     check: (value) => {
-      expect(value).toBe('none');
+      expect(['none', 'basic']).toContain(value);
     },
   },
+  'auth-user': {
+    takesValue: true,
+    check: (value) => {
+      expect(value).toMatch(/^[^:\s]+$/);
+    },
+  },
+  'auth-password-env': {
+    takesValue: true,
+    check: (value) => {
+      expect(value).toMatch(/^[A-Za-z_][A-Za-z0-9_]*$/);
+    },
+  },
+  'auth-password-stdin': { takesValue: false },
   timeout: { takesValue: true },
   header: {
     takesValue: true,
@@ -306,6 +319,10 @@ describe('the command line checker', () => {
     expect(ok('operate commands task --search claim --effect write')).not.toThrow();
     expect(ok('operate describe getProcessInstances')).not.toThrow();
     expect(ok('operate config unset prod url headers')).not.toThrow();
+    expect(
+      ok('operate config set p --auth basic --auth-user demo --auth-password-env PW'),
+    ).not.toThrow();
+    expect(ok('operate ping --auth basic --auth-user demo --auth-password-stdin')).not.toThrow();
     expect(ok('operate api PUT /job/j1/retries --body {"retries":1}')).not.toThrow();
   });
 
@@ -331,6 +348,9 @@ describe('the command line checker', () => {
     expect(ok('operate commands --effect remove')).toThrow();
     expect(ok('operate describe task nothing')).toThrow();
     expect(ok('operate config set')).toThrow();
+    expect(ok('operate config set p --auth oauth')).toThrow();
+    expect(ok('operate config set p --auth-password-env MY-VAR')).toThrow();
+    expect(ok('operate config set p --auth-user a:b')).toThrow();
     expect(ok('operate config rename a b')).toThrow();
     expect(ok('operate api FETCH /x')).toThrow();
     expect(ok('operate api DELETE /process-instance/abc')).toThrow();

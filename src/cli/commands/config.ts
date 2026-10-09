@@ -4,6 +4,7 @@
  */
 
 import type { Command } from 'commander';
+import { replacedAuthorization } from '../../config/auth-edit.js';
 import {
   deleteProfile,
   listProfiles,
@@ -14,7 +15,7 @@ import {
   useProfile,
 } from '../../config/edit.js';
 import { readConfigFile, writeConfigFile } from '../../config/file.js';
-import { validateOutput } from '../../config/resolve.js';
+import { findProfile, validateOutput } from '../../config/resolve.js';
 import { type ConfigFile, PROFILE_KEYS } from '../../config/types.js';
 import { renderValue } from '../../output/render.js';
 import { compact } from '../../util.js';
@@ -25,6 +26,7 @@ import { addGlobalOptions, readGlobals } from '../globals.js';
 import { collect } from '../options.js';
 import { maxWidthOf } from '../output-format.js';
 import { configPath, isExplicit, openSession } from '../session.js';
+import { readStdinPassword } from '../stdin-password.js';
 import { maskedView, profileView, showHeader, showRows } from './config-view.js';
 import type { UtilityCommand } from './types.js';
 
@@ -40,6 +42,9 @@ const SHOW_OPTIONS = [
   'output',
   'timeout',
   'header',
+  'auth',
+  'auth-user',
+  'auth-password-stdin',
   'read-only',
   'show-secrets',
 ];
@@ -52,6 +57,9 @@ interface SetOptions {
   readonly url?: string;
   readonly engine?: string;
   readonly auth?: string;
+  readonly authUser?: string;
+  readonly authPasswordEnv?: string;
+  readonly authPasswordStdin?: boolean;
   readonly output?: string;
   readonly timeout?: string;
   readonly header?: string[];
@@ -119,19 +127,26 @@ async function editConfig(command: Command, context: CliContext, edit: Edit) {
   const flags = editFlags(command);
   const view = await displayOf(context, flags);
   const path = configPath(runtime, flags.config);
-  const file = edit(await readConfigFile(runtime.fs, path));
+  const previous = await readConfigFile(runtime.fs, path);
+  const file = edit(previous);
   await writeConfigFile(runtime.fs, path, file);
-  return { file, path, view };
+  return { file, previous, path, view };
 }
 
-/** The changes of `config set`; only options given on the command line. */
-function profileChanges(command: Command): ProfileChanges {
+/**
+ * The changes of `config set`; only options given on the command line. `password` is what
+ * `--auth-password-stdin` read.
+ */
+function profileChanges(command: Command, password: string | undefined): ProfileChanges {
   // --read-only is defined before --no-read-only, so neither sets a default value
   const options = command.opts<SetOptions>();
   return compact({
     url: options.url,
     engine: options.engine,
     auth: options.auth,
+    authUser: options.authUser,
+    authPasswordEnv: options.authPasswordEnv,
+    authPassword: password,
     output: options.output,
     timeout: options.timeout,
     headers: options.header,
@@ -140,9 +155,64 @@ function profileChanges(command: Command): ProfileChanges {
   });
 }
 
+/** Applies the edit and prints the profile; resolves to the file before and after, and its path. */
 async function editProfile(name: string, command: Command, context: CliContext, edit: Edit) {
-  const { file, view } = await editConfig(command, context, edit);
-  write(context, renderValue(profileView(file, name), view));
+  const edited = await editConfig(command, context, edit);
+  write(context, renderValue(profileView(edited.file, name), edited.view));
+  return edited;
+}
+
+/** What `config set` did that deserves a note on stderr. */
+interface SetOutcome {
+  readonly path: string;
+  /** The stored Authorization header was removed: Basic auth replaces it. */
+  readonly replacedHeader: boolean;
+  /** A literal password was stored. */
+  readonly storedPassword: boolean;
+  /** The variable named by --auth-password-env is not set in this environment. */
+  readonly unsetVariable: boolean;
+}
+
+/**
+ * Notes on stderr after `config set`. The unset variable is not named: given by mistake, the
+ * "name" may be the password itself.
+ */
+function setNotices(outcome: SetOutcome): string[] {
+  return [
+    outcome.replacedHeader
+      ? 'Notice: removed the Authorization header of the profile; Basic auth replaces it.'
+      : undefined,
+    outcome.storedPassword
+      ? `Warning: the password is stored in plain text in ${outcome.path} (mode 0600). Prefer --auth-password-env <VAR>, which stores only the name of an environment variable.`
+      : undefined,
+    outcome.unsetVariable
+      ? 'Warning: the variable named by --auth-password-env is not set in this environment. Pass the name of a variable that holds the password (e.g. CAMUNDA_PASSWORD), never the password itself; commands read it when they run.'
+      : undefined,
+  ].filter((notice) => notice !== undefined);
+}
+
+/** True for a variable name that has no non-blank value in `env` (blank passwords count as unset). */
+function isUnset(env: CliContext['runtime']['env'], name: string): boolean {
+  return (env[name.trim()] ?? '').trim() === '';
+}
+
+/** `config set`: reads a literal password from stdin first, and warns after storing it. */
+async function setProfileFrom(name: string, command: Command, context: CliContext) {
+  const { runtime } = context;
+  const fromStdin = command.opts<SetOptions>().authPasswordStdin === true;
+  const password = fromStdin ? await readStdinPassword(runtime) : undefined;
+  const changes = profileChanges(command, password);
+  const { file, previous, path } = await editProfile(name, command, context, (current) =>
+    setProfile(current, name, changes),
+  );
+  const notices = setNotices({
+    path,
+    replacedHeader: replacedAuthorization(findProfile(previous, name), findProfile(file, name)),
+    storedPassword: password !== undefined,
+    unsetVariable:
+      changes.authPasswordEnv !== undefined && isUnset(runtime.env, changes.authPasswordEnv),
+  });
+  for (const notice of notices) runtime.stderr.write(`${notice}\n`);
 }
 
 async function removeProfile(name: string, command: Command, context: CliContext): Promise<void> {
@@ -172,7 +242,7 @@ function registerReadCommands(config: Command, context: CliContext): void {
   const show = configSubcommand(
     config,
     'show',
-    'Print the effective configuration and where each value comes from; header values are masked unless --show-secrets. -o only formats this output: the values are what an operation command resolves without it.',
+    'Print the effective configuration and where each value comes from; header values and the password are masked unless --show-secrets. -o only formats this output: the values are what an operation command resolves without it.',
     SHOW_OPTIONS,
   );
   show.action(() => printConfig(show, context));
@@ -183,12 +253,21 @@ function registerReadCommands(config: Command, context: CliContext): void {
 function registerSet(config: Command, context: CliContext): void {
   const set = subcommand(config, 'set')
     .description(
-      'Create or update a profile; only the given values change. The first profile becomes the default. --output is the output format stored in the profile; -o <format> chooses how the profile is printed.',
+      'Create or update a profile; only the given values change. The first profile becomes the default. --output is the output format stored in the profile; -o <format> chooses how the profile is printed. Basic auth: --auth basic --auth-user <name> --auth-password-env <VAR> keeps the password in an environment variable.',
     )
     .argument('<profile>', 'Profile name, e.g. local or prod-eu')
     .option('--url <url>', 'REST API root, e.g. http://localhost:8080/engine-rest')
     .option('--engine <name>', 'Named process engine')
-    .option('--auth <type>', 'Authentication: none')
+    .option('--auth <type>', 'Authentication: none or basic')
+    .option('--auth-user <name>', 'Username for Basic auth')
+    .option(
+      '--auth-password-env <VAR>',
+      'Name of the environment variable that holds the Basic auth password (recommended)',
+    )
+    .option(
+      '--auth-password-stdin',
+      'Store the password read from the first line of stdin (plain text in the file; discouraged)',
+    )
     .option('--output <format>', 'Output format to store in the profile: json or table')
     .option('--timeout <ms>', 'Request timeout in milliseconds')
     .option(
@@ -201,9 +280,7 @@ function registerSet(config: Command, context: CliContext): void {
     .option('--default', 'Make this the default profile')
     .option('-o <format>', 'Output format of the printed profile: json or table');
   addGlobalOptions(set, SET_OPTIONS, OPTIONS_GROUP);
-  set.action((name: string) =>
-    editProfile(name, set, context, (file) => setProfile(file, name, profileChanges(set))),
-  );
+  set.action((name: string) => setProfileFrom(name, set, context));
 }
 
 function registerEditCommands(config: Command, context: CliContext): void {
@@ -211,12 +288,14 @@ function registerEditCommands(config: Command, context: CliContext): void {
   const unset = configSubcommand(config, 'unset', 'Remove values from a profile', FILE_OPTIONS)
     .argument('<profile>', 'Profile name')
     .argument('<keys...>', `Keys to remove: ${PROFILE_KEYS.join(', ')}`);
-  unset.action((name: string, keys: string[]) =>
-    editProfile(name, unset, context, (file) => unsetProfileKeys(file, name, keys)),
-  );
+  unset.action(async (name: string, keys: string[]) => {
+    await editProfile(name, unset, context, (file) => unsetProfileKeys(file, name, keys));
+  });
   const use = configSubcommand(config, 'use', 'Make a profile the default', FILE_OPTIONS);
   use.argument('<profile>', 'Profile name');
-  use.action((name: string) => editProfile(name, use, context, (file) => useProfile(file, name)));
+  use.action(async (name: string) => {
+    await editProfile(name, use, context, (file) => useProfile(file, name));
+  });
   const remove = configSubcommand(config, 'delete', 'Delete a profile', FILE_OPTIONS);
   remove.argument('<profile>', 'Profile name');
   remove.action((name: string) => removeProfile(name, remove, context));

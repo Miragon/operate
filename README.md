@@ -159,9 +159,12 @@ These work on every API command, `api` and `ping`, after the command path
 | `--read-only`           | Refuse every operation that is not a read                                      |
 | `--timeout <ms>`        | Request timeout in milliseconds, default 30000                                 |
 | `-H, --header <header>` | Extra request header `Name: value`; repeatable                                 |
+| `--auth <type>`         | `none` or `basic`; a username alone selects `basic`                            |
+| `--auth-user <name>`    | Username for Basic auth                                                        |
+| `--auth-password-stdin` | Read the Basic auth password from the first line of stdin                      |
 | `--verbose`             | Trace requests and responses on stderr                                         |
 | `--out-file <path>`     | Write the response body to a file                                              |
-| `--show-secrets`        | Do not mask secret headers in dry-run, verbose and config output               |
+| `--show-secrets`        | Do not mask secret headers and passwords in dry-run, verbose and config output |
 
 ### Environment variables
 
@@ -173,8 +176,10 @@ These work on every API command, `api` and `ping`, after the command path
 | `OPERATE_CONFIG`    | Config file location; the file must exist                                  |
 | `OPERATE_OUTPUT`    | `json` or `table`                                                          |
 | `OPERATE_TIMEOUT`   | Request timeout in milliseconds                                            |
-| `OPERATE_AUTH`      | Authentication type; only `none` in this version                           |
-| `OPERATE_HEADERS`   | Extra headers `Name: value`, one per line, e.g. credentials                |
+| `OPERATE_AUTH`      | Authentication type: `none` or `basic`                                     |
+| `OPERATE_USERNAME`  | Username for Basic auth                                                    |
+| `OPERATE_PASSWORD`  | Password for Basic auth                                                    |
+| `OPERATE_HEADERS`   | Extra headers `Name: value`, one per line, e.g. a token                    |
 | `OPERATE_READ_ONLY` | `1`/`true`/`yes`/`on` or `0`/`false`/`no`/`off`; anything else is an error |
 
 ### Config file
@@ -183,8 +188,9 @@ The config file is looked up in this order: `--config <path>`, `OPERATE_CONFIG`,
 `$XDG_CONFIG_HOME/operate/config.json`, `~/.config/operate/config.json` (Windows:
 `%APPDATA%\operate\config.json`). `operate config path` prints the location. A file named with
 `--config` or `OPERATE_CONFIG` must exist (`operate config set` creates it), so a typo never drops a
-profile and its read-only setting silently. `operate` writes the file with mode `0600` and
-validates every value before storing it; you can also edit it by hand:
+profile and its read-only setting silently. `operate` validates every value before storing it and
+writes the file atomically with mode `0600` (a new private file replaces the old one, so its content
+is never readable under another mode); you can also edit it by hand:
 
 ```json
 {
@@ -197,6 +203,10 @@ validates every value before storing it; you can also edit it by hand:
       "output": "table",
       "timeout": 10000
     },
+    "staging": {
+      "url": "https://staging.example.com/engine-rest",
+      "auth": { "type": "basic", "username": "demo", "passwordEnv": "CAMUNDA_PASSWORD" }
+    },
     "prod": {
       "url": "https://camunda.example.com/engine-rest",
       "headers": { "Authorization": "Bearer eyJhbGciOi..." },
@@ -206,7 +216,8 @@ validates every value before storing it; you can also edit it by hand:
 }
 ```
 
-Profile keys: `url`, `engine`, `auth`, `output`, `timeout`, `headers`, `readOnly`. URLs with
+Profile keys: `url`, `engine`, `auth` (`type`, `username`, and `passwordEnv` or `password`, see
+[Authentication](#authentication)), `output`, `timeout`, `headers`, `readOnly`. URLs with
 credentials (`https://user:pass@host`) or a query string are rejected, and so are header values
 with control characters and connection headers (`Connection`, `Transfer-Encoding`, ...).
 
@@ -224,10 +235,11 @@ operate config delete prod
 ```
 
 - `config set <profile>` creates or updates a profile; only the given values change
-  (`--url`, `--engine`, `--auth`, `--output`, `--timeout`, `-H/--header`, `--read-only`,
-  `--no-read-only`, `--default`). The first profile becomes the default. Here `--output` is the
-  output format stored in the profile; `-o <format>` chooses how the profile is printed, as
-  `-o/--output` does for every other config command.
+  (`--url`, `--engine`, `--auth`, `--auth-user`, `--auth-password-env`, `--auth-password-stdin`,
+  `--output`, `--timeout`, `-H/--header`, `--read-only`, `--no-read-only`, `--default`). The
+  first profile becomes the default. Here `--output` is the output format stored in the profile;
+  `-o <format>` chooses how the profile is printed, as `-o/--output` does for every other config
+  command. `config unset <profile> auth` removes all auth settings.
 - `config use <profile>` makes a profile the default; `--profile` or `OPERATE_PROFILE` pick another
   one per call.
 - `config show` accepts the global configuration flags, so you can see what a combination resolves
@@ -243,6 +255,8 @@ KEY       VALUE                                    SOURCE
 url       https://camunda.example.com/engine-rest  profile
 engine                                             default
 auth      none                                     default
+username                                           default
+password                                           default
 output                                             default
 timeout   30000                                    default
 headers   {"Authorization":"Bearer ***"}           profile
@@ -251,25 +265,70 @@ readOnly  true                                     profile
 
 ## Authentication
 
-Version 1 sends no credentials of its own (`auth: none`). Planned:
+`operate` supports HTTP Basic authentication, e.g. for Camunda 7 Run with
+`camunda.bpm.run.auth.enabled=true`, CIB seven Run additionally with
+`camunda.bpm.run.auth.authentication=basic` (its default `pseudo` lets every request in), Operaton
+Run with `operaton.bpm.run.auth.enabled=true`, or a `ProcessEngineAuthenticationFilter` or proxy in
+front of `/engine-rest`. The OAuth 2.0
+authorization code flow with PKCE is planned: [#2](https://github.com/Miragon/operate/issues/2).
 
-- Basic auth: [#1](https://github.com/Miragon/operate/issues/1)
-- OAuth 2.0 authorization code flow with PKCE: [#2](https://github.com/Miragon/operate/issues/2)
+| Value    | Flag                    | Environment        | Profile (`auth` object)                     |
+| -------- | ----------------------- | ------------------ | ------------------------------------------- |
+| type     | `--auth <type>`         | `OPERATE_AUTH`     | `type`: `none` or `basic`                   |
+| username | `--auth-user <name>`    | `OPERATE_USERNAME` | `username`                                  |
+| password | `--auth-password-stdin` | `OPERATE_PASSWORD` | `passwordEnv` (variable name) or `password` |
 
-Until then, pass the header yourself: per call with `-H`, in the environment with
-`OPERATE_HEADERS` (keeps the credential out of the command line and shell history), or stored in a
-profile. Headers merge per name: profile, then `OPERATE_HEADERS`, then `-H`. `Authorization` and
-other secret headers (cookies, names containing `token`, `secret`, `password`, `api-key`) are
+- Each value is resolved on its own: flag > environment variable > profile. Without a type
+  anywhere, a username or `--auth-password-stdin` selects `basic`; `--auth none` or
+  `OPERATE_AUTH=none` switch Basic auth off even when the profile sets it.
+- Credentials follow URL overrides: with `--url` or `OPERATE_URL` set, the credentials of the
+  profile (and `OPERATE_USERNAME`/`OPERATE_PASSWORD`) go to that URL. Check `operate config show`
+  when a shell has a leftover `OPERATE_URL`, and use `https://` beyond `localhost`: Basic auth sends
+  the password readable to anyone on the path.
+- The password is never a plain flag (shell history, process list). `--auth-password-stdin`
+  reads the first line of stdin, so it cannot be combined with `--body -`. In a profile, prefer
+  `passwordEnv`, the name of an environment variable that holds the password; a literal
+  `password` is stored in plain text (the config file has mode `0600`, and `config set` warns).
+  `config set` also warns, without repeating it, when the variable given to
+  `--auth-password-env` is not set in its environment: pass the name, never the password.
+- Basic auth with a missing username or password fails with exit code 3 before any request is
+  sent, naming where each value was looked up. Usernames must not contain `:` (RFC 7617), and
+  neither value may contain control characters.
+- `operate ping` reports `"auth": "basic"` and `"user"`. `config show` lists `auth`, `username`
+  and `password` with their sources. The password and the `Authorization` header are masked
+  (`***`, `Basic ***`) in `config show`, `--verbose` and `--dry-run` output, including the curl
+  line, unless `--show-secrets` is given.
+- An HTTP 401 (exit code 4) says whether operate sent no credentials and why (for example
+  `OPERATE_AUTH=none`, or a password without a username), or which user the engine rejected and
+  where the credentials came from.
+- A mistyped password flag (`--auth-password=...`, a value after `--auth-password-stdin`) is a
+  usage error that never repeats the value.
+
+```sh
+# per call: the password comes from stdin
+printf '%s\n' "$CAMUNDA_PASSWORD" | operate ping --auth basic --auth-user demo --auth-password-stdin
+# per shell or CI job: take the password from a secret, never type it into the command line
+export OPERATE_USERNAME=demo OPERATE_PASSWORD="$CAMUNDA_PASSWORD"
+# interactive shell: read it without echo and without shell history
+read -rs OPERATE_PASSWORD && export OPERATE_PASSWORD
+operate task list --assignee demo
+# per profile: only the name of the variable is stored
+operate config set staging --url https://staging.example.com/engine-rest --auth basic --auth-user demo --auth-password-env CAMUNDA_PASSWORD
+```
+
+Other schemes, such as bearer tokens, are passed as headers: per call with `-H`, in the
+environment with `OPERATE_HEADERS` (keeps the credential out of the command line and shell
+history), or stored in a profile. Headers merge per name: profile, then `OPERATE_HEADERS`, then
+`-H`. An `Authorization` header together with Basic auth is a configuration error; in a profile,
+`config set` with Basic auth options replaces a stored `Authorization` header (with a notice on
+stderr), and `--auth none` keeps the header and switches Basic auth off. `Authorization`
+and other secret headers (cookies, names containing `token`, `secret`, `password`, `api-key`) are
 masked as `***` in dry-run, verbose and config output unless `--show-secrets` is given.
 
 ```sh
-operate task list -H 'Authorization: Basic ZGVtbzpkZW1v'
 export OPERATE_HEADERS='Authorization: Bearer eyJhbGciOi...'
 operate config set prod --header 'Authorization: Bearer eyJhbGciOi...'
 ```
-
-An HTTP 401 says which case applies: without an `Authorization` header the hint shows these ways to
-send credentials, with one it says the engine rejected them.
 
 ## Command structure
 
@@ -672,7 +731,8 @@ operate api DELETE /process-instance/$INSTANCE_ID --yes
 | CIB seven | `cibseven/cibseven:run-2.2.0`             |
 | Camunda 7 | `camunda/camunda-bpm-platform:run-7.24.0` |
 
-The integration tests start each engine with Testcontainers and run the built CLI against it.
+The integration tests start each engine with Testcontainers and run the built CLI against it,
+once as the image ships and once with HTTP Basic authentication enabled for the REST API.
 Commands for features an engine does not offer fail with the engine's error. Property names that
 differ between the engines are both accepted (`operatonFormRef` for Operaton, `camundaFormRef` for
 Camunda 7 and CIB seven). Camunda 8 is not supported (it has a different API).
@@ -697,9 +757,11 @@ npx tsx src/bin/operate.ts --help
 | `npm run test:mutation`    | Mutation testing with StrykerJS                                                    |
 | `npm run test:integration` | Build, then run the Testcontainers tests against real engines                      |
 
-`test:integration` runs all engines; `OPERATE_IT_ENGINES=operaton,camunda` selects a comma
-separated subset (`operaton`, `cibseven`, `camunda`), and `OPERATE_IT_SKIP_PACK=1` skips the
-packed-tarball smoke test (`npm pack`, install, run).
+`test:integration` runs all engines, each twice: the scenario suite without authentication and the
+Basic auth suite (`*-auth.it.test.ts`) against a second container with authentication enabled.
+`OPERATE_IT_ENGINES=operaton,camunda` selects a comma separated subset (`operaton`, `cibseven`,
+`camunda`), and `OPERATE_IT_SKIP_PACK=1` skips the packed-tarball smoke test (`npm pack`,
+install, run).
 
 ### Catalog generation
 
@@ -751,9 +813,10 @@ development dependencies and `ci:` for actions. A `Release-As: <version>` footer
 commit message forces the next version. If publishing fails after the release was created
 because of a setting (npm, environment, repository visibility), fix it and re-run the failed jobs
 of the Release run; a version that is already on npm is skipped. A defect in the tagged code needs
-a fix and a new release instead. `bootstrap-sha` and `initial-version` in
-`release-please-config.json` only shape the first release (0.1.0) and can be removed once `v0.1.0`
-exists.
+a fix and a new release instead. The one-time settings `bootstrap-sha` and `initial-version`,
+which shaped the first release (0.1.0), are gone from `release-please-config.json`: since `v0.1.0`
+exists, release-please takes the current version from `.release-please-manifest.json` and starts
+each changelog section at the last release tag.
 
 #### One-time setup
 
@@ -830,7 +893,7 @@ src/operation/  input building, variables, dates, guards, request building, exec
 src/docs/       commands, describe, examples and the agent guide (pure)
 src/catalog/    catalog access, schema helpers, body validation (pure)
 src/config/     config resolution and profile editing (pure), file store
-src/auth/       auth providers (none)
+src/auth/       auth providers (none, basic)
 src/http/       fetch based HTTP client and error mapping
 src/output/     JSON, tables, field projection, errors, secret masking (pure)
 scripts/        catalog generator
@@ -852,10 +915,11 @@ on `config`, `cli` or `operation`, and the generated catalog is only read throug
 - **vitest** with v8 coverage thresholds: at least 90 % of lines, statements and functions and
   85 % of branches.
 - **fast-check** property tests for naming, patches, variable parsing, dates, query building,
-  projection, table width, config precedence, body validation and secret masking.
+  projection, table width, config and auth precedence, the Basic auth header, body validation and
+  secret masking.
 - **StrykerJS** mutation testing (break threshold 65 %) on `main`, weekly and on demand.
-- **Testcontainers** integration tests against the three engines plus a packed-tarball smoke test,
-  on every pull request.
+- **Testcontainers** integration tests against the three engines, with and without Basic auth,
+  plus a packed-tarball smoke test, on every pull request.
 
 ## License
 

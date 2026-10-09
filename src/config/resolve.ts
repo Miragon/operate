@@ -5,12 +5,12 @@
  */
 
 import type { OperateError } from '../errors.js';
-import { compact, mergeHeaders } from '../util.js';
+import { compact } from '../util.js';
 import { configError } from './config-error.js';
-import { parseEnvHeaders, parseHeaders } from './headers.js';
+import { resolveHeaders } from './headers.js';
+import { type Env, nonEmpty, pick } from './pick.js';
+import { authorizationConflict, resolveAuth } from './resolve-auth.js';
 import {
-  AUTH_TYPES,
-  type AuthConfig,
   type ConfigFile,
   type ConfigFlags,
   DEFAULT_TIMEOUT_MS,
@@ -20,38 +20,14 @@ import {
   type OutputFormat,
   type Profile,
   type ResolvedConfig,
-  type Source,
+  type SelectedProfile,
 } from './types.js';
-
-type Env = Readonly<Record<string, string | undefined>>;
-
-interface Picked<T> {
-  readonly value: T | undefined;
-  readonly source: Source;
-}
 
 /** Largest delay a Node.js timer supports (2^31 - 1 ms, about 24.8 days). */
 export const MAX_TIMEOUT_MS = 2_147_483_647;
 
-/** Planned auth types, tracked as GitHub issues. */
-const AUTH_ISSUES = {
-  basic: 'https://github.com/Miragon/operate/issues/1',
-  oauth: 'https://github.com/Miragon/operate/issues/2',
-} as const;
-
 const TRUE_VALUES: readonly string[] = ['1', 'true', 'yes', 'on'];
 const FALSE_VALUES: readonly string[] = ['0', 'false', 'no', 'off'];
-
-function nonEmpty(value: string | undefined): string | undefined {
-  return value === undefined || value.trim() === '' ? undefined : value.trim();
-}
-
-function pick<T>(flag: T | undefined, env: T | undefined, profile: T | undefined): Picked<T> {
-  if (flag !== undefined) return { value: flag, source: 'flag' };
-  if (env !== undefined) return { value: env, source: 'env' };
-  if (profile !== undefined) return { value: profile, source: 'profile' };
-  return { value: undefined, source: 'default' };
-}
 
 /** Where the name of the selected profile came from. */
 export type ProfileOrigin = 'flag' | 'env' | 'default';
@@ -99,7 +75,7 @@ export function selectProfile(
   flags: ConfigFlags,
   env: Env,
   file: ConfigFile | undefined,
-): { name?: string; profile?: Profile } {
+): SelectedProfile {
   const selected = profileName(flags, env, file);
   if (selected === undefined) return {};
   const profile = findProfile(file, selected.name);
@@ -137,7 +113,7 @@ export function validateUrl(url: string): string {
   if (parsed.username !== '' || parsed.password !== '') {
     throw configError(
       'Engine URL must not contain credentials',
-      `Remove the user info from the URL. Basic auth is planned, see ${AUTH_ISSUES.basic}.`,
+      'Remove the user info from the URL and use Basic auth: --auth basic --auth-user <name> with the password from --auth-password-stdin or OPERATE_PASSWORD.',
     );
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
@@ -209,17 +185,6 @@ export function parseTimeout(value: string | number): number {
   return timeout;
 }
 
-export function validateAuth(type: string): AuthConfig {
-  const known = AUTH_TYPES.find((candidate) => candidate === type);
-  if (known === undefined) {
-    throw configError(
-      `Unsupported auth type "${type}"`,
-      `Supported: ${AUTH_TYPES.join(', ')}. Basic auth (${AUTH_ISSUES.basic}) and OAuth authorization code (${AUTH_ISSUES.oauth}) are planned.`,
-    );
-  }
-  return { type: known };
-}
-
 /** Parses OPERATE_READ_ONLY. Blank means unset; unknown values fail instead of silently disabling. */
 export function parseReadOnly(value: string | undefined): boolean | undefined {
   const normalized = nonEmpty(value)?.toLowerCase();
@@ -232,29 +197,12 @@ export function parseReadOnly(value: string | undefined): boolean | undefined {
   );
 }
 
-/** The most specific source that contributed headers. */
-function headerSource(...layers: readonly (readonly [Source, object])[]): Source {
-  return layers.find(([, headers]) => Object.keys(headers).length > 0)?.[0] ?? 'default';
-}
-
-/** Headers merge per name: profile, then OPERATE_HEADERS, then -H flags (later wins). */
-function resolveHeaders(flags: ConfigFlags, env: Env, profile: Profile | undefined) {
-  const fromFlags = parseHeaders(flags.headers ?? []);
-  const fromEnv = parseEnvHeaders(env[ENV.headers]);
-  const fromProfile = profile?.headers ?? {};
-  return {
-    value: mergeHeaders(fromProfile, fromEnv, fromFlags),
-    source: headerSource(['flag', fromFlags], ['env', fromEnv], ['profile', fromProfile]),
-  };
-}
-
 function pickAll(flags: ConfigFlags, env: Env, profile: Profile | undefined) {
   return {
     url: pick(nonEmpty(flags.url), nonEmpty(env[ENV.url]), profile?.url),
     engine: pick(nonEmpty(flags.engine), nonEmpty(env[ENV.engine]), profile?.engine),
     output: pick(nonEmpty(flags.output), nonEmpty(env[ENV.output]), profile?.output),
     timeout: pick<string | number>(flags.timeout, nonEmpty(env[ENV.timeout]), profile?.timeout),
-    auth: pick(undefined, nonEmpty(env[ENV.auth]), profile?.auth?.type),
     readOnly: pick(flags.readOnly, parseReadOnly(env[ENV.readOnly]), profile?.readOnly),
     headers: resolveHeaders(flags, env, profile),
   };
@@ -265,20 +213,25 @@ export function resolveConfig(
   env: Env,
   file: ConfigFile | undefined,
 ): ResolvedConfig {
-  const { name, profile } = selectProfile(flags, env, file);
-  const picked = pickAll(flags, env, profile);
-  const { url, engine, output, timeout, auth, readOnly, headers } = picked;
-  return {
+  const selected = selectProfile(flags, env, file);
+  const { url, engine, output, timeout, readOnly, headers } = pickAll(flags, env, selected.profile);
+  const values = {
     ...compact({
-      profile: name,
+      profile: selected.name,
       engine: engine.value === undefined ? undefined : validateEngine(engine.value),
       output: output.value === undefined ? undefined : validateOutput(output.value),
     }),
     url: validateUrl(url.value ?? DEFAULT_URL),
-    auth: validateAuth(auth.value ?? 'none'),
     timeoutMs: timeout.value === undefined ? DEFAULT_TIMEOUT_MS : parseTimeout(timeout.value),
     headers: headers.value,
     readOnly: readOnly.value ?? false,
+  };
+  const auth = resolveAuth(flags, env, selected);
+  const conflict = authorizationConflict(auth.auth, headers.authorization, selected.name);
+  if (conflict !== undefined) throw conflict;
+  return {
+    ...values,
+    auth: auth.auth,
     sources: {
       url: url.source,
       engine: engine.source,

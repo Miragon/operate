@@ -21,7 +21,7 @@ function response(
 }
 
 const HINTS = {
-  401: "The engine requires authentication and operate sent no credentials (the built-in auth type is none). Pass them as a header: -H 'Authorization: Basic <base64 of user:password>', OPERATE_HEADERS, or store it with `operate config set <profile> --header 'Authorization: ...'`. Built-in Basic auth is planned: https://github.com/Miragon/operate/issues/1.",
+  401: "The engine requires authentication and operate sent no credentials. Use Basic auth: --auth basic --auth-user <name> with the password piped into --auth-password-stdin, OPERATE_USERNAME and OPERATE_PASSWORD, or a profile: `operate config set <profile> --auth basic --auth-user <name> --auth-password-env <VAR>`. For a token, pass -H 'Authorization: Bearer <token>' or OPERATE_HEADERS.",
   rejected:
     'The engine rejected the credentials of the Authorization header (from -H, OPERATE_HEADERS or the profile headers; `operate config show` shows which). Check user and password or the token.',
   queryParam:
@@ -173,6 +173,40 @@ describe('httpError', () => {
     expect(error.details.request).toEqual(REQUEST);
     const other = { ...REQUEST, headers: { 'X-Tenant': 'a' } };
     expect(httpError(response(401, ''), other).details.hint).toBe(HINTS[401]);
+  });
+
+  it('names the user and the source of rejected Basic auth credentials', () => {
+    const basic = { ...REQUEST, principal: { user: 'demo', source: 'env' } };
+    const error = httpError(response(401, ''), basic);
+    expect(error.code).toBe('UNAUTHORIZED');
+    expect(error.exitCode).toBe(4);
+    expect(error.details.hint).toBe(
+      'The engine rejected the credentials of user demo (source: env). Check the username and the password; `operate config show` shows where each comes from. After a failed login the engine refuses the user for a few seconds (and locks it after repeated failures), so wait before retrying.',
+    );
+    expect(error.details.request).toEqual(REQUEST);
+    expect(HINTS[401]).toContain('operate sent no credentials');
+    expect(HINTS[401]).not.toContain('issues/1');
+  });
+
+  it('says why no credentials were sent when Basic auth is off', () => {
+    const off = { ...REQUEST, authOff: 'Basic auth is switched off by OPERATE_AUTH=none' };
+    const error = httpError(response(401, ''), off);
+    expect(error.details.hint).toBe(
+      HINTS[401].replace(
+        'operate sent no credentials.',
+        'operate sent no credentials: Basic auth is switched off by OPERATE_AUTH=none.',
+      ),
+    );
+    expect(error.details.hint).not.toBe(HINTS[401]);
+    // an Authorization header was sent after all: the credentials were rejected
+    const sent = { ...off, headers: { Authorization: 'Bearer t' } };
+    expect(httpError(response(401, ''), sent).details.hint).toBe(HINTS.rejected);
+    expect(httpError(response(403, ''), off).details.hint).toBe(HINTS[403]);
+  });
+
+  it('keeps the 403 hint with Basic auth credentials', () => {
+    const basic = { ...REQUEST, principal: { user: 'demo', source: 'flag' } };
+    expect(httpError(response(403, ''), basic).details.hint).toBe(HINTS[403]);
   });
 
   it('reports a 404 QueryParamException as a rejected request, not a missing resource', () => {

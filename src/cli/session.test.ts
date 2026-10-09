@@ -23,6 +23,7 @@ const NONE: GlobalOptions = {
   readOnly: false,
   verbose: false,
   showSecrets: false,
+  authPasswordStdin: false,
 };
 
 function context(runtime = fakeRuntime()): CliContext {

@@ -7,14 +7,16 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { argv, globalFlag } from './support/catalog.js';
-import { assertCliBuilt, bindCli, type Cli, type CliError, type CliResult } from './support/cli.js';
+import { assertCliBuilt, bindCli, type Cli } from './support/cli.js';
 import {
+  ENGINE_START_TIMEOUT_MS,
   type EngineName,
   ENGINES,
   isEngineEnabled,
   type RunningEngine,
   startEngine,
 } from './support/engines.js';
+import { expectError, expectExit, expectSuccess, required } from './support/expect.js';
 import {
   DECISION_KEY,
   EXTERNAL_TOPIC,
@@ -38,33 +40,8 @@ import type {
   TypedValue,
 } from './support/types.js';
 
-const ENGINE_START_TIMEOUT_MS = 240_000;
 const WORKER_ID = 'w1';
 const UNREACHABLE_URL = 'http://127.0.0.1:1/engine-rest';
-
-function expectExit(result: CliResult, code: number): CliResult {
-  expect(result.code, result.diagnostics).toBe(code);
-  return result;
-}
-
-function expectSuccess(result: CliResult): CliResult {
-  return expectExit(result, 0);
-}
-
-/** Asserts a failed run with the given error code and exit code; returns the parsed error. */
-function expectError(result: CliResult, code: string, exitCode: number): CliError {
-  expectExit(result, exitCode);
-  const error = result.errorJson();
-  expect(error, result.diagnostics).toMatchObject({ code, exitCode });
-  return error;
-}
-
-function required<T>(value: T | undefined, what: string): T {
-  if (value === undefined) {
-    throw new Error(`${what} is missing; an earlier step of the scenario failed`);
-  }
-  return value;
-}
 
 export function registerScenario(engineName: EngineName): void {
   describe.skipIf(!isEngineEnabled(engineName))(`operate against ${engineName}`, () => {
