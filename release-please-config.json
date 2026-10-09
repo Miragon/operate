@@ -5,7 +5,6 @@
   "include-v-in-tag": true,
   "bump-minor-pre-major": true,
   "bump-patch-for-minor-pre-major": false,
-  "bootstrap-sha": "da88fbbad6d61b51a7f4160a2022e8c221621f76",
   "changelog-sections": [
     { "type": "feat", "section": "Features" },
     { "type": "fix", "section": "Bug Fixes" },
@@ -22,8 +21,7 @@
   ],
   "packages": {
     ".": {
-      "package-name": "@miragon/operate",
-      "initial-version": "0.1.0"
+      "package-name": "@miragon/operate"
     }
   }
 }

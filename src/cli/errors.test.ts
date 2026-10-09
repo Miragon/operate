@@ -99,6 +99,95 @@ describe('commanderUsageError', () => {
     expect(far.details.hint).toBe('Run "operate task list --help" for the usage.');
   });
 
+  it('never quotes the value of an unknown --name=value option', () => {
+    const error = commanderUsageError(
+      exitOf(list, 'commander.unknownOption', "error: unknown option '--assigne=S3cr3t'"),
+    );
+    expect(error.message).toBe('Unknown option "--assigne"');
+    expect(error.details.hint).toBe(
+      'Did you mean one of --assignee, --assigned? Run "operate task list --help" for the usage.',
+    );
+    const quoted = commanderUsageError(
+      exitOf(list, 'commander.unknownOption', "error: unknown option '--auth-password=it's'"),
+    );
+    expect(quoted.message).toBe('Unknown option "--auth-password"');
+  });
+
+  it('reports a value given to a flag that takes none', () => {
+    const error = commanderUsageError(
+      exitOf(list, 'commander.unknownOption', "error: unknown option '--assigned=S3cr3t'"),
+    );
+    expect(error.message).toBe('Option "--assigned" takes no value');
+    expect(error.details.hint).toBe('Run "operate task list --help" for the usage.');
+  });
+
+  describe('auth flags', () => {
+    const auth = new Command('ping');
+    root.addCommand(auth);
+    auth.option('--auth <type>').option('--auth-user <name>').option('--auth-password-stdin');
+    const secret =
+      'Secrets are never flag values: pipe the password into --auth-password-stdin, or set OPERATE_PASSWORD (a profile stores the name of a variable: config set --auth-password-env <VAR>); pass a token with OPERATE_HEADERS. ';
+    const help = 'Run "operate ping --help" for the usage.';
+    const unknown = (flag: string) =>
+      commanderUsageError(
+        exitOf(auth, 'commander.unknownOption', `error: unknown option '${flag}'`),
+      );
+
+    it('points the flag names of issue #1 to the --auth-* flags', () => {
+      for (const flag of ['--username', '--USER', '--auth-username']) {
+        expect(unknown(flag).details.hint).toBe(`Did you mean --auth-user? ${help}`);
+      }
+      expect(unknown('--password-stdin').details.hint).toBe(
+        `Did you mean --auth-password-stdin? ${help}`,
+      );
+      expect(unknown('--auth-type=basic').details.hint).toBe(`Did you mean --auth? ${help}`);
+      // only flags the command has: ping has no --auth-password-env
+      expect(unknown('--password-env').details.hint).toBe(`${secret}${help}`);
+    });
+
+    it('says that passwords are never flag values, without the value', () => {
+      for (const flag of [
+        '--password',
+        '--auth-password',
+        '--pass',
+        '--token',
+        '--client-secret',
+      ]) {
+        const error = unknown(`${flag}=S3cr3t`);
+        expect(error.message).toBe(`Unknown option "${flag}"`);
+        expect(error.details.hint).toBe(`${secret}${help}`);
+      }
+      const stdin = unknown('--auth-password-stdin=S3cr3t');
+      expect(stdin.message).toBe('Option "--auth-password-stdin" takes no value');
+      expect(stdin.details.hint).toBe(`${secret}${help}`);
+      expect(unknown('--compass').details.hint).toBe(help);
+    });
+
+    it('leaves out extra arguments next to an option about a secret', () => {
+      const excess = (argv: readonly string[]) =>
+        commanderUsageError(
+          exitOf(
+            auth,
+            'commander.excessArguments',
+            "error: too many arguments for 'ping'. Expected 0 arguments but got 2: S3:cr3t, x\ny.",
+          ),
+          argv,
+        );
+      const stdin = excess(['ping', '--auth-password-stdin', 'S3:cr3t', 'x']);
+      expect(stdin.message).toBe("Too many arguments for 'ping'. Expected 0 arguments but got 2.");
+      expect(stdin.details.hint).toBe(
+        `--auth-password-stdin takes no value: pipe the password into it, e.g. printf '%s\\n' "$PASSWORD" | operate ... --auth-password-stdin. ${help}`,
+      );
+      const other = excess(['ping', '--password=x', 'S3:cr3t']);
+      expect(other.message).toBe("Too many arguments for 'ping'. Expected 0 arguments but got 2.");
+      expect(other.details.hint).toBe(help);
+      expect(excess(['ping', 'S3:cr3t', 'x\ny']).message).toBe(
+        "Too many arguments for 'ping'. Expected 0 arguments but got 2: S3:cr3t, x\ny.",
+      );
+      expect(excess(['ping', 'password', 'x']).message).toContain('got 2: S3:cr3t, x\ny.');
+    });
+  });
+
   it('keeps messages without prefix', () => {
     expect(commanderUsageError(exitOf(root, 'commander.error', 'odd')).message).toBe('Odd');
   });

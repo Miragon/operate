@@ -5,6 +5,7 @@ import { OperateError } from '../errors.js';
 import type { FileSystem } from '../runtime.js';
 import { isRecord } from '../util.js';
 import { jsonErrorPosition } from './json-position.js';
+import { profileAuthProblem } from './auth.js';
 import { configError } from './config-error.js';
 import { isHeaderName, isHeaderValue } from './headers.js';
 import { MAX_TIMEOUT_MS, isEngineName, isTimeout } from './resolve.js';
@@ -90,13 +91,10 @@ function isHeaderMap(value: unknown): boolean {
 
 type Check = readonly [check: (value: unknown) => boolean, expected: string];
 
-const PROFILE_CHECKS: Readonly<Record<ProfileKey, Check>> = {
+/** Checks of the plain profile values; the auth object has its own (`profileAuthProblem`). */
+const PROFILE_CHECKS: Readonly<Record<Exclude<ProfileKey, 'auth'>, Check>> = {
   url: [isNonEmptyString, 'a URL such as http://localhost:8080/engine-rest'],
   engine: [isEngineName, 'a process engine name, not "." or ".."'],
-  auth: [
-    (value) => isRecord(value) && typeof value.type === 'string',
-    'an object like {"type": "none"}',
-  ],
   output: [
     (value) => OUTPUT_FORMATS.some((format) => format === value),
     OUTPUT_FORMATS.join(' or '),
@@ -109,14 +107,20 @@ const PROFILE_CHECKS: Readonly<Record<ProfileKey, Check>> = {
   readOnly: [(value) => typeof value === 'boolean', 'true or false'],
 };
 
+function valueProblem(name: string, key: ProfileKey, value: unknown): string | undefined {
+  if (key === 'auth') return profileAuthProblem(name, value);
+  const [check, expected] = PROFILE_CHECKS[key];
+  return check(value)
+    ? undefined
+    : `profile "${name}" has an invalid ${key} (expected ${expected})`;
+}
+
 function validateProfile(name: string, value: unknown, path: string): Profile {
   if (!isRecord(value)) fail(path, `profile "${name}" must be an object`);
   checkKeys(value, PROFILE_KEYS, `profile "${name}"`, path);
   for (const key of PROFILE_KEYS) {
-    const [check, expected] = PROFILE_CHECKS[key];
-    if (Object.hasOwn(value, key) && !check(value[key])) {
-      fail(path, `profile "${name}" has an invalid ${key} (expected ${expected})`);
-    }
+    const problem = Object.hasOwn(value, key) ? valueProblem(name, key, value[key]) : undefined;
+    if (problem !== undefined) fail(path, problem);
   }
   return value;
 }
@@ -197,7 +201,7 @@ export async function readConfigFile(
   return parseConfigFile(new TextDecoder().decode(data), path);
 }
 
-/** Writes the file with mode 0600 (it may contain credentials in headers). */
+/** Writes the file with mode 0600 (it may contain credentials: headers, a Basic auth password). */
 export async function writeConfigFile(
   fs: FileSystem,
   path: string,

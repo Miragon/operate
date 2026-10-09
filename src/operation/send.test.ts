@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { basicAuth } from '../auth/basic.js';
 import { noAuth } from '../auth/none.js';
 import { OperateError } from '../errors.js';
 import type { ClientOptions } from '../http/client.js';
@@ -98,6 +99,36 @@ describe('sendRequest', () => {
     );
     expect(error.details.hint).toMatch(/^The engine rejected the credentials/);
     expect(error.details.request).toEqual({ method: 'POST', url: request.url });
+  });
+
+  it('names the user of rejected Basic auth credentials in the 401 hint', async () => {
+    const auth = basicAuth({
+      type: 'basic',
+      username: 'demo',
+      password: 'wrong-password',
+      sources: { username: 'profile', password: 'env' },
+    });
+    const basic = { ...client(() => new Response('', { status: 401 })), auth };
+    const error = await caught(sendRequest(request, basic));
+    expect(error.code).toBe('UNAUTHORIZED');
+    expect(error.details.hint).toBe(
+      'The engine rejected the credentials of user demo (source: profile for the user, env for the password). Check the username and the password; `operate config show` shows where each comes from. After a failed login the engine refuses the user for a few seconds (and locks it after repeated failures), so wait before retrying.',
+    );
+    expect(error.details.request).toEqual({ method: 'POST', url: request.url });
+    expect(JSON.stringify(error.details)).not.toContain('wrong-password');
+    const forbidden = { ...client(() => new Response('', { status: 403 })), auth };
+    expect((await caught(sendRequest(request, forbidden))).details.hint).toBe(
+      'The user is authenticated but lacks the authorization for this operation.',
+    );
+  });
+
+  it('passes why the auth provider sends no credentials to the 401 hint', async () => {
+    const auth = noAuth('a password is set (from OPERATE_PASSWORD), but no username');
+    const unauthenticated = { ...client(() => new Response('', { status: 401 })), auth };
+    const error = await caught(sendRequest(request, unauthenticated));
+    expect(error.details.hint).toMatch(
+      /^The engine requires authentication and operate sent no credentials: a password is set \(from OPERATE_PASSWORD\), but no username\. Use Basic auth: /,
+    );
   });
 
   it('maps HTTP errors with the engine message', async () => {

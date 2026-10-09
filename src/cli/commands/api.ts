@@ -12,7 +12,7 @@ import { usageError } from '../../errors.js';
 import type { HttpRequest } from '../../http/types.js';
 import { readBody } from '../../operation/body.js';
 import { commandRef } from '../../operation/command-ref.js';
-import { checkEffect, previewRequest, sendRequest } from '../../operation/execute.js';
+import { checkEffect, dryRunPreview, sendRequest } from '../../operation/execute.js';
 import { apiPath, apiQuery, type ApiPath, parseApiPath } from '../../operation/raw-request.js';
 import { acceptHeader, joinUrl } from '../../operation/request.js';
 import type { OperationResult } from '../../operation/result.js';
@@ -53,14 +53,18 @@ interface ApiCall extends ApiPath {
   readonly operation: OperationSpec | undefined;
 }
 
+interface ApiOptions {
+  readonly query?: string[];
+  readonly body?: string;
+}
+
 async function apiRequest(
   call: ApiCall,
-  command: Command,
+  options: ApiOptions,
   session: Session,
   context: CliContext,
 ): Promise<HttpRequest> {
   const { runtime } = context;
-  const options = command.opts<{ query?: string[]; body?: string }>();
   const deps = { fs: runtime.fs, readStdin: () => runtime.readStdin() };
   const body =
     options.body === undefined ? undefined : stringifyJson(await readBody(options.body, deps));
@@ -80,17 +84,19 @@ async function apiRequest(
 
 async function runApi(rawMethod: string, rawPath: string, command: Command, context: CliContext) {
   const { runtime, catalog } = context;
-  const session = await openSession(context, readGlobals(command));
+  const options = command.opts<ApiOptions>();
+  const session = await openSession(context, readGlobals(command), options.body === '-');
   const method = parseMethod(rawMethod);
   const { path, query } = parseApiPath(rawPath);
   const operation = findOperationByPath(catalog, method, path);
   checkEffect(apiEffect(operation, method), `operate api ${method} ${path}`, guardsOf(session));
-  const request = await apiRequest({ method, path, query, operation }, command, session, context);
+  const request = await apiRequest({ method, path, query, operation }, options, session, context);
+  const client = clientOf(session, runtime);
   const result: OperationResult = session.globals.dryRun
-    ? { kind: 'dry-run', request: previewRequest(request) }
+    ? { kind: 'dry-run', request: dryRunPreview(request, client.auth) }
     : await sendRequest(
         request,
-        clientOf(session, runtime),
+        client,
         operation === undefined ? undefined : commandRef(operation, catalog),
       );
   await emitResult(result, session, runtime);

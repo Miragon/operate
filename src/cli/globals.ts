@@ -70,11 +70,25 @@ export const GLOBAL_OPTIONS: readonly GlobalOptionSpec[] = [
     repeatable: true,
     description: 'Extra request header "Name: value"; repeatable',
   },
+  {
+    long: 'auth',
+    value: '<type>',
+    description: 'Authentication: none or basic; a username alone selects basic (env OPERATE_AUTH)',
+  },
+  {
+    long: 'auth-user',
+    value: '<name>',
+    description: 'Username for Basic auth (env OPERATE_USERNAME)',
+  },
+  {
+    long: 'auth-password-stdin',
+    description: 'Read the Basic auth password from the first line of stdin (env OPERATE_PASSWORD)',
+  },
   { long: 'verbose', description: 'Trace requests and responses on stderr' },
   { long: 'out-file', value: '<path>', description: 'Write the response body to a file' },
   {
     long: 'show-secrets',
-    description: 'Do not mask secret headers in dry-run, verbose and config output',
+    description: 'Do not mask secret headers and passwords in dry-run, verbose and config output',
   },
   { long: 'help', short: 'h', description: 'Display help for command' },
 ];
@@ -92,6 +106,8 @@ export interface GlobalOptions {
   readonly fields?: string;
   readonly timeout?: string;
   readonly outFile?: string;
+  readonly auth?: string;
+  readonly authUser?: string;
   readonly headers: readonly string[];
   readonly pretty: boolean;
   readonly dryRun: boolean;
@@ -99,6 +115,7 @@ export interface GlobalOptions {
   readonly readOnly: boolean;
   readonly verbose: boolean;
   readonly showSecrets: boolean;
+  readonly authPasswordStdin: boolean;
 }
 
 /** commander flags of a spec, e.g. `-o, --output <format>`. */
@@ -148,6 +165,8 @@ export function readGlobals(command: Command): GlobalOptions {
       fields: text('fields'),
       timeout: text('timeout'),
       outFile: text('outFile'),
+      auth: text('auth'),
+      authUser: text('authUser'),
     }),
     headers: Array.isArray(opts.header) ? (opts.header as string[]) : [],
     pretty: flag('pretty'),
@@ -156,11 +175,15 @@ export function readGlobals(command: Command): GlobalOptions {
     readOnly: flag('readOnly'),
     verbose: flag('verbose'),
     showSecrets: flag('showSecrets'),
+    authPasswordStdin: flag('authPasswordStdin'),
   };
 }
 
-/** The config related global options as input for `resolveConfig`. */
-export function configFlags(globals: GlobalOptions): ConfigFlags {
+/**
+ * The config related global options as input for `resolveConfig`; `password` is what
+ * `--auth-password-stdin` read from stdin.
+ */
+export function configFlags(globals: GlobalOptions, password?: string): ConfigFlags {
   return compact({
     url: globals.url,
     engine: globals.engine,
@@ -169,5 +192,8 @@ export function configFlags(globals: GlobalOptions): ConfigFlags {
     timeout: globals.timeout,
     headers: globals.headers.length > 0 ? globals.headers : undefined,
     readOnly: globals.readOnly ? true : undefined,
+    auth: globals.auth,
+    authUser: globals.authUser,
+    authPassword: password,
   });
 }

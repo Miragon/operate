@@ -5,6 +5,17 @@ export interface PingOutput {
   readonly reachable: boolean;
   readonly version: string;
   readonly engines: readonly string[];
+  /** Auth type: `none` or `basic`. */
+  readonly auth: string;
+  /** The username, only with `basic`. */
+  readonly user?: string;
+}
+
+/** `operate config show`: every effective value with the source it came from. */
+export interface ConfigShowOutput {
+  readonly configFile: string;
+  readonly profile: string | null;
+  readonly values: Readonly<Record<string, unknown>>;
 }
 
 interface DefinitionRef {

@@ -5,13 +5,13 @@
  */
 
 import { compact, mergeHeaders } from '../util.js';
+import { changedAuth, settleAuthorization } from './auth-edit.js';
 import { configError } from './config-error.js';
 import { parseHeaders } from './headers.js';
 import {
   findProfile,
   missingProfileError,
   parseTimeout,
-  validateAuth,
   validateEngine,
   validateOutput,
   validateUrl,
@@ -29,7 +29,14 @@ import {
 export interface ProfileChanges {
   readonly url?: string;
   readonly engine?: string;
+  /** Auth type: none or basic. */
   readonly auth?: string;
+  /** Basic auth username. */
+  readonly authUser?: string;
+  /** Name of the environment variable holding the password; replaces a stored password. */
+  readonly authPasswordEnv?: string;
+  /** Literal password (discouraged: stored in plain text); replaces a stored passwordEnv. */
+  readonly authPassword?: string;
   readonly output?: string;
   readonly timeout?: string | number;
   /** Headers in the form "Name: value", merged into the existing headers of the profile. */
@@ -55,7 +62,8 @@ interface ConfigValue<T> {
 }
 
 /**
- * Output of `operate config show`: every effective value with its source. Header values are not
+ * Output of `operate config show`: every effective value with its source (`auth` is the type,
+ * `username` and `password` the Basic auth credentials). Header values and the password are not
  * masked here; the CLI masks them unless --show-secrets is given.
  */
 export interface ConfigView {
@@ -65,6 +73,8 @@ export interface ConfigView {
     readonly url: ConfigValue<string>;
     readonly engine: ConfigValue<string | null>;
     readonly auth: ConfigValue<string>;
+    readonly username: ConfigValue<string | null>;
+    readonly password: ConfigValue<string | null>;
     readonly output: ConfigValue<OutputFormat | null>;
     readonly timeout: ConfigValue<number>;
     readonly headers: ConfigValue<Readonly<Record<string, string>>>;
@@ -108,7 +118,7 @@ function changedValues(existing: Profile | undefined, changes: ProfileChanges): 
   return compact({
     url: ifGiven(changes.url, validateUrl),
     engine: ifGiven(changes.engine, validateEngine),
-    auth: ifGiven(changes.auth, validateAuth),
+    auth: changedAuth(existing?.auth, changes),
     output: ifGiven(changes.output, validateOutput),
     timeout: ifGiven(changes.timeout, parseTimeout),
     headers: ifGiven(changes.headers, (headers) => changedHeaders(existing, headers)),
@@ -136,7 +146,8 @@ function requireProfile(file: ConfigFile, name: string): Profile {
 
 /**
  * Creates or updates a profile; only the given keys change, headers are merged. The first profile
- * of a file becomes the default profile automatically.
+ * of a file becomes the default profile automatically. Basic auth options replace a stored
+ * Authorization header; any other mix of the two is a CONFIG error (`settleAuthorization`).
  */
 export function setProfile(
   file: ConfigFile | undefined,
@@ -146,7 +157,8 @@ export function setProfile(
   validateProfileName(name);
   const current = file ?? EMPTY;
   const existing = findProfile(current, name);
-  const profile = canonical({ ...existing, ...changedValues(existing, changes) });
+  const merged = { ...existing, ...changedValues(existing, changes) };
+  const profile = canonical(settleAuthorization(merged, changes, name));
   const first = Object.keys(current.profiles).length === 0;
   const makeDefault = changes.makeDefault === true || first;
   return buildFile(
@@ -209,22 +221,29 @@ export function listProfiles(file: ConfigFile | undefined): ProfileSummary[] {
       default: current.defaultProfile === name,
       url: profile.url ?? null,
       engine: profile.engine ?? null,
-      auth: profile.auth?.type ?? null,
+      auth: profile.auth?.type ?? (profile.auth?.username === undefined ? null : 'basic'),
       readOnly: profile.readOnly === true,
     }))
     .sort(byName);
 }
 
+const NOT_SET = { value: null, source: 'default' } as const;
+
 /** The effective configuration with the source of every value. */
 export function showConfig(resolved: ResolvedConfig, configFile: string): ConfigView {
-  const { sources } = resolved;
+  const { sources, auth } = resolved;
+  const basic = auth.type === 'basic' ? auth : undefined;
   return {
     configFile,
     profile: resolved.profile ?? null,
     values: {
       url: { value: resolved.url, source: sources.url },
       engine: { value: resolved.engine ?? null, source: sources.engine },
-      auth: { value: resolved.auth.type, source: sources.auth },
+      auth: { value: auth.type, source: sources.auth },
+      username:
+        basic === undefined ? NOT_SET : { value: basic.username, source: basic.sources.username },
+      password:
+        basic === undefined ? NOT_SET : { value: basic.password, source: basic.sources.password },
       output: { value: resolved.output ?? null, source: sources.output },
       timeout: { value: resolved.timeoutMs, source: sources.timeout },
       headers: { value: resolved.headers, source: sources.headers },

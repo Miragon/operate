@@ -16,6 +16,7 @@ import type { Runtime } from '../runtime.js';
 import type { CliContext } from './context.js';
 import { configFlags, type GlobalOptions } from './globals.js';
 import { maxWidthOf, terminalFormat } from './output-format.js';
+import { checkStdinUse, readStdinPassword } from './stdin-password.js';
 import { traceWriter } from './trace.js';
 
 export interface Session {
@@ -37,12 +38,21 @@ export function isExplicit(runtime: Runtime, flag: string | undefined): boolean 
   return explicitConfigPath(runtime.env, flag) !== undefined;
 }
 
-/** Resolves the configuration and records the output format for error rendering. */
-export async function openSession(context: CliContext, globals: GlobalOptions): Promise<Session> {
+/**
+ * Resolves the configuration and records the output format for error rendering. Reads the
+ * password from stdin for `--auth-password-stdin`; `bodyFromStdin` (`--body -`) refuses that.
+ */
+export async function openSession(
+  context: CliContext,
+  globals: GlobalOptions,
+  bodyFromStdin = false,
+): Promise<Session> {
   const { runtime } = context;
+  checkStdinUse(globals.authPasswordStdin, bodyFromStdin);
   const path = configPath(runtime, globals.config);
   const file = await readConfigFile(runtime.fs, path, isExplicit(runtime, globals.config));
-  const config = resolveConfig(configFlags(globals), runtime.env, file);
+  const password = globals.authPasswordStdin ? await readStdinPassword(runtime) : undefined;
+  const config = resolveConfig(configFlags(globals, password), runtime.env, file);
   const format = config.output ?? terminalFormat(runtime);
   context.state.format = format;
   return {

@@ -79,6 +79,8 @@ export const ROOT_DESCRIPTION = [
   '',
   'The REST API root defaults to http://localhost:8080/engine-rest; set it with --url, OPERATE_URL or a profile (operate config set).',
   '',
+  'Basic auth: --auth-user <name> with the password piped into --auth-password-stdin, OPERATE_USERNAME and OPERATE_PASSWORD, or a profile (operate config set <profile> --auth basic --auth-user <name> --auth-password-env <VAR>).',
+  '',
   'Get started:',
   '  operate ping                        check the connection to the engine',
   '  operate commands                    list the API groups',

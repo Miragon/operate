@@ -17,6 +17,11 @@ export interface EngineDefinition {
   readonly restPath: string;
   /** Version reported by `GET /version`. */
   readonly version: string;
+  /**
+   * Environment that protects the REST API with HTTP Basic authentication (Spring relaxed binding
+   * of `<prefix>.bpm.run.auth.*`). The users are the engine's identity service, e.g. {@link ADMIN}.
+   */
+  readonly basicAuthEnv: Readonly<Record<string, string>>;
 }
 
 export interface RunningEngine {
@@ -30,6 +35,11 @@ export interface RunningEngine {
 const ENGINES_ENV = 'OPERATE_IT_ENGINES';
 
 const STARTUP_TIMEOUT_MS = 180_000;
+/** Timeout of a `beforeAll` that starts an engine: the startup plus pulling the image. */
+export const ENGINE_START_TIMEOUT_MS = 240_000;
+
+/** The administrator that every Run distribution creates (`admin-user` of its default.yml). */
+export const ADMIN = { username: 'demo', password: 'demo' } as const;
 
 export const ENGINES: Readonly<Record<EngineName, EngineDefinition>> = {
   operaton: {
@@ -38,6 +48,7 @@ export const ENGINES: Readonly<Record<EngineName, EngineDefinition>> = {
     port: 8080,
     restPath: '/engine-rest',
     version: '2.1.5',
+    basicAuthEnv: { OPERATON_BPM_RUN_AUTH_ENABLED: 'true' },
   },
   cibseven: {
     name: 'cibseven',
@@ -45,6 +56,11 @@ export const ENGINES: Readonly<Record<EngineName, EngineDefinition>> = {
     port: 8080,
     restPath: '/engine-rest',
     version: '2.2.0',
+    // default.yml already enables auth, but with `pseudo` authentication that lets every request in
+    basicAuthEnv: {
+      CAMUNDA_BPM_RUN_AUTH_ENABLED: 'true',
+      CAMUNDA_BPM_RUN_AUTH_AUTHENTICATION: 'basic',
+    },
   },
   camunda: {
     name: 'camunda',
@@ -52,6 +68,7 @@ export const ENGINES: Readonly<Record<EngineName, EngineDefinition>> = {
     port: 8080,
     restPath: '/engine-rest',
     version: '7.24.0',
+    basicAuthEnv: { CAMUNDA_BPM_RUN_AUTH_ENABLED: 'true' },
   },
 };
 
@@ -81,13 +98,27 @@ export function isEngineEnabled(name: EngineName, env: NodeJS.ProcessEnv = proce
   return enabledEngines(env).includes(name);
 }
 
-/** Starts the engine container and waits until `GET <rest-root>/version` answers 200. */
-export async function startEngine(name: EngineName): Promise<RunningEngine> {
+export interface StartOptions {
+  /** Protect the REST API with HTTP Basic authentication ({@link EngineDefinition.basicAuthEnv}). */
+  readonly basicAuth?: boolean;
+}
+
+/**
+ * Starts the engine container and waits until `GET <rest-root>/version` answers 200 (with the
+ * {@link ADMIN} credentials when the REST API requires authentication).
+ */
+export async function startEngine(
+  name: EngineName,
+  options: StartOptions = {},
+): Promise<RunningEngine> {
   const definition = ENGINES[name];
+  const basicAuth = options.basicAuth === true;
+  const ready = Wait.forHttp(`${definition.restPath}/version`, definition.port).forStatusCode(200);
   const container = await new GenericContainer(definition.image)
     .withExposedPorts(definition.port)
+    .withEnvironment(basicAuth ? definition.basicAuthEnv : {})
     .withWaitStrategy(
-      Wait.forHttp(`${definition.restPath}/version`, definition.port).forStatusCode(200),
+      basicAuth ? ready.withBasicCredentials(ADMIN.username, ADMIN.password) : ready,
     )
     .withStartupTimeout(STARTUP_TIMEOUT_MS)
     .start();

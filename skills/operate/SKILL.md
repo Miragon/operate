@@ -26,12 +26,13 @@ operate config show --profile prod
 operate config use local
 ```
 
-- `operate ping` prints `{url, engine, reachable, version, engines, latencyMs, auth}`.
+- `operate ping` prints `{url, engine, reachable, version, engines, latencyMs, auth}`, plus
+  `user` with Basic auth.
 - Precedence for every setting: flag > environment variable > profile > default.
 - Environment: `OPERATE_URL`, `OPERATE_ENGINE`, `OPERATE_PROFILE`, `OPERATE_CONFIG`,
-  `OPERATE_OUTPUT`, `OPERATE_TIMEOUT`, `OPERATE_READ_ONLY`, `OPERATE_AUTH`, `OPERATE_HEADERS`.
-- `--engine <name>` addresses a named process engine (`/engine/{name}/...`); `operate ping`
-  checks that the REST API serves it.
+  `OPERATE_OUTPUT`, `OPERATE_TIMEOUT`, `OPERATE_READ_ONLY`, `OPERATE_AUTH`, `OPERATE_USERNAME`,
+  `OPERATE_PASSWORD`, `OPERATE_HEADERS`.
+- `--engine <name>` addresses a named process engine (`/engine/{name}/...`); `ping` checks it.
 - `operate config path` prints the config file location (`--config <path>` overrides it). A file
   named with `--config` or `OPERATE_CONFIG` must exist (`config set` creates it).
 - `config set` stores `--output` in the profile and prints in the `-o` format; `config show`
@@ -87,7 +88,8 @@ operate process-definition start invoice --var amount=250
   `--max-results`, default 500) and print one list.
 - Global options work after the command: `--url`, `--engine`, `--profile`, `--config`,
   `-o/--output`, `--fields`, `--pretty`, `--dry-run`, `-y/--yes`, `--read-only`, `--timeout`,
-  `-H/--header`, `--verbose`, `--out-file`, `--show-secrets`.
+  `-H/--header`, `--auth`, `--auth-user`, `--auth-password-stdin`, `--verbose`, `--out-file`,
+  `--show-secrets`.
 
 ```sh
 operate process-definition start invoice --business-key INV-1001 --var amount=250 --var approved=false
@@ -237,18 +239,16 @@ operate api DELETE /process-instance/$INSTANCE_ID --yes
 
 ## Authentication
 
-operate sends no credentials by itself: the only built-in auth type is `none`
-(`operate config set <profile> --auth none`, `OPERATE_AUTH=none`). Basic auth
-(https://github.com/Miragon/operate/issues/1) and OAuth with PKCE
-(https://github.com/Miragon/operate/issues/2) are planned. Until then pass the credentials as a
-header: with `-H`, in `OPERATE_HEADERS` (`Name: value` lines, keeps them out of the command
-line) or stored in a profile. Header values are masked in dry-run, verbose and config output:
+Basic auth: the username comes from `--auth-user`, `OPERATE_USERNAME` or the profile, the password
+from `--auth-password-stdin` (first line of stdin, never a flag), `OPERATE_PASSWORD` or the profile
+(best as a variable name: `--auth-password-env <VAR>`). A username or `--auth-password-stdin`
+selects Basic auth, `--auth none` or `OPERATE_AUTH=none` switch it off. Missing values: exit 3.
 
 ```sh
-operate task list --header 'Authorization: Basic ZGVtbzpkZW1v'
-export OPERATE_HEADERS='Authorization: Bearer eyJhbGciOi...'
-operate config set prod --header 'Authorization: Bearer eyJhbGciOi...'
+printf '%s\n' "$CAMUNDA_PASSWORD" | operate ping --auth basic --auth-user demo --auth-password-stdin
+operate config set prod --auth basic --auth-user demo --auth-password-env CAMUNDA_PASSWORD
 ```
 
-A 401 without an `Authorization` header means the engine wants credentials; with one, it
-rejected them.
+A 401 hint says why no credentials were sent or which user was rejected. Tokens go into a header
+(`-H`, `OPERATE_HEADERS`, profile headers); OAuth with PKCE is planned
+(https://github.com/Miragon/operate/issues/2). Secrets are masked unless `--show-secrets`.

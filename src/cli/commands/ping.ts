@@ -1,14 +1,15 @@
 /**
  * `operate ping` (design §5): `GET /version` and `GET /engine`, printed as
- * `{url, engine, reachable, version, engines, latencyMs, auth}`. Failures are normal errors; a
- * configured engine name that the REST API does not serve is a CONFIG error.
+ * `{url, engine, reachable, version, engines, latencyMs, auth}`, plus `user` with Basic auth.
+ * Failures are normal errors; a configured engine name that the REST API does not serve is a
+ * CONFIG error.
  */
 
 import type { Command } from 'commander';
 import { findByOperationId } from '../../catalog/catalog.js';
 import type { Catalog, OperationSpec } from '../../catalog/types.js';
 import { OperateError } from '../../errors.js';
-import { previewRequest, sendRequest } from '../../operation/execute.js';
+import { dryRunPreview, sendRequest } from '../../operation/execute.js';
 import { buildRequest, type OperationInput } from '../../operation/request.js';
 import type { OperationResult } from '../../operation/result.js';
 import { maskUrl } from '../../output/secrets.js';
@@ -74,15 +75,12 @@ async function runPing(command: Command, context: CliContext): Promise<void> {
     NO_INPUT,
     target,
   );
+  const client = clientOf(session, runtime);
   if (session.globals.dryRun) {
-    await emitResult(
-      { kind: 'dry-run', request: previewRequest(versionRequest) },
-      session,
-      runtime,
-    );
+    const request = dryRunPreview(versionRequest, client.auth);
+    await emitResult({ kind: 'dry-run', request }, session, runtime);
     return;
   }
-  const client = clientOf(session, runtime);
   const started = runtime.now();
   const version = await sendRequest(versionRequest, client);
   const latencyMs = runtime.now() - started;
@@ -99,6 +97,7 @@ async function runPing(command: Command, context: CliContext): Promise<void> {
     engines: names,
     latencyMs,
     auth: config.auth.type,
+    ...(config.auth.type === 'basic' ? { user: config.auth.username } : {}),
   };
   await emitResult(
     { kind: 'json', status: 200, value, request: version.request },

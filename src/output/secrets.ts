@@ -6,7 +6,8 @@
 import type { MultipartPartPreview, RequestPreview } from '../operation/result.js';
 import { isRecord, stringifyJson } from '../util.js';
 
-const MASK = '***';
+/** What a masked secret shows instead of its value. */
+export const MASK = '***';
 
 const SECRET_HEADERS = new Set(['authorization', 'proxy-authorization', 'cookie', 'set-cookie']);
 const SECRET_NAME_PARTS = ['token', 'secret', 'password', 'api-key', 'apikey'];

@@ -194,10 +194,6 @@ describe('parseConfigFile', () => {
     ['engine', '', ENGINE],
     ['engine', false, ENGINE],
     ['engine', '..', ENGINE],
-    ['auth', 'none', 'an object like {"type": "none"}'],
-    ['auth', {}, 'an object like {"type": "none"}'],
-    ['auth', { type: 1 }, 'an object like {"type": "none"}'],
-    ['auth', null, 'an object like {"type": "none"}'],
     ['output', 'yaml', 'json or table'],
     ['output', null, 'json or table'],
     ['timeout', 0, 'a whole number of milliseconds between 1 and 2147483647'],
@@ -222,11 +218,64 @@ describe('parseConfigFile', () => {
     );
   });
 
+  const AUTH_OBJECT = '{"type": "basic", "username": "demo", "passwordEnv": "CAMUNDA_PASSWORD"}';
+  const ENV_NAME = 'the name of an environment variable, e.g. CAMUNDA_PASSWORD';
+
+  it.each([
+    [
+      'none',
+      `Invalid config file ${PATH}: profile "prod" has an invalid auth (expected ${AUTH_OBJECT})`,
+    ],
+    [
+      null,
+      `Invalid config file ${PATH}: profile "prod" has an invalid auth (expected ${AUTH_OBJECT})`,
+    ],
+    [
+      { type: 'basic', user: 'demo', pass: 'x' },
+      `Invalid config file ${PATH}: unknown key(s) user, pass in the auth of profile "prod" (allowed: type, username, passwordEnv, password)`,
+    ],
+    [
+      { type: 1 },
+      `Invalid config file ${PATH}: profile "prod" has an invalid auth.type (expected none or basic)`,
+    ],
+    [
+      { username: ' ' },
+      `Invalid config file ${PATH}: profile "prod" has an invalid auth.username (expected a non-empty string)`,
+    ],
+    [
+      { username: 'demo', passwordEnv: 'MY-VAR' },
+      `Invalid config file ${PATH}: profile "prod" has an invalid auth.passwordEnv (expected ${ENV_NAME})`,
+    ],
+    [
+      { username: 'demo', passwordEnv: 7 },
+      `Invalid config file ${PATH}: profile "prod" has an invalid auth.passwordEnv (expected ${ENV_NAME})`,
+    ],
+    [
+      { username: 'demo', password: '' },
+      `Invalid config file ${PATH}: profile "prod" has an invalid auth.password (expected a non-empty string)`,
+    ],
+    [
+      { username: 'demo', password: 'secret-value', passwordEnv: 'PW' },
+      `Invalid config file ${PATH}: profile "prod" sets both auth.password and auth.passwordEnv; keep one (passwordEnv is recommended)`,
+    ],
+  ])('rejects auth = %j', (auth, message) => {
+    expect(profileFailure({ auth })).toBe(message);
+    expect(profileFailure({ auth })).not.toContain('secret-value');
+  });
+
+  it('checks the profile keys in their order', () => {
+    expect(profileFailure({ output: 'yaml', auth: 'none', url: 1 })).toContain('invalid url');
+    expect(profileFailure({ output: 'yaml', auth: 'none' })).toContain('invalid auth (');
+  });
+
   it.each([
     ['url', 'http://localhost:8080/engine-rest'],
     ['engine', 'tenant1'],
     ['auth', { type: 'none' }],
     ['auth', { type: 'basic' }],
+    ['auth', {}],
+    ['auth', { username: 'demo', passwordEnv: 'CAMUNDA_PASSWORD' }],
+    ['auth', { type: 'basic', username: 'd:x', password: ' p:ä ' }],
     ['output', 'json'],
     ['output', 'table'],
     ['timeout', 1],

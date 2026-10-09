@@ -3,8 +3,10 @@
  * stdin, the file system, fetch and the environment.
  */
 
-import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { chmod, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
 import { usageError } from '../errors.js';
 import type { FileSystem, OutputStream, Runtime } from '../runtime.js';
 
@@ -43,12 +45,12 @@ function outputStream(stream: ProcessStream): OutputStream {
   };
 }
 
-/** Reads stdin completely; refuses to wait for a terminal. */
+/** Reads stdin completely; refuses to wait for a terminal (operate never prompts). */
 async function readStdin(stdin: NodeJS.ReadStream = process.stdin): Promise<Uint8Array> {
   if (stdin.isTTY) {
     throw usageError(
-      'stdin is a terminal; pipe the body into the command',
-      "Example: echo '{}' | operate ... --body -, or pass --body @file.json.",
+      'stdin is a terminal; pipe the input into the command',
+      `Examples: echo '{}' | operate ... --body - (or --body @file.json); printf '%s\\n' "$PASSWORD" | operate ... --auth-password-stdin.`,
     );
   }
   const chunks: Buffer[] = [];
@@ -67,13 +69,60 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+/** The file `path` names, symlinks resolved (a linked config file stays linked); else `path`. */
+async function linkTarget(path: string): Promise<string> {
+  try {
+    return await realpath(path);
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT') return path;
+    throw error;
+  }
+}
+
+/**
+ * In place, for a directory the user may not create files in: an existing file gets `mode` before
+ * the first byte (and a chmod that fails, on a file of another user, writes nothing).
+ */
+async function writeInPlace(path: string, data: string | Uint8Array, mode: number) {
+  if (await exists(path)) await chmod(path, mode);
+  await writeFile(path, data, { mode });
+}
+
+/**
+ * Writes a private file (the config file may hold credentials) atomically: a new file next to the
+ * target, created exclusively with `mode`, then renamed over it. The content is never readable
+ * under the old mode of an existing file (writeFile applies `mode` only to new files), and a
+ * crash leaves the old or the new file, never half of one.
+ */
+async function writePrivateFile(path: string, data: string | Uint8Array, mode: number) {
+  const target = await linkTarget(path);
+  const temporary = join(
+    dirname(target),
+    `.${basename(target)}.${randomBytes(6).toString('hex')}.tmp`,
+  );
+  try {
+    await writeFile(temporary, data, { mode, flag: 'wx' });
+  } catch (error) {
+    const code = errorCode(error);
+    if (code !== 'EACCES' && code !== 'EPERM') throw error;
+    await writeInPlace(target, data, mode);
+    return;
+  }
+  try {
+    // the umask may have cleared bits of `mode`
+    await chmod(temporary, mode);
+    await rename(temporary, target);
+  } catch (error) {
+    await rm(temporary, { force: true });
+    throw error;
+  }
+}
+
 const nodeFileSystem: FileSystem = {
   readFile: async (path) => new Uint8Array(await readFile(path)),
   async writeFile(path, data, options) {
     const mode = options?.mode;
-    await writeFile(path, data, mode === undefined ? {} : { mode });
-    // the mode of writeFile only applies to new files; existing files keep theirs otherwise
-    if (mode !== undefined) await chmod(path, mode);
+    await (mode === undefined ? writeFile(path, data) : writePrivateFile(path, data, mode));
   },
   async mkdir(path) {
     await mkdir(path, { recursive: true });

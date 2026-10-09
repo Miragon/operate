@@ -1,5 +1,6 @@
 /** Maps HTTP error responses (and the engine's ExceptionDto) to OperateError with hints. */
 
+import type { Principal } from '../auth/types.js';
 import { type ErrorCode, OperateError } from '../errors.js';
 import { compact, isRecord, parseJson } from '../util.js';
 import type { HttpResponse } from './types.js';
@@ -103,11 +104,9 @@ function notFoundHint(ref: CommandRef | undefined): string {
  */
 const UNKNOWN_ENGINE = /^(?:No process engine|Process engine \S+ not) available$/;
 
-/** Built-in Basic auth, the planned fix for most 401s. */
-const BASIC_AUTH_ISSUE = 'https://github.com/Miragon/operate/issues/1';
-
 const HINTS = {
-  unauthenticated: `The engine requires authentication and operate sent no credentials (the built-in auth type is none). Pass them as a header: -H 'Authorization: Basic <base64 of user:password>', OPERATE_HEADERS, or store it with \`operate config set <profile> --header 'Authorization: ...'\`. Built-in Basic auth is planned: ${BASIC_AUTH_ISSUE}.`,
+  unauthenticated:
+    "Use Basic auth: --auth basic --auth-user <name> with the password piped into --auth-password-stdin, OPERATE_USERNAME and OPERATE_PASSWORD, or a profile: `operate config set <profile> --auth basic --auth-user <name> --auth-password-env <VAR>`. For a token, pass -H 'Authorization: Bearer <token>' or OPERATE_HEADERS.",
   rejected:
     'The engine rejected the credentials of the Authorization header (from -H, OPERATE_HEADERS or the profile headers; `operate config show` shows which). Check user and password or the token.',
   403: 'The user is authenticated but lacks the authorization for this operation.',
@@ -127,11 +126,17 @@ const HINTS = {
  */
 const QUERY_PARAM_EXCEPTION = 'QueryParamException';
 
-/** The request as far as the hints need it; `headers` tell whether credentials were sent. */
+/**
+ * The request as far as the hints need it: `headers` tell whether an Authorization header was
+ * sent, `principal` whose Basic auth credentials the auth provider added, `authOff` why no
+ * credentials were added although some were configured (`AuthProvider.off`).
+ */
 export interface FailedRequest {
   readonly method: string;
   readonly url: string;
   readonly headers?: Readonly<Record<string, string>>;
+  readonly principal?: Principal | undefined;
+  readonly authOff?: string | undefined;
 }
 
 function sentCredentials(request: FailedRequest): boolean {
@@ -142,9 +147,20 @@ function clientErrorHint(ref: CommandRef | undefined): string {
   return `The engine rejected the request. Check parameters and body with \`operate describe ${ref?.command ?? '<group> <command>'}\`.`;
 }
 
+/** The 401 hint: Basic credentials rejected, an Authorization header rejected, or none sent. */
+function unauthorizedHint(request: FailedRequest): string {
+  const { principal } = request;
+  if (principal !== undefined) {
+    return `The engine rejected the credentials of user ${principal.user} (source: ${principal.source}). Check the username and the password; \`operate config show\` shows where each comes from. After a failed login the engine refuses the user for a few seconds (and locks it after repeated failures), so wait before retrying.`;
+  }
+  if (sentCredentials(request)) return HINTS.rejected;
+  const why = request.authOff === undefined ? '' : `: ${request.authOff}`;
+  return `The engine requires authentication and operate sent no credentials${why}. ${HINTS.unauthenticated}`;
+}
+
 /** Hints that follow from the status alone. */
 function statusHint(status: number, request: FailedRequest): string | undefined {
-  if (status === 401) return sentCredentials(request) ? HINTS.rejected : HINTS.unauthenticated;
+  if (status === 401) return unauthorizedHint(request);
   if (status === 403) return HINTS[403];
   return status >= 500 ? HINTS.server : undefined;
 }
