@@ -5,3 +5,6 @@ reports
 spec
 src/generated
 package-lock.json
+# written by release-please (its own Markdown and JSON style)
+CHANGELOG.md
+.release-please-manifest.json

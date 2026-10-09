@@ -5,8 +5,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
+    # Conventional commit messages for release-please: runtime dependencies are user facing
+    # ("deps:", Dependencies section, patch release), development dependencies are not
+    # ("chore(deps-dev):", no release)
     commit-message:
-      prefix: chore(deps)
+      prefix: deps
+      prefix-development: chore(deps-dev)
     groups:
       dev-dependencies:
         dependency-type: development
@@ -24,8 +28,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # "ci:" is hidden in the changelog and starts no release
     commit-message:
-      prefix: chore(ci)
+      prefix: ci
     groups:
       github-actions:
         patterns: ['*']
