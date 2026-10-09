@@ -1,0 +1,14 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["scripts/*.ts"],
+  "project": ["src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts", "*.config.ts"],
+  "vitest": {
+    "config": ["vitest.config.ts", "vitest.integration.config.ts"]
+  },
+  "tsdown": {
+    "config": ["tsdown.config.ts"]
+  },
+  "stryker": {
+    "config": ["stryker.config.js"]
+  }
+}

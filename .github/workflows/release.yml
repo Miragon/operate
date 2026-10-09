@@ -1,0 +1,57 @@
+# Publishes @miragon/operate to npm (with provenance) when a GitHub release is published.
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # npm provenance refuses private source repositories, and the CLI hints and README link
+      # to issues of the public repository: release only from a public repository
+      - name: Check that the repository is public
+        if: github.event.repository.private
+        run: |
+          echo "::error::${GITHUB_REPOSITORY} is private. npm publish --provenance needs a public repository; make it public before releasing."
+          exit 1
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - run: npm ci
+      - name: Check that the release tag matches the package version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::Release tag ${GITHUB_REF_NAME} does not match package.json version ${version}"
+            exit 1
+          fi
+      - run: npm run check
+      # npm refuses a prerelease version without an explicit dist-tag; such versions go to "next"
+      # so `latest` keeps pointing at the newest stable release
+      - name: Publish to npm
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          case "${version%%+*}" in
+            *-*) tag=next ;;
+            *) tag=latest ;;
+          esac
+          npm publish --provenance --access public --tag "$tag"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
