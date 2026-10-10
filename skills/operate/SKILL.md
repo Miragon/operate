@@ -13,14 +13,14 @@ errors as one JSON line on stderr and uses stable exit codes.
 
 ## Setup
 
-The REST API root defaults to `http://localhost:8080/engine-rest`. Set it once per shell or keep
-it in a profile, then check the connection:
+If `operate` is missing, run `npx -y @miragon/operate` in its place or ask the user to install it
+with `npm i -g @miragon/operate` (Node.js 22.12+). The REST API root defaults to
+`http://localhost:8080/engine-rest`. Set it per shell or in a profile, then check the connection:
 
 ```sh
 export OPERATE_URL=http://localhost:8080/engine-rest
 operate ping
 operate config set prod --url https://camunda.example.com/engine-rest --read-only
-operate config show --profile prod
 operate config set local --url http://localhost:8080/engine-rest --default
 ```
 

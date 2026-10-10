@@ -29,6 +29,7 @@
   "files": [
     "dist",
     "skills",
+    "!skills/operate/evals",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

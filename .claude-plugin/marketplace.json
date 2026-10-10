@@ -1,0 +1,14 @@
+{
+  "name": "miragon",
+  "owner": {
+    "name": "Miragon GmbH",
+    "url": "https://github.com/Miragon"
+  },
+  "description": "Claude Code plugins by Miragon",
+  "plugins": [
+    {
+      "name": "operate",
+      "source": "./skills/operate"
+    }
+  ]
+}

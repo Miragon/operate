@@ -1,5 +1,5 @@
-# Quality gates: fast checks on Node 22/24, Testcontainers integration tests per engine, and
-# mutation testing on main, weekly and on demand.
+# Quality gates: fast checks on Node 22/24, validation of the Claude Code plugin, Testcontainers
+# integration tests per engine, and mutation testing on main, weekly and on demand.
 name: CI
 
 on:
@@ -50,6 +50,37 @@ jobs:
           path: coverage/
           if-no-files-found: ignore
           retention-days: 14
+
+  # The Claude Code plugin: the marketplace at the repository root (with the plugin manifest it
+  # lists), the plugin in skills/operate (manifest and command) and its skill (validated as part of
+  # skills/, since a plugin run skips a SKILL.md at the plugin root). `claude plugin validate` needs
+  # no account or API key; the stable channel of Claude Code is typically a week old and skips
+  # releases with major regressions.
+  plugin:
+    name: Claude Code plugin
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DISABLE_AUTOUPDATER: '1'
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          package-manager-cache: false
+      # The postinstall script of the package puts the native binary in place.
+      - name: Install Claude Code
+        run: npm install --global --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@stable
+      - name: Validate the marketplace and the plugin
+        run: |
+          claude --version
+          for target in . skills/operate skills; do
+            claude plugin validate --strict "$target"
+          done
 
   integration:
     name: integration (${{ matrix.engine }})
