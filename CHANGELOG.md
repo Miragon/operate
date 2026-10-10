@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/Miragon/operate/compare/v0.2.0...v0.3.0) (2026-10-10)
+
+
+### Features
+
+* add OAuth 2.0 authorization code flow with PKCE ([88e466b](https://github.com/Miragon/operate/commit/88e466b2d4de4229c1a48b69d421dea6bb0048d2))
+* add OAuth 2.0 authorization code flow with PKCE ([69f34b7](https://github.com/Miragon/operate/commit/69f34b7ffb5089e4b07a28eb816c1d6c89bd0838)), closes [#2](https://github.com/Miragon/operate/issues/2)
+
 ## [0.2.0](https://github.com/Miragon/operate/compare/v0.1.0...v0.2.0) (2026-10-09)
 
 
