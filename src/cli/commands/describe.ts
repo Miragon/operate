@@ -8,10 +8,13 @@
 import type { Command } from 'commander';
 import { findByOperationId, findGroup, findOperation } from '../../catalog/catalog.js';
 import type { Catalog, OperationSpec } from '../../catalog/types.js';
-import { listCommands } from '../../docs/commands.js';
+import { findCommands } from '../../docs/commands.js';
 import { describeOperation, type DescribeView, renderDescribeText } from '../../docs/describe.js';
+import { describeWorkflow, renderWorkflowDescribeText } from '../../docs/describe-workflow.js';
+import { findWorkflow, WORKFLOW_GROUP, type WorkflowDoc } from '../../docs/workflow.js';
 import { type OperateError, usageError } from '../../errors.js';
 import { subcommand } from '../command.js';
+import { setPositional } from '../completion-meta.js';
 import type { CliContext } from '../context.js';
 import { type Display, displayOf, displayText } from '../display.js';
 import { addGlobalOptions, readGlobals } from '../globals.js';
@@ -22,12 +25,13 @@ import type { UtilityCommand } from './types.js';
 const DESCRIPTION = [
   'Describe a command: usage, arguments, options, request body schema, responses and examples.',
   '',
-  'Name the command by group and command (process-definition start) or by its operationId (startProcessInstanceByKey). A group alone lists its commands like "operate commands <group>". Prints JSON when stdout is not a terminal, readable text otherwise.',
+  'Name the command by group and command (process-definition start), by its operationId (startProcessInstanceByKey) or as a workflow command (inspect). A group alone lists its commands like "operate commands <group>". Prints JSON when stdout is not a terminal, readable text otherwise.',
 ].join('\n');
 
-/** What `describe` was asked for: a group (its commands) or one operation. */
+/** What `describe` was asked for: a group (its commands), a workflow command or one operation. */
 export type DescribeTarget =
   | { readonly kind: 'group'; readonly group: string }
+  | { readonly kind: 'workflow'; readonly doc: WorkflowDoc }
   | { readonly kind: 'operation'; readonly operation: OperationSpec };
 
 function unknownTarget(catalog: Catalog, first: string, second: string | undefined): OperateError {
@@ -53,9 +57,10 @@ export function describeTarget(
   first: string,
   second: string | undefined,
 ): DescribeTarget {
-  if (second === undefined && findGroup(catalog, first) !== undefined) {
-    return { kind: 'group', group: first };
-  }
+  const known = findGroup(catalog, first) !== undefined || first === WORKFLOW_GROUP.group;
+  if (second === undefined && known) return { kind: 'group', group: first };
+  const doc = second === undefined ? findWorkflow(first) : undefined;
+  if (doc !== undefined) return { kind: 'workflow', doc };
   const operation =
     second === undefined
       ? findByOperationId(catalog, first)
@@ -69,6 +74,19 @@ export function describeText(view: DescribeView, display: Display): string {
   return displayText(view, display, () => renderDescribeText(view));
 }
 
+function targetText(target: DescribeTarget, catalog: Catalog, display: Display): string {
+  switch (target.kind) {
+    case 'group':
+      return commandsText(findCommands(catalog, { group: target.group }), display);
+    case 'workflow': {
+      const view = describeWorkflow(target.doc, catalog);
+      return displayText(view, display, () => renderWorkflowDescribeText(view));
+    }
+    case 'operation':
+      return describeText(describeOperation(target.operation, catalog), display);
+  }
+}
+
 async function runDescribe(
   first: string,
   second: string | undefined,
@@ -78,11 +96,7 @@ async function runDescribe(
   const { catalog, runtime } = context;
   const display = await displayOf(context, readGlobals(command));
   const target = describeTarget(catalog, first, second);
-  runtime.stdout.write(
-    target.kind === 'group'
-      ? commandsText(listCommands(catalog, { group: target.group }), display)
-      : describeText(describeOperation(target.operation, catalog), display),
-  );
+  runtime.stdout.write(targetText(target, catalog, display));
 }
 
 export const describeCommand: UtilityCommand = {
@@ -93,9 +107,10 @@ export const describeCommand: UtilityCommand = {
       .summary('Describe a command: options, request body, responses, examples')
       .description(DESCRIPTION)
       .usage('<group> [command] [options]')
-      .argument('<group>', 'Group, e.g. process-definition, or an operationId')
+      .argument('<group>', 'Group (process-definition), workflow command (inspect) or operationId')
       .argument('[command]', 'Command of the group, e.g. start');
     addGlobalOptions(command, DOCS_OPTIONS, OPTIONS_GROUP);
+    setPositional(command, { kind: 'describe' });
     command.action((first: string, second: string | undefined) =>
       runDescribe(first, second, command, context),
     );

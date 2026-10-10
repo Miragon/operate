@@ -15,6 +15,7 @@ import type { CliContext } from './context.js';
 import { exitHandler } from './errors.js';
 import { helpConfiguration, outputConfiguration, ROOT_DESCRIPTION, rootFooter } from './help.js';
 import { registerOperation } from './operation.js';
+import { registerWorkflowCommands } from './workflow/index.js';
 
 const GROUP_FOOTER = `
 Run "operate <group> <command> --help" for the arguments and options of a command, or
@@ -63,8 +64,9 @@ export function createProgram(args: readonly string[], context: CliContext): Com
     .helpCommand('help [command]', 'Display help for a command')
     .description(ROOT_DESCRIPTION)
     .addHelpText('after', rootFooter());
-  // utilities first: the root help lists "Commands:" before "API groups:"
+  // utilities first: the root help lists "Commands:", "Workflow commands:", then "API groups:"
   for (const utility of UTILITY_COMMANDS) utility.register(program, context);
+  registerWorkflowCommands(program, context);
   registerGroups(program, context, addressedCommand(args));
   return program;
 }

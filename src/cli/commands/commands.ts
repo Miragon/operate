@@ -8,15 +8,17 @@ import { type Command, Option } from 'commander';
 import { findGroup } from '../../catalog/catalog.js';
 import { type Catalog, EFFECTS, type Effect } from '../../catalog/types.js';
 import {
-  type CommandSummary,
+  type CommandRow,
+  discoveryGroups,
+  findCommands,
   type GroupSummary,
-  listCommands,
-  listGroups,
 } from '../../docs/commands.js';
+import { WORKFLOW_GROUP } from '../../docs/workflow.js';
 import { usageError } from '../../errors.js';
 import { renderTable } from '../../output/table.js';
 import { compact } from '../../util.js';
 import { subcommand } from '../command.js';
+import { setPositional } from '../completion-meta.js';
 import { operationSummary } from '../operation.js';
 import type { CliContext } from '../context.js';
 import { type Display, displayOf, displayText } from '../display.js';
@@ -38,7 +40,7 @@ const COMMAND_TABLE = { columns: ['COMMAND', 'EFFECT', 'SUMMARY'], fixed: ['COMM
 const DESCRIPTION = [
   'List the API groups, or the commands of a group, a search or an effect.',
   '',
-  'Without arguments: every group with its number of commands. With a group, --search or --effect: the matching commands with method, path, effect and summary. --search is case-insensitive; each of its words must occur in the command, its aliases, the operationId, the summary or the path.',
+  'Without arguments: every group with its number of commands, and the group "workflow" of the top-level workflow commands. With a group, --search or --effect: the matching commands with method, path, effect and summary (workflow commands first, with the operations they call). --search is case-insensitive; each of its words must occur in the command, its aliases, the operationId, the summary or the path (for workflow commands: name, summary or description).',
 ].join('\n');
 
 interface CommandsOptions {
@@ -69,18 +71,18 @@ export function groupsText(groups: readonly GroupSummary[], display: Display): s
   return render(groups, rows, GROUP_TABLE, display);
 }
 
-export function commandsText(commands: readonly CommandSummary[], display: Display): string {
+export function commandsText(commands: readonly CommandRow[], display: Display): string {
   const rows = commands.map((summary) => ({
     COMMAND: summary.command,
     EFFECT: summary.effect,
-    SUMMARY: operationSummary(summary),
+    SUMMARY: 'operationId' in summary ? operationSummary(summary) : summary.summary,
   }));
   return render(commands, rows, COMMAND_TABLE, display);
 }
 
-/** Throws a USAGE error for a name that is not a group of the catalog. */
+/** Throws a USAGE error for a name that is not a group of the catalog (or `workflow`). */
 export function requireGroup(catalog: Catalog, name: string): void {
-  if (findGroup(catalog, name) !== undefined) return;
+  if (findGroup(catalog, name) !== undefined || name === WORKFLOW_GROUP.group) return;
   const suggestions = didYouMean(groupSuggestions(catalog, name));
   throw usageError(
     `Unknown group "${name}"`,
@@ -99,8 +101,8 @@ async function runCommands(
   if (group !== undefined) requireGroup(catalog, group);
   const text =
     group === undefined && search === undefined && effect === undefined
-      ? groupsText(listGroups(catalog), display)
-      : commandsText(listCommands(catalog, compact({ group, search, effect })), display);
+      ? groupsText(discoveryGroups(catalog), display)
+      : commandsText(findCommands(catalog, compact({ group, search, effect })), display);
   runtime.stdout.write(text);
 }
 
@@ -119,6 +121,7 @@ export const commandsCommand: UtilityCommand = {
       )
       .addOption(new Option('--effect <effect>', 'Commands with this effect').choices(EFFECTS));
     addGlobalOptions(command, DOCS_OPTIONS, OPTIONS_GROUP);
+    setPositional(command, { kind: 'groups' });
     command.action((group: string | undefined) => runCommands(group, command, context));
   },
 };

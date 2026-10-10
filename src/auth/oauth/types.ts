@@ -24,7 +24,7 @@ export interface LoginDeps extends OAuthDeps {
   readonly randomBytes: Runtime['randomBytes'];
   readonly listenLoopback: Runtime['listenLoopback'];
   readonly openBrowser: Runtime['openBrowser'];
-  readonly sleep: Runtime['sleep'];
+  readonly deadline: Runtime['deadline'];
   readonly stderr: OutputStream;
 }
 

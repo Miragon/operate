@@ -47,7 +47,7 @@ export function authFlagFor(name: string, known: readonly string[]): string[] {
 
 /** `--show-secrets` is no secret, but only some commands print credentials at all. */
 const SHOW_SECRETS_HINT =
-  '--show-secrets works where operate prints credentials: --dry-run and --verbose of API commands, api and ping, and config show. `operate auth` commands never print a token. ';
+  '--show-secrets works where operate prints credentials: --dry-run and --verbose of API and workflow commands, api and ping, and config show. `operate auth` commands never print a token. ';
 
 /**
  * A hint (with a trailing space) for an unknown option that looks like it wants a secret, or for

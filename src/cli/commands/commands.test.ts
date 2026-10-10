@@ -5,7 +5,12 @@ import {
   type FakeRuntimeOptions,
 } from '../../../test/support/fake-runtime.js';
 import { loadCatalog } from '../../catalog/catalog.js';
-import { type CommandSummary, listCommands, listGroups } from '../../docs/commands.js';
+import {
+  type CommandSummary,
+  discoveryGroups,
+  findCommands,
+  listCommands,
+} from '../../docs/commands.js';
 import { OperateError } from '../../errors.js';
 import type { Display } from '../display.js';
 import { run } from '../run.js';
@@ -42,12 +47,18 @@ describe('operate commands: groups', () => {
   it('prints every group with description and number of commands as JSON when piped', async () => {
     const result = await cli(['commands']);
     expect(result).toMatchObject({ code: 0, stderr: '' });
-    expect(result.stdout).toBe(`${JSON.stringify(listGroups(catalog))}\n`);
+    expect(result.stdout).toBe(`${JSON.stringify(discoveryGroups(catalog))}\n`);
+    expect(JSON.parse(result.stdout)).toContainEqual({
+      group: 'workflow',
+      description:
+        'Top-level commands that combine several requests (operate <command>): inspect, wait, advance, retry, deploy, status',
+      commands: 6,
+    });
   });
 
   it('indents the JSON with --pretty', async () => {
     const result = await cli(['commands', '--pretty']);
-    expect(result.stdout).toBe(`${JSON.stringify(listGroups(catalog), null, 2)}\n`);
+    expect(result.stdout).toBe(`${JSON.stringify(discoveryGroups(catalog), null, 2)}\n`);
   });
 
   it('prints a GROUP COMMANDS DESCRIPTION table on a terminal, within its width', async () => {
@@ -57,7 +68,8 @@ describe('operate commands: groups', () => {
     expect(lines[1]).toBe(
       `${'authorization'.padEnd(41)}  7         Manage authorizations (permissions of users an…`,
     );
-    expect(lines).toHaveLength(54);
+    expect(lines).toHaveLength(55);
+    expect(lines.at(-2)).toMatch(/^workflow +6 +Top-level commands that combine/);
     expect(Math.max(...lines.map((line) => line.length))).toBe(100);
   });
 
@@ -71,7 +83,7 @@ describe('operate commands: groups', () => {
   it('projects the JSON with --fields', async () => {
     const result = await cli(['commands', '--fields', 'group']);
     expect(JSON.parse(result.stdout)).toEqual(
-      listGroups(catalog).map((group) => ({ group: group.group })),
+      discoveryGroups(catalog).map((group) => ({ group: group.group })),
     );
   });
 
@@ -110,14 +122,15 @@ describe('operate commands: commands', () => {
 
   it('filters by effect alone, with a search or within a group', async () => {
     const bulk = await cli(['commands', '--effect', 'bulk']);
-    expect(bulk.stdout).toBe(`${JSON.stringify(listCommands(catalog, { effect: 'bulk' }))}\n`);
+    expect(bulk.stdout).toBe(`${JSON.stringify(findCommands(catalog, { effect: 'bulk' }))}\n`);
     const parsed = JSON.parse(bulk.stdout) as CommandSummary[];
     expect(parsed.length).toBeGreaterThan(10);
     expect(parsed.every((command) => command.effect === 'bulk')).toBe(true);
     const incident = await cli(['commands', '--search', 'incident', '--effect', 'write']);
     expect(incident.stdout).toBe(
-      `${JSON.stringify(listCommands(catalog, { search: 'incident', effect: 'write' }))}\n`,
+      `${JSON.stringify(findCommands(catalog, { search: 'incident', effect: 'write' }))}\n`,
     );
+    expect((JSON.parse(incident.stdout) as { command: string }[])[0]?.command).toBe('retry');
     const task = await cli(['commands', 'task', '--effect', 'delete', '--fields', 'command']);
     expect(task.stdout).toBe('[{"command":"task delete"}]\n');
   });

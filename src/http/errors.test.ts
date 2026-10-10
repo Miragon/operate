@@ -471,3 +471,73 @@ describe('redirectError', () => {
     expect(absolute.message).toBe('HTTP 308 Found: redirect to https://other.example/engine-rest/');
   });
 });
+
+describe('job execute hints', () => {
+  const EXECUTE = { command: 'job execute', listCommand: 'job list' };
+  const body = (message: string) => JSON.stringify({ type: 'InvalidRequestException', message });
+
+  it('explains a 404 of a job that ran and failed, keeping NOT_FOUND', () => {
+    const error = httpError(
+      response(404, body('Unknown property used in expression'), 'application/json'),
+      REQUEST,
+      EXECUTE,
+    );
+    expect(error.code).toBe('NOT_FOUND');
+    expect(error.details.hint).toBe(
+      'The job ran and failed; the engine reports failures of job execute as 404. See `operate job get-stacktrace <id>` or `operate retry --incident <incident-id> --now`.',
+    );
+  });
+
+  it('keeps the missing job hint for "No job found with id"', () => {
+    const error = httpError(
+      response(404, body("ENGINE-14026 No job found with id 'x'"), 'application/json'),
+      REQUEST,
+      EXECUTE,
+    );
+    expect(error.details.hint).toBe(
+      'Check the id or key. List the existing ones with `operate job list`.',
+    );
+  });
+});
+
+describe('httpError for a BPMN that does not parse', () => {
+  const deploy = { method: 'POST', url: 'http://localhost:8080/engine-rest/deployment/create' };
+
+  it('points to the first error, its line and the details in data', () => {
+    const body = JSON.stringify({
+      type: 'ParseException',
+      message: 'ENGINE-09005 Could not parse BPMN process. Errors: ...',
+      details: {
+        'broken.bpmn': {
+          errors: [
+            {
+              message: "Invalid destination 'missing' of sequence flow 'f1'\nsecond line",
+              line: 5,
+              column: 72,
+            },
+            { message: 'other', line: 3, column: 49 },
+          ],
+          warnings: [],
+        },
+      },
+    });
+    const error = httpError(response(400, body, 'application/json', 'Bad Request'), deploy);
+    expect(error.code).toBe('HTTP_CLIENT_ERROR');
+    expect(error.details.hint).toBe(
+      "The engine could not parse broken.bpmn: Invalid destination 'missing' of sequence flow 'f1' (line 5, column 72) and 1 more. Fix the file and deploy again; data.details lists every error with its line per resource.",
+    );
+  });
+
+  it('stays readable without details, lines or with a long message', () => {
+    const plain = JSON.stringify({ type: 'ParseException', message: 'broken' });
+    expect(httpError(response(400, plain), deploy).details.hint).toBe(
+      'The engine could not parse a resource. Fix the file and deploy again; data.details lists every error with its line per resource.',
+    );
+    const long = JSON.stringify({
+      type: 'ParseException',
+      details: { 'a.dmn': { errors: [{ message: 'x'.repeat(300) }, 'odd'] } },
+    });
+    const hint = httpError(response(400, long), deploy).details.hint ?? '';
+    expect(hint).toMatch(/^The engine could not parse a\.dmn: x{199}…\. Fix/);
+  });
+});

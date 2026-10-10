@@ -179,7 +179,7 @@ async function runLogin(command: Command, context: CliContext): Promise<void> {
     randomBytes: (length) => runtime.randomBytes(length),
     listenLoopback: (port, handler) => runtime.listenLoopback(port, handler),
     openBrowser: (url) => runtime.openBrowser(url),
-    sleep: (ms) => runtime.sleep(ms),
+    deadline: (ms) => runtime.deadline(ms),
     stderr: safeStderr(runtime),
   };
   const noBrowser = options.browser === false;

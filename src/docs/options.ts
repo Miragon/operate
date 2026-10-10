@@ -19,9 +19,10 @@ import type {
  * value: `--x <value>`; boolean: `--x` (true) and `--no-x` (false); presence: only `--x` (true);
  * negated: only `--no-x` (false); repeatable: `--x <value>` given any number of times.
  */
-type OptionKind = 'value' | 'boolean' | 'presence' | 'negated' | 'repeatable';
+export type OptionKind = 'value' | 'boolean' | 'presence' | 'negated' | 'repeatable';
 
 type OptionSource =
+  | 'workflow'
   | 'query'
   | 'body-field'
   | 'variables'
@@ -62,7 +63,7 @@ const VALUE_NAMES: Readonly<Record<string, string>> = {
   array: '<values>',
 };
 
-const VARIABLE_HELP =
+export const VARIABLE_HELP =
   'name=value (auto typed: true/false, integers, decimals, null, else string) or name:Type=value ' +
   '(String, Integer, Short, Long, Double, Boolean, Date, Json, Xml, Null; Date accepts the ' +
   'date-time forms, e.g. 2024-05-01 or 2024-05-01T10:00:00+02:00); repeatable';

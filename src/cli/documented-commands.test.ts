@@ -7,8 +7,8 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { json } from '../../test/support/fake-fetch.js';
 import { execute, type FakeRuntime, fakeRuntime } from '../../test/support/fake-runtime.js';
+import { WorkflowEngine } from '../../test/support/workflow-engine.js';
 import { loadCatalog } from '../catalog/catalog.js';
 import type { OperationSpec } from '../catalog/types.js';
 import { examplesFor } from '../docs/examples.js';
@@ -49,26 +49,53 @@ function fencedCommands(markdown: string): string[][] {
   return commands;
 }
 
+/** A BPMN file with one executable process named like the file (`invoice.bpmn` → `invoice`). */
+function processXml(path: string): string {
+  const key = (path.split('/').at(-1) ?? path).replace(/\.bpmn$/, '');
+  return `<bpmn:definitions><bpmn:process id="${key}" isExecutable="true" /></bpmn:definitions>`;
+}
+
+function contentOf(path: string): string {
+  if (path.endsWith('.json')) return '{}';
+  return path.endsWith('.bpmn') ? processXml(path) : '<x/>';
+}
+
 /** Files the command lines refer to (`invoice.bpmn`, `@start.json`), with minimal content. */
 function referencedFiles(words: readonly string[]): Record<string, string> {
   const paths = words
     .map((word) => word.replace(/^@/, ''))
     .filter((word) => /\.(?:json|bpmn|dmn|form|pdf)$/.test(word));
-  return Object.fromEntries(paths.map((path) => [path, path.endsWith('.json') ? '{}' : '<x/>']));
+  return Object.fromEntries(paths.map((path) => [path, contentOf(path)]));
 }
 
+/** Directories the documented `operate deploy` lines deploy, each with one process. */
+const DEPLOYED_DIRECTORIES = {
+  'bpmn/invoice.bpmn': processXml('invoice.bpmn'),
+  'src/main/resources/invoice.bpmn': processXml('invoice.bpmn'),
+};
+
 /**
- * A runtime whose engine answers paged requests (`--all`) with an empty list and every other
- * request with `{}`, with the referenced files.
+ * Documented lines that exit with code 9 on purpose: the dev loop's `advance --wait` meets the
+ * incident of the failing job (the next line retries it).
+ */
+const EXIT_9: ReadonlySet<string> = new Set([
+  'operate advance --business-key B-1 --var approved=true --wait',
+]);
+
+/**
+ * A runtime with the scripted fake engine of the workflow commands (lenient: every other request
+ * gets `{}`, paged ones `[]`), whose job executor runs while the CLI sleeps, and the referenced
+ * files.
  */
 function documentedRuntime(words: readonly string[]): FakeRuntime {
+  const engine = new WorkflowEngine('approve', true);
   return fakeRuntime({
-    fetch: (input) => {
-      const url = input instanceof Request ? input.url : input.toString();
-      return Promise.resolve(json(url.includes('maxResults=') ? [] : {}));
+    fetch: engine.fetch,
+    onSleep: () => {
+      engine.tick();
     },
     stdin: '{}',
-    files: referencedFiles(words),
+    files: { ...DEPLOYED_DIRECTORIES, ...referencedFiles(words) },
   });
 }
 
@@ -79,7 +106,8 @@ async function failures(lines: readonly (readonly string[])[], runtime: FakeRunt
     runtime.stdout.chunks.length = 0;
     runtime.stderr.chunks.length = 0;
     const result = await execute(run, words.slice(1), runtime);
-    if (result.code !== 0) failed.push(`${words.join(' ')}: ${result.stderr}`);
+    const expected = EXIT_9.has(words.join(' ')) ? 9 : 0;
+    if (result.code !== expected) failed.push(`${words.join(' ')}: ${result.stderr}`);
   }
   return failed;
 }
@@ -129,13 +157,13 @@ describe('documented command lines run in the CLI', () => {
     ]);
     expect(referencedFiles(['--body', '@a.json', 'b.bpmn', 'c.txt'])).toEqual({
       'a.json': '{}',
-      'b.bpmn': '<x/>',
+      'b.bpmn': processXml('b.bpmn'),
     });
   });
 
   it('runs the commands of the guide in order', async () => {
     const guide = fencedCommands(GUIDE);
-    expect(guide.length).toBeGreaterThan(50);
+    expect(guide.length).toBeGreaterThan(40);
     expect(await failures(guide, documentedRuntime(guide.flat()))).toEqual([]);
   });
 

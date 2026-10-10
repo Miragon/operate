@@ -1,7 +1,8 @@
 /**
- * OAuth in the operation commands, `api` and `ping` through `run()`: Bearer tokens from the cache,
- * proactive and reactive refresh, 401 and 403 hints, dry-run notes, the verbose trace of token
- * requests and the guarantee that no command but `auth login` starts a login.
+ * OAuth in the operation commands, `api`, `ping` and the workflow commands through `run()`: Bearer
+ * tokens from the cache, proactive and reactive refresh, 401 and 403 hints, dry-run notes, the
+ * verbose trace of token requests and the guarantee that no command but `auth login` starts a
+ * login.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -336,5 +337,36 @@ describe('OAuth on dry-run, ping and api', () => {
     expect(errorOf(result.stderr).hint).toContain(
       '`operate auth status --profile p` shows whether the OAuth login is usable.',
     );
+  });
+});
+
+describe('OAuth on the workflow commands', () => {
+  it('previews the cached token and notes a missing login once per dry-run', async () => {
+    const { cli, server } = setup();
+    const preview = await cli(['inspect', 'pi-1', '--dry-run']);
+    expect(preview.code).toBe(0);
+    const { requests } = JSON.parse(preview.stdout) as {
+      requests: { headers: Record<string, string> }[];
+    };
+    expect(requests.length).toBeGreaterThan(1);
+    expect(requests.map((request) => request.headers.Authorization)).toEqual(
+      requests.map(() => 'Bearer ***'),
+    );
+    expect(preview.stderr).toBe('');
+    const missing = await setup({ login: null }).cli(['status', '--dry-run']);
+    expect(missing.code).toBe(0);
+    expect(missing.stderr).toBe(
+      'Note: Not logged in with OAuth (profile "p"); the request would fail with LOGIN_REQUIRED. Run `operate auth login --profile p` in a terminal.\n',
+    );
+    expect(server.requests).toEqual([]);
+  });
+
+  it('fails with LOGIN_REQUIRED before any request and never starts a login', async () => {
+    const { cli, server } = setup({ login: null });
+    const result = await cli(['inspect', 'pi-1']);
+    expect(result.code).toBe(4);
+    expect(result.stdout).toBe('');
+    expect(errorOf(result.stderr)).toMatchObject({ code: 'LOGIN_REQUIRED', exitCode: 4 });
+    expect(server.requests).toEqual([]);
   });
 });

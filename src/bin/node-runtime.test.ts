@@ -164,9 +164,9 @@ describe('createNodeRuntime OAuth parts', () => {
     expect(runtime.randomBytes(70_000)).toHaveLength(70_000);
   });
 
-  it('resolves sleep after the delay', async () => {
+  it('resolves a deadline after the delay', async () => {
     const started = Date.now();
-    await runtime.sleep(20);
+    await runtime.deadline(20);
     expect(Date.now() - started).toBeGreaterThanOrEqual(15);
   });
 });
@@ -317,5 +317,48 @@ describe.skipIf(process.platform === 'win32')('withLock and the file system', ()
     expect((await stat(tokens)).mode & 0o777).toBe(0o700);
     await runtime.fs.mkdir(tokens, { mode: 0o755 });
     expect((await stat(tokens)).mode & 0o777).toBe(0o700);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('createNodeRuntime().fs.readdir and kind', () => {
+  let dir = '';
+  const fs = createNodeRuntime().fs;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'operate-scan-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('reports files, directories, links to files and links to directories', async () => {
+    await writeFile(join(dir, 'a.bpmn'), '<x/>');
+    await mkdir(join(dir, 'sub'));
+    await symlink(join(dir, 'a.bpmn'), join(dir, 'link.bpmn'));
+    await symlink(join(dir, 'sub'), join(dir, 'linked-dir'));
+    const entries = (await fs.readdir(dir)).toSorted((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+    expect(entries).toEqual([
+      { name: 'a.bpmn', kind: 'file' },
+      { name: 'link.bpmn', kind: 'file' },
+      { name: 'linked-dir', kind: 'other' },
+      { name: 'sub', kind: 'directory' },
+    ]);
+    expect(await fs.kind(join(dir, 'a.bpmn'))).toBe('file');
+    expect(await fs.kind(join(dir, 'sub'))).toBe('directory');
+    expect(await fs.kind(join(dir, 'linked-dir'))).toBe('directory');
+    expect(await fs.kind(join(dir, 'missing'))).toBe('missing');
+    expect(await fs.kind(join(dir, 'a.bpmn', 'below'))).toBe('missing');
+  });
+});
+
+describe('createNodeRuntime().sleep', () => {
+  it('waits at least the given time', async () => {
+    const runtime = createNodeRuntime();
+    const started = runtime.now();
+    await runtime.sleep(20);
+    expect(runtime.now() - started).toBeGreaterThanOrEqual(15);
   });
 });

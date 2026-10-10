@@ -10,6 +10,8 @@ export const EXIT_CODES = {
   client: 6,
   server: 7,
   network: 8,
+  /** Every request succeeded, but the process did not reach the expected state (design §17). */
+  outcome: 9,
 } as const;
 
 export type ErrorCode =
@@ -28,7 +30,12 @@ export type ErrorCode =
   | 'HTTP_REDIRECT'
   | 'NETWORK'
   | 'TIMEOUT'
-  | 'INTERNAL';
+  | 'INTERNAL'
+  | 'WAIT_TIMEOUT'
+  | 'INCIDENT'
+  | 'INSTANCE_ENDED'
+  | 'JOB_FAILED'
+  | 'CHECK_FAILED';
 
 const EXIT_CODE_BY_ERROR: Readonly<Record<ErrorCode, number>> = {
   USAGE: EXIT_CODES.usage,
@@ -49,6 +56,11 @@ const EXIT_CODE_BY_ERROR: Readonly<Record<ErrorCode, number>> = {
   NETWORK: EXIT_CODES.network,
   TIMEOUT: EXIT_CODES.network,
   INTERNAL: EXIT_CODES.internal,
+  WAIT_TIMEOUT: EXIT_CODES.outcome,
+  INCIDENT: EXIT_CODES.outcome,
+  INSTANCE_ENDED: EXIT_CODES.outcome,
+  JOB_FAILED: EXIT_CODES.outcome,
+  CHECK_FAILED: EXIT_CODES.outcome,
 };
 
 export interface ErrorDetails {

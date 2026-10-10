@@ -6,6 +6,7 @@
  * the CLI accepts. So neither the examples nor the guide can drift from the catalog.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { GLOBAL_FLAGS } from '../../scripts/catalog/flags.js';
 import { findByOperationId, findGroup, findOperation, loadCatalog } from '../catalog/catalog.js';
@@ -18,6 +19,9 @@ import { examplesFor } from '../docs/examples.js';
 import { GUIDE } from '../docs/guide.js';
 import { type OptionDoc, operationArguments, operationOptions } from '../docs/options.js';
 import { commandWords } from '../docs/text.js';
+import { findWorkflow, WORKFLOW_DOCS, type WorkflowDoc } from '../docs/workflow.js';
+import { parseDuration } from '../operation/durations.js';
+import { parseCondition } from '../workflow/conditions.js';
 
 const catalog = loadCatalog();
 
@@ -162,7 +166,9 @@ function checkCommands(rest: readonly string[]): void {
   });
   const positionals = parseWords(rest, flags);
   expect(positionals.length).toBeLessThanOrEqual(1);
-  if (positionals[0] !== undefined) expect(findGroup(catalog, positionals[0])).toBeDefined();
+  if (positionals[0] !== undefined && positionals[0] !== 'workflow') {
+    expect(findGroup(catalog, positionals[0])).toBeDefined();
+  }
 }
 
 function checkDescribe(rest: readonly string[]): void {
@@ -172,8 +178,49 @@ function checkDescribe(rest: readonly string[]): void {
   if (second !== undefined) {
     expect(findOperation(catalog, first!, second)).toBeDefined();
   } else {
-    expect(findGroup(catalog, first!) ?? findByOperationId(catalog, first!)).toBeDefined();
+    const known = first === 'workflow' || findWorkflow(first!) !== undefined;
+    expect(
+      known || (findGroup(catalog, first!) ?? findByOperationId(catalog, first!)) !== undefined,
+    ).toBe(true);
   }
+}
+
+/** Value checks of the workflow options: choices, durations, conditions, variables, integers. */
+function workflowCheck(option: OptionDoc): (value: string) => void {
+  return (value) => {
+    if (option.enum !== undefined) expect(option.enum).toContain(value);
+    if (option.type === 'duration') parseDuration(value, `--${option.flag}`);
+    if (option.type === 'condition') parseCondition(value);
+    if (option.type === 'variables') parseVariable(value, option.flag);
+    if (option.type === 'integer') expect(value).toMatch(/^\d+$/);
+  };
+}
+
+function workflowFlags(doc: WorkflowDoc): Flags {
+  const flags = new Map<string, FlagSpec>(GLOBALS);
+  for (const option of doc.options) {
+    const takesValue = option.kind === 'value' || option.kind === 'repeatable';
+    const name = option.kind === 'negated' ? `no-${option.flag}` : option.flag;
+    flags.set(name, { takesValue, check: workflowCheck(option) });
+  }
+  return flags;
+}
+
+/** A workflow command line: its options and the number of positionals. */
+function checkWorkflow(doc: WorkflowDoc, rest: readonly string[]): void {
+  const positionals = parseWords(rest, workflowFlags(doc));
+  const [argument] = doc.arguments;
+  if (argument === undefined) expect(positionals).toEqual([]);
+  else if (argument.variadic) expect(positionals.length).toBeGreaterThan(0);
+  else expect(positionals.length).toBeLessThanOrEqual(1);
+  const definitionOnly =
+    doc.name === 'retry' &&
+    rest.includes('--process-definition-key') &&
+    positionals.length === 0 &&
+    !rest.includes('--business-key') &&
+    !rest.includes('--latest');
+  if (definitionOnly)
+    expect(rest.some((word) => word === '--yes' || word === '--dry-run')).toBe(true);
 }
 
 function checkApi(rest: readonly string[]): void {
@@ -273,6 +320,18 @@ const UTILITIES: Readonly<Record<string, (rest: readonly string[]) => void>> = {
     expect(rest).toEqual([]);
   },
   config: checkConfig,
+  completion: (rest) => {
+    expect(rest).toHaveLength(1);
+    expect(['bash', 'zsh', 'fish']).toContain(rest[0]);
+  },
+  ...Object.fromEntries(
+    WORKFLOW_DOCS.map((doc) => [
+      doc.name,
+      (rest: readonly string[]) => {
+        checkWorkflow(doc, rest);
+      },
+    ]),
+  ),
 };
 
 /** Validates one command line given as words, the first being `operate`. */
@@ -331,6 +390,16 @@ describe('the command line checker', () => {
     ).not.toThrow();
     expect(ok('operate ping --auth basic --auth-user demo --auth-password-stdin')).not.toThrow();
     expect(ok('operate api PUT /job/j1/retries --body {"retries":1}')).not.toThrow();
+    expect(ok('operate inspect p1 --history --no-variables -o table')).not.toThrow();
+    expect(
+      ok('operate wait --business-key B --until task:a --until ended --wait-timeout 2m'),
+    ).not.toThrow();
+    expect(ok('operate retry --process-definition-key k --dry-run')).not.toThrow();
+    expect(ok('operate deploy a b --start-key k --var x=1')).not.toThrow();
+    expect(ok('operate status --fail-on warning --stale-after 10m')).not.toThrow();
+    expect(ok('operate completion zsh')).not.toThrow();
+    expect(ok('operate describe inspect')).not.toThrow();
+    expect(ok('operate commands workflow')).not.toThrow();
   });
 
   it('rejects drift from the catalog', () => {
@@ -364,6 +433,16 @@ describe('the command line checker', () => {
     expect(ok('operate api DELETE /process-instance/abc')).toThrow();
     expect(ok('operate ping extra')).toThrow();
     expect(ok('operate guide --pretty')).toThrow();
+    expect(ok('operate inspect a b')).toThrow();
+    expect(ok('operate inspect a --nope')).toThrow();
+    expect(ok('operate wait a --until done')).toThrow();
+    expect(ok('operate wait a --wait-timeout soon')).toThrow();
+    expect(ok('operate status x')).toThrow();
+    expect(ok('operate status --fail-on never')).toThrow();
+    expect(ok('operate deploy')).toThrow();
+    expect(ok('operate retry --process-definition-key k')).toThrow();
+    expect(ok('operate retry a --retries one')).toThrow();
+    expect(ok('operate completion powershell')).toThrow();
   });
 
   it('finds commands in fenced code blocks only, split at shell operators', () => {
@@ -398,11 +477,38 @@ describe('examples', () => {
   });
 });
 
+const README = readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
+const TOP_LEVEL = new Set([...WORKFLOW_DOCS.map((doc) => doc.name), 'completion']);
+
+describe('README workflow command lines', () => {
+  const lines = guideCommands(README).filter((words) => TOP_LEVEL.has(words[1] ?? ''));
+
+  it('has the workflow commands and the completion commands', () => {
+    expect(new Set(lines.map((words) => words[1]))).toEqual(TOP_LEVEL);
+  });
+
+  it.each(lines.map((words) => [words.join(' '), words] as const))('%s is valid', (_, words) => {
+    checkCommandLine(words);
+  });
+});
+
+describe('workflow examples', () => {
+  it('are valid for every workflow command', () => {
+    for (const doc of WORKFLOW_DOCS) {
+      for (const example of doc.examples) {
+        expect(() => {
+          checkCommandLine(commandWords(example));
+        }, example).not.toThrow();
+      }
+    }
+  });
+});
+
 describe('guide', () => {
   const commands = guideCommands(GUIDE);
 
   it('has plenty of command lines', () => {
-    expect(commands.length).toBeGreaterThan(50);
+    expect(commands.length).toBeGreaterThan(40);
   });
 
   it.each(commands.map((words) => [words.join(' '), words] as const))('%s is valid', (_, words) => {

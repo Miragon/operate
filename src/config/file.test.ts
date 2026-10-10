@@ -38,6 +38,8 @@ function memoryFs(files: Record<string, string> = {}) {
     },
     exists: (path) => Promise.resolve(Object.hasOwn(files, path)),
     remove: () => Promise.resolve(false),
+    readdir: () => Promise.resolve([]),
+    kind: () => Promise.resolve('missing' as const),
   };
   return { fs, writes, dirs };
 }

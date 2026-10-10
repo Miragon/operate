@@ -19,6 +19,11 @@ const DOCUMENTED: Readonly<Record<ErrorCode, number>> = {
   HTTP_SERVER_ERROR: 7,
   NETWORK: 8,
   TIMEOUT: 8,
+  WAIT_TIMEOUT: 9,
+  INCIDENT: 9,
+  INSTANCE_ENDED: 9,
+  JOB_FAILED: 9,
+  CHECK_FAILED: 9,
 };
 
 describe('EXIT_CODES', () => {
@@ -33,6 +38,7 @@ describe('EXIT_CODES', () => {
       client: 6,
       server: 7,
       network: 8,
+      outcome: 9,
     });
   });
 });
