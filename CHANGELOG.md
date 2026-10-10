@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/Miragon/operate/compare/v0.3.0...v0.4.0) (2026-10-10)
+
+
+### Features
+
+* add workflow commands and shell completion ([8a5a05b](https://github.com/Miragon/operate/commit/8a5a05b1a6b676b852624272385497d45d454f96))
+
 ## [0.3.0](https://github.com/Miragon/operate/compare/v0.2.0...v0.3.0) (2026-10-10)
 
 
