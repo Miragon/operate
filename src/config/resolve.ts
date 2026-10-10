@@ -219,7 +219,7 @@ export function resolveConfig(
     headers: headers.value,
     readOnly: readOnly.value ?? false,
   };
-  const auth = resolveAuth(flags, env, selected);
+  const auth = resolveAuth(flags, env, selected, options.authCommand);
   const conflict = authorizationConflict(
     auth.auth,
     headers.authorization,
@@ -230,6 +230,7 @@ export function resolveConfig(
   return {
     ...values,
     auth: auth.auth,
+    ...compact({ unusedToken: auth.unusedToken }),
     sources: {
       url: url.source,
       engine: engine.source,

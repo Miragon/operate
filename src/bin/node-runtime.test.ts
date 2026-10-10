@@ -38,7 +38,7 @@ describe('createNodeRuntime().readStdin', () => {
     expect(code).toBe('USAGE');
     expect(message).toBe('stdin is a terminal; pipe the input into the command');
     expect(details.hint).toBe(
-      `Examples: echo '{}' | operate ... --body - (or --body @file.json); printf '%s\\n' "$PASSWORD" | operate ... --auth-password-stdin.`,
+      `Examples: echo '{}' | operate ... --body - (or --body @file.json); printf '%s\\n' "$PASSWORD" | operate ... --auth-password-stdin (a token: --auth-token-stdin).`,
     );
     // rendered errors are single lines; a template literal "\n" would break the printf example
     expect(details.hint).not.toMatch(/[\r\n]/);

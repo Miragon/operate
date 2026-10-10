@@ -21,7 +21,7 @@ function response(
 }
 
 const HINTS = {
-  401: "The engine requires authentication and operate sent no credentials. Use Basic auth: --auth basic --auth-user <name> with the password piped into --auth-password-stdin, OPERATE_USERNAME and OPERATE_PASSWORD, or a profile: `operate config set <profile> --auth basic --auth-user <name> --auth-password-env <VAR>`. OAuth: `operate config set <profile> --auth oauth --oauth-issuer <url> --oauth-client-id <id>`, then `operate auth login --profile <profile>` in a terminal. For a token, pass -H 'Authorization: Bearer <token>' or OPERATE_HEADERS.",
+  401: 'The engine requires authentication and operate sent no credentials. Use Basic auth: --auth basic --auth-user <name> with the password piped into --auth-password-stdin, OPERATE_USERNAME and OPERATE_PASSWORD, or a profile: `operate config set <profile> --auth basic --auth-user <name> --auth-password-env <VAR>`. OAuth: `operate config set <profile> --auth oauth --oauth-issuer <url> --oauth-client-id <id>`, then `operate auth login --profile <profile>` in a terminal. A token from elsewhere (SSO tooling, a CI secret): --auth bearer with OPERATE_TOKEN or --auth-token-stdin.',
   rejected:
     'The engine rejected the credentials of the Authorization header (from -H, OPERATE_HEADERS or the profile headers; `operate config show` shows which). Check user and password or the token.',
   queryParam:
@@ -216,6 +216,18 @@ describe('httpError', () => {
     expect(httpError(response(401, ''), { ...REQUEST, rejectedHint: undefined }).details.hint).toBe(
       HINTS[401],
     );
+  });
+
+  it("appends the provider's note to the 401 and 403 hints only", () => {
+    const note = 'A bearer token is set (from OPERATE_TOKEN) but not used.';
+    const basic = { ...REQUEST, principal: { user: 'demo', source: 'flag' }, authNote: note };
+    expect(httpError(response(401, ''), basic).details.hint).toMatch(
+      /^The engine rejected the credentials of user demo \(source: flag\)\. .* A bearer token is set \(from OPERATE_TOKEN\) but not used\.$/,
+    );
+    expect(httpError(response(403, ''), basic).details.hint).toBe(`${HINTS[403]} ${note}`);
+    const oauth = { ...REQUEST, rejectedHint: 'OAuth hint', authNote: note };
+    expect(httpError(response(401, ''), oauth).details.hint).toBe(`OAuth hint ${note}`);
+    expect(httpError(response(500, ''), oauth).details.hint).toBe(HINTS.server);
   });
 
   it('keeps the 403 hint with Basic auth credentials', () => {

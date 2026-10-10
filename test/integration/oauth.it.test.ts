@@ -31,6 +31,7 @@ import {
 } from './support/cli.js';
 import { ENGINES } from './support/engines.js';
 import { expectError, expectSuccess, required } from './support/expect.js';
+import { claimsOf } from './support/jwt.js';
 import {
   adminLogout,
   CLIENT_SECRET,
@@ -111,13 +112,6 @@ function authArgs(command: 'status' | 'logout', profile: string, ...extra: strin
 /** `operate process-definition count --profile <profile> [flags...]`, a read the gateway guards. */
 function countArgs(profile: string, ...flags: string[]): string[] {
   return [...argv('process-definition count'), globalFlag('profile'), profile, ...flags];
-}
-
-function claimsOf(jwt: string): Readonly<Record<string, unknown>> {
-  return JSON.parse(Buffer.from(jwt.split('.')[1] ?? '', 'base64url').toString('utf8')) as Record<
-    string,
-    unknown
-  >;
 }
 
 function headerValue(headers: Readonly<Record<string, string>>, name: string): string | undefined {
@@ -505,7 +499,8 @@ describe.skipIf(engine === undefined)(`OAuth login and tokens against ${engine ?
       expect(next.refreshToken).not.toBe(cache.refreshToken);
       expect(next.refreshedAt).toBeGreaterThan(cache.refreshedAt ?? cache.loggedInAt);
       const lifetime = (next.expiresAt ?? 0) - (next.refreshedAt ?? 0);
-      expect(lifetime).toBeGreaterThan(4_000);
+      // Keycloak answers expires_in = exp - now in whole seconds: 4 when a second boundary passes
+      expect(lifetime).toBeGreaterThanOrEqual(4_000);
       expect(lifetime).toBeLessThanOrEqual(5_000);
       spent = cache.refreshToken ?? '';
       cache = next;

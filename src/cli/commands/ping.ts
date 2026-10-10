@@ -1,11 +1,12 @@
 /**
  * `operate ping` (design §5): `GET /version` and `GET /engine`, printed as
  * `{url, engine, reachable, version, engines, latencyMs, auth}`, plus `user` with Basic auth and
- * OAuth. Failures are normal errors; a configured engine name that the REST API does not serve
- * is a CONFIG error.
+ * OAuth, and `user` and `subject` of a bearer token that is a JWT. Failures are normal errors; a
+ * configured engine name that the REST API does not serve is a CONFIG error.
  */
 
 import type { Command } from 'commander';
+import { jwtClaims } from '../../auth/jwt.js';
 import type { AuthProvider } from '../../auth/types.js';
 import { findByOperationId } from '../../catalog/catalog.js';
 import type { Catalog, OperationSpec } from '../../catalog/types.js';
@@ -68,10 +69,18 @@ export function checkEngine(engine: string | undefined, names: readonly string[]
   });
 }
 
-/** `user`: the Basic auth username, or the user of the OAuth login (null when unknown). */
-function userOf(auth: AuthConfig, provider: AuthProvider): { user?: string | null } {
+/**
+ * `user`: the Basic auth username, or the user of the OAuth login (null when unknown); for a
+ * bearer token that is a JWT its `preferred_username` and `sub` (`subject`).
+ */
+function userOf(
+  auth: AuthConfig,
+  provider: AuthProvider,
+): { user?: string | null; subject?: string | null } {
   if (auth.type === 'basic') return { user: auth.username };
-  return auth.type === 'oauth' ? { user: provider.principal?.user ?? null } : {};
+  if (auth.type === 'oauth') return { user: provider.principal?.user ?? null };
+  const claims = auth.type === 'bearer' ? jwtClaims(auth.token) : undefined;
+  return claims === undefined ? {} : { user: claims.user, subject: claims.subject };
 }
 
 async function runPing(command: Command, context: CliContext): Promise<void> {

@@ -1,7 +1,8 @@
 /**
  * `--auth-password-stdin`: the Basic auth password is the first line of stdin, so it never shows
- * up in the shell history or the process list. operate never prompts for it. `config set
- * --oauth-client-secret-stdin` reads an OAuth client secret the same way.
+ * up in the shell history or the process list. operate never prompts for it. `--auth-token-stdin`
+ * reads a bearer token and `config set --oauth-client-secret-stdin` an OAuth client secret the
+ * same way.
  */
 
 import { usageError } from '../errors.js';
@@ -25,6 +26,13 @@ const PASSWORD: StdinSecret = {
   example: PIPE_EXAMPLE,
 };
 
+/** `--auth-token-stdin`: a bearer token obtained elsewhere. */
+export const TOKEN: StdinSecret = {
+  flag: '--auth-token-stdin',
+  noun: 'token',
+  example: `gcloud auth print-access-token | operate ... --auth-token-stdin`,
+};
+
 /**
  * The first line of `data` without its line break (LF, CRLF or a trailing CR). Only that line is
  * decoded (a UTF-8 sequence never contains the byte of LF). Bytes that are not UTF-8, e.g. a
@@ -46,12 +54,31 @@ export function firstLine(data: Uint8Array, secret: StdinSecret = PASSWORD): str
   return line.replace(/\r+$/, '');
 }
 
-/** Both `--auth-password-stdin` and `--body -` want stdin: a usage error. */
-export function checkStdinUse(passwordFromStdin: boolean, bodyFromStdin: boolean): void {
-  if (passwordFromStdin && bodyFromStdin) {
+/** What a command reads from stdin: the password, the token, the body (`--body -`). */
+export interface StdinUse {
+  readonly password: boolean;
+  readonly token: boolean;
+  readonly body: boolean;
+}
+
+/**
+ * Two of `--auth-password-stdin`, `--auth-token-stdin` and `--body -` want stdin: a usage error,
+ * raised before stdin is read.
+ */
+export function checkStdinUse(use: StdinUse): void {
+  if (use.password && use.token) {
     throw usageError(
-      '--auth-password-stdin and --body - both read stdin',
-      'Pass the body as a file (--body @file.json), or the password with OPERATE_PASSWORD or a profile (--auth-password-env).',
+      '--auth-password-stdin and --auth-token-stdin both read stdin',
+      'A command sends a Basic auth password or a bearer token, not both; pass the other one with OPERATE_PASSWORD or OPERATE_TOKEN, and choose the type with --auth.',
+    );
+  }
+  const [flag, variable, option] = use.token
+    ? ['--auth-token-stdin', 'the token with OPERATE_TOKEN', '--auth-token-env']
+    : ['--auth-password-stdin', 'the password with OPERATE_PASSWORD', '--auth-password-env'];
+  if ((use.password || use.token) && use.body) {
+    throw usageError(
+      `${flag} and --body - both read stdin`,
+      `Pass the body as a file (--body @file.json), or ${variable} or a profile (${option}).`,
     );
   }
 }

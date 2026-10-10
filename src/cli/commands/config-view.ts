@@ -5,18 +5,19 @@ import { findProfile } from '../../config/resolve.js';
 import type { ConfigFile, ProfileAuth, Source } from '../../config/types.js';
 import { MASK, maskHeaders } from '../../output/secrets.js';
 
-/** The stored auth object with the password and the client secret masked. */
+/** The stored auth object with the password, the client secret and the token masked. */
 function maskedAuth(auth: ProfileAuth): ProfileAuth {
   return {
     ...auth,
     ...(auth.password === undefined ? {} : { password: MASK }),
     ...(auth.clientSecret === undefined ? {} : { clientSecret: MASK }),
+    ...(auth.token === undefined ? {} : { token: MASK }),
   };
 }
 
 /**
- * A stored profile with its name and default flag; header values, the password and the client
- * secret masked.
+ * A stored profile with its name and default flag; header values, the password, the client
+ * secret and the bearer token masked.
  */
 export function profileView(file: ConfigFile, name: string): Record<string, unknown> {
   const profile = findProfile(file, name) ?? {};
@@ -31,27 +32,36 @@ function masked<T>(entry: { value: T | null; source: Source }, show: boolean) {
 }
 
 /**
- * The `config show` view with header values, the password and the client secret masked unless
- * `showSecrets`.
+ * The `config show` view with header values, the password, the client secret and the bearer
+ * token masked unless `showSecrets`.
  */
 export function maskedView(view: ConfigView, showSecrets: boolean): ConfigView {
-  const { headers, password, clientSecret } = view.values;
+  const { headers, password, clientSecret, token } = view.values;
   return {
     ...view,
     values: {
       ...view.values,
       password: masked(password, showSecrets),
       ...(clientSecret === undefined ? {} : { clientSecret: masked(clientSecret, showSecrets) }),
+      ...(token === undefined
+        ? {}
+        : { token: { ...token, value: showSecrets ? token.value : MASK } }),
       headers: { ...headers, value: maskHeaders(headers.value, showSecrets) },
     },
   };
 }
 
-/** Rows of the `config show` table: KEY VALUE SOURCE; lists (scopes) space-joined. */
+/** A VALUE cell: lists (scopes) space-joined; an unused token says why it is not used. */
+function cell(entry: { readonly value: unknown; readonly unused?: string }): unknown {
+  if (entry.unused !== undefined) return `${String(entry.value)} (unused: ${entry.unused})`;
+  return Array.isArray(entry.value) ? entry.value.join(' ') : entry.value;
+}
+
+/** Rows of the `config show` table: KEY VALUE SOURCE. */
 export function showRows(view: ConfigView): Record<string, unknown>[] {
   return Object.entries(view.values).map(([key, entry]) => ({
     KEY: key,
-    VALUE: Array.isArray(entry.value) ? entry.value.join(' ') : entry.value,
+    VALUE: cell(entry),
     SOURCE: entry.source,
   }));
 }

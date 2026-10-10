@@ -89,7 +89,7 @@ export function parseHeaders(headers: readonly string[]): Record<string, string>
 
 /**
  * OPERATE_HEADERS: `Name: value` headers separated by line breaks (a header value never contains
- * one), e.g. a token a CI job keeps in its environment instead of the command line.
+ * one), e.g. an API key a CI job keeps in its environment instead of the command line.
  */
 export function parseEnvHeaders(value: string | undefined): Record<string, string> {
   const lines = (value ?? '').split(/\r?\n/).filter((line) => line.trim() !== '');
@@ -99,7 +99,7 @@ export function parseEnvHeaders(value: string | undefined): Record<string, strin
     const reason = error instanceof OperateError ? error.message : String(error);
     throw configError(
       `Invalid ${ENV.headers}: ${reason}`,
-      `Example: ${ENV.headers}='Authorization: Bearer <token>'; separate several headers with line breaks.`,
+      `Example: ${ENV.headers}='X-API-Key: <key>'; separate several headers with line breaks. A bearer token goes into ${ENV.token} (--auth bearer).`,
     );
   }
 }

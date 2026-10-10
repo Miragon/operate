@@ -4,6 +4,7 @@
  */
 
 import { createAuthProvider } from '../auth/index.js';
+import { withAuthNote } from '../auth/note.js';
 import type { OAuthDeps } from '../auth/oauth/types.js';
 import {
   configFilePath,
@@ -14,6 +15,7 @@ import {
 } from '../config/file.js';
 import { plainHttpHost } from '../config/oauth.js';
 import { resolveConfig } from '../config/resolve.js';
+import { unusedTokenNote } from '../config/resolve-bearer.js';
 import { ENV, type OutputFormat, type ResolvedConfig } from '../config/types.js';
 import type { ClientOptions } from '../http/client.js';
 import type { GuardOptions } from '../operation/guards.js';
@@ -24,7 +26,7 @@ import type { Runtime } from '../runtime.js';
 import type { CliContext } from './context.js';
 import { configFlags, type GlobalOptions } from './globals.js';
 import { maxWidthOf, terminalFormat } from './output-format.js';
-import { checkStdinUse, readStdinPassword } from './stdin-password.js';
+import { checkStdinUse, readStdinPassword, TOKEN } from './stdin-password.js';
 import { traceWriter } from './trace.js';
 
 export interface Session {
@@ -47,7 +49,7 @@ export function isExplicit(runtime: Runtime, flag: string | undefined): boolean 
 }
 
 export interface SessionOptions {
-  /** `--body -`: stdin holds the body, so `--auth-password-stdin` is refused. */
+  /** `--body -`: stdin holds the body, so `--auth-password-stdin` and `--auth-token-stdin` are refused. */
   readonly bodyFromStdin?: boolean;
   /** `operate auth login|status`: hints never suggest switching OAuth off. */
   readonly authCommand?: boolean;
@@ -55,7 +57,8 @@ export interface SessionOptions {
 
 /**
  * Resolves the configuration and records the output format for error rendering. Reads the
- * password from stdin for `--auth-password-stdin`; `bodyFromStdin` (`--body -`) refuses that.
+ * password from stdin for `--auth-password-stdin` and the token for `--auth-token-stdin`;
+ * `bodyFromStdin` (`--body -`) refuses both.
  */
 export async function openSession(
   context: CliContext,
@@ -63,11 +66,17 @@ export async function openSession(
   options: SessionOptions = {},
 ): Promise<Session> {
   const { runtime } = context;
-  checkStdinUse(globals.authPasswordStdin, options.bodyFromStdin === true);
+  const { authPasswordStdin, authTokenStdin } = globals;
+  checkStdinUse({
+    password: authPasswordStdin,
+    token: authTokenStdin,
+    body: options.bodyFromStdin === true,
+  });
   const path = configPath(runtime, globals.config);
   const file = await readConfigFile(runtime.fs, path, isExplicit(runtime, globals.config));
-  const password = globals.authPasswordStdin ? await readStdinPassword(runtime) : undefined;
-  const config = resolveConfig(configFlags(globals, password), runtime.env, file, {
+  const password = authPasswordStdin ? await readStdinPassword(runtime) : undefined;
+  const token = authTokenStdin ? await readStdinPassword(runtime, TOKEN) : undefined;
+  const config = resolveConfig(configFlags(globals, { password, token }), runtime.env, file, {
     authCommand: options.authCommand === true,
   });
   const format = config.output ?? terminalFormat(runtime);
@@ -116,16 +125,36 @@ export function sessionOAuthDeps(session: Session, runtime: Runtime): OAuthDeps 
   return oauthDeps(runtime, { timeoutMs: session.config.timeoutMs, verbose, showSecrets });
 }
 
+/** What a Bearer token of an auth type is called in the plain http warning. */
+const BEARER_TOKENS: Readonly<Record<string, string>> = {
+  oauth: 'the OAuth access token',
+  bearer: 'the bearer token',
+};
+
 /**
- * The warning for OAuth over plain http to a host beyond loopback: the Bearer token is readable
- * and reusable on the way (RFC 6750 §5.3: clients MUST use TLS). Not for --dry-run (nothing is
- * sent).
+ * The warning for a Bearer token (OAuth or a token from elsewhere) over plain http to a host
+ * beyond loopback: the token is readable and reusable on the way (RFC 6750 §5.3: clients MUST use
+ * TLS). Not for --dry-run (nothing is sent).
  */
 function plainHttpWarning(session: Session): string | undefined {
   const { config, globals } = session;
-  const host = config.auth.type === 'oauth' ? plainHttpHost(config.url) : undefined;
-  if (host === undefined || globals.dryRun) return undefined;
-  return `Warning: operate sends the OAuth access token over plain http to ${host}; anyone on the network path can read and reuse it. Use https:// for the engine URL (RFC 6750 §5.3).`;
+  const token = BEARER_TOKENS[config.auth.type];
+  if (token === undefined || globals.dryRun) return undefined;
+  const host = plainHttpHost(config.url);
+  return host === undefined
+    ? undefined
+    : `Warning: operate sends ${token} over plain http to ${host}; anyone on the network path can read and reuse it. Use https:// for the engine URL (RFC 6750 §5.3).`;
+}
+
+/**
+ * The note for auth failures when OPERATE_TOKEN is set but Basic auth or OAuth won (design §18);
+ * with type none the provider's `off` reason says it already.
+ */
+function unusedNote(config: ResolvedConfig): string | undefined {
+  const { unusedToken } = config;
+  return unusedToken === undefined || config.auth.type === 'none'
+    ? undefined
+    : unusedTokenNote(unusedToken);
 }
 
 /** The HTTP client of a command; the auth provider reads the token cache lazily (OAuth). */
@@ -133,9 +162,10 @@ export function clientOf(session: Session, runtime: Runtime): ClientOptions {
   const { config, globals } = session;
   const warning = plainHttpWarning(session);
   if (warning !== undefined) runtime.stderr.write(`${warning}\n`);
+  const provider = createAuthProvider(config.auth, sessionOAuthDeps(session, runtime));
   const client: ClientOptions = {
     fetch: runtime.fetch,
-    auth: createAuthProvider(config.auth, sessionOAuthDeps(session, runtime)),
+    auth: withAuthNote(provider, unusedNote(config)),
     timeoutMs: config.timeoutMs,
     now: () => runtime.now(),
   };

@@ -149,9 +149,10 @@ describe('operate auth login', () => {
       hint: 'Configure it: operate config set p --auth oauth --oauth-issuer <url> --oauth-client-id <id>',
     });
     const none = await execute(run, ['auth', 'status'], fakeRuntime());
-    expect(errorOf(none.stderr).message).toBe(
-      'operate auth status needs OAuth, but the configuration uses none',
-    );
+    expect(errorOf(none.stderr)).toMatchObject({
+      message: 'operate auth status needs OAuth or a bearer token, but the configuration uses none',
+      hint: 'Configure it: operate config set <profile> --auth oauth --oauth-issuer <url> --oauth-client-id <id>. For a bearer token from elsewhere: OPERATE_AUTH=bearer with OPERATE_TOKEN or --auth-token-stdin.',
+    });
   });
 
   it('says what switched stored or exported OAuth settings off', async () => {
@@ -230,10 +231,15 @@ describe('operate auth login', () => {
       for (const command of ['login', 'status']) {
         const result = await execute(run, ['auth', command], fakeRuntime({ files: basic(auth) }));
         expect(result.code).toBe(3);
+        const needs = command === 'status' ? 'OAuth or a bearer token' : 'OAuth';
+        const bearer =
+          command === 'status'
+            ? '. For a bearer token from elsewhere: OPERATE_AUTH=bearer with OPERATE_TOKEN or --auth-token-stdin.'
+            : '';
         expect(errorOf(result.stderr)).toMatchObject({
           code: 'CONFIG',
-          message: `operate auth ${command} needs OAuth, but profile "p" uses basic`,
-          hint: 'Configure it: operate config set p --auth oauth --oauth-issuer <url> --oauth-client-id <id>',
+          message: `operate auth ${command} needs ${needs}, but profile "p" uses basic`,
+          hint: `Configure it: operate config set p --auth oauth --oauth-issuer <url> --oauth-client-id <id>${bearer}`,
         });
       }
     }

@@ -6,6 +6,7 @@
 
 import { compact, mergeHeaders } from '../util.js';
 import { changedAuth, settleAuthorization } from './auth-edit.js';
+import { type BearerChanges, BEARER_UNSET_KEYS, bearerUnsetKeys } from './bearer-edit.js';
 import { configError } from './config-error.js';
 import { parseHeaders } from './headers.js';
 import {
@@ -30,15 +31,16 @@ import {
   type OutputFormat,
   PROFILE_KEYS,
   type Profile,
+  type ProfileAuth,
   type ProfileKey,
   type ResolvedConfig,
   type Source,
 } from './types.js';
 
-export interface ProfileChanges extends OAuthChanges {
+export interface ProfileChanges extends OAuthChanges, BearerChanges {
   readonly url?: string;
   readonly engine?: string;
-  /** Auth type: none, basic or oauth. */
+  /** Auth type: none, basic, oauth or bearer. */
   readonly auth?: string;
   /** Basic auth username. */
   readonly authUser?: string;
@@ -83,10 +85,18 @@ interface OAuthValues {
 }
 
 /**
+ * The `token` row of `config show`: the bearer token of type bearer, or a token that is set but
+ * not used by the resolved type (`unused` says why).
+ */
+interface TokenValue extends ConfigValue<string> {
+  readonly unused?: string;
+}
+
+/**
  * Output of `operate config show`: every effective value with its source (`auth` is the type,
- * `username` and `password` the Basic auth credentials, the OAuth settings only for type oauth).
- * Header values, the password and the client secret are not masked here; the CLI masks them
- * unless --show-secrets is given.
+ * `username` and `password` the Basic auth credentials, the OAuth settings only for type oauth,
+ * `token` for type bearer or an unused token). Header values, the password, the client secret
+ * and the token are not masked here; the CLI masks them unless --show-secrets is given.
  */
 export interface ConfigView {
   readonly configFile: string;
@@ -98,6 +108,7 @@ export interface ConfigView {
     readonly username: ConfigValue<string | null>;
     readonly password: ConfigValue<string | null>;
   } & Partial<OAuthValues> & {
+      readonly token?: TokenValue;
       readonly output: ConfigValue<OutputFormat | null>;
       readonly timeout: ConfigValue<number>;
       readonly headers: ConfigValue<Readonly<Record<string, string>>>;
@@ -194,16 +205,21 @@ function profileKey(key: string): ProfileKey {
   if (known === undefined) {
     throw configError(
       `Unknown profile key "${key}"`,
-      `Valid keys: ${PROFILE_KEYS.join(', ')}; OAuth settings: ${OAUTH_UNSET_KEYS.join(', ')}.`,
+      `Valid keys: ${PROFILE_KEYS.join(', ')}; OAuth settings: ${OAUTH_UNSET_KEYS.join(', ')}; bearer token: ${BEARER_UNSET_KEYS.join(', ')}.`,
     );
   }
   return known;
 }
 
+/** The keys of the auth object an unset key name removes: OAuth settings or the bearer token. */
+function authUnsetKeys(key: string): readonly (keyof ProfileAuth)[] | undefined {
+  return oauthUnsetKeys(key) ?? bearerUnsetKeys(key);
+}
+
 /**
- * Removes keys from a profile: profile keys, or single OAuth settings of its auth object
- * (`audience`, `clientSecret`, ...; `auth` removes all auth settings). Unknown key names fail;
- * keys the profile does not set are ignored.
+ * Removes keys from a profile: profile keys, or single OAuth settings or the bearer token of its
+ * auth object (`audience`, `clientSecret`, `token`, ...; `auth` removes all auth settings).
+ * Unknown key names fail; keys the profile does not set are ignored.
  */
 export function unsetProfileKeys(
   file: ConfigFile | undefined,
@@ -212,13 +228,13 @@ export function unsetProfileKeys(
 ): ConfigFile {
   const current = file ?? EMPTY;
   const profile = requireProfile(current, name);
-  const oauth = keys.flatMap((key) => oauthUnsetKeys(key) ?? []);
-  const plain = keys.filter((key) => oauthUnsetKeys(key) === undefined);
+  const authKeys = keys.flatMap((key) => authUnsetKeys(key) ?? []);
+  const plain = keys.filter((key) => authUnsetKeys(key) === undefined);
   const removed = new Set<string>(plain.map(profileKey));
   const { auth, ...kept }: Profile = Object.fromEntries(
     Object.entries(profile).filter(([key]) => !removed.has(key)),
   );
-  const rest = withoutAuthKeys(auth, oauth);
+  const rest = withoutAuthKeys(auth, authKeys);
   const edited = canonical(rest === undefined ? kept : { ...kept, auth: rest });
   return buildFile({ ...current.profiles, [name]: edited }, current.defaultProfile);
 }
@@ -282,6 +298,15 @@ function oauthValues(oauth: OAuthConfig): OAuthValues {
   };
 }
 
+/** The `token` row: the bearer token, or a token the resolved type leaves unused. */
+function tokenValue(resolved: ResolvedConfig): { token?: TokenValue } {
+  const { auth, unusedToken } = resolved;
+  if (auth.type === 'bearer') return { token: { value: auth.token, source: auth.source } };
+  if (unusedToken === undefined) return {};
+  const { value, source, reason } = unusedToken;
+  return { token: { value, source, unused: reason } };
+}
+
 function credentialValues(auth: AuthConfig) {
   if (auth.type !== 'basic') {
     return {
@@ -307,6 +332,7 @@ export function showConfig(resolved: ResolvedConfig, configFile: string): Config
       engine: { value: resolved.engine ?? null, source: sources.engine },
       auth: { value: auth.type, source: sources.auth },
       ...credentialValues(auth),
+      ...tokenValue(resolved),
       output: { value: resolved.output ?? null, source: sources.output },
       timeout: { value: resolved.timeoutMs, source: sources.timeout },
       headers: { value: resolved.headers, source: sources.headers },

@@ -1,8 +1,9 @@
 /**
  * `operate auth login|status|logout` (design §16.3): the OAuth login of a person in a terminal,
- * the state of the token cache, and the logout. This is the only module that imports the
- * interactive login (src/auth/oauth/login.ts): no other command can start a loopback server or a
- * browser, so agents never end up in an interactive login.
+ * the state of the token cache, and the logout; `auth status` also shows a bearer token from
+ * elsewhere (auth-bearer.ts, §18). This is the only module that imports the interactive login
+ * (src/auth/oauth/login.ts): no other command can start a loopback server or a browser, so agents
+ * never end up in an interactive login.
  */
 
 import type { Command } from 'commander';
@@ -12,11 +13,10 @@ import { identityOf, sameIdentity } from '../../auth/oauth/identity.js';
 import { login } from '../../auth/oauth/login.js';
 import { logout, type LogoutTarget } from '../../auth/oauth/logout.js';
 import type { LoginDeps } from '../../auth/oauth/types.js';
-import { configError } from '../../config/config-error.js';
 import { profileTokenFile, readConfigFile } from '../../config/file.js';
 import type { Env } from '../../config/pick.js';
-import { selectedAuthType } from '../../config/resolve-auth.js';
-import { endpointSource, oauthEnvVariable } from '../../config/resolve-oauth.js';
+import { selectedAuth } from '../../config/resolve-auth.js';
+import { endpointSource } from '../../config/resolve-oauth.js';
 import {
   MAX_TIMEOUT_MS,
   parseTimeout,
@@ -24,11 +24,10 @@ import {
   selectProfile,
 } from '../../config/resolve.js';
 import {
+  type BearerAuthConfig,
   DEFAULT_TIMEOUT_MS,
-  ENV,
   type ResolvedConfig,
   type SelectedProfile,
-  type Source,
 } from '../../config/types.js';
 import { usageError } from '../../errors.js';
 import { renderValue } from '../../output/render.js';
@@ -39,19 +38,20 @@ import type { CliContext } from '../context.js';
 import { type Display, displayOf } from '../display.js';
 import { addGlobalOptions, configFlags, type GlobalOptions, readGlobals } from '../globals.js';
 import { maxWidthOf } from '../output-format.js';
+import { configPath, isExplicit, oauthDeps, type Session, sessionOAuthDeps } from '../session.js';
 import {
-  configPath,
-  isExplicit,
-  oauthDeps,
-  openSession,
-  type Session,
-  sessionOAuthDeps,
-} from '../session.js';
+  bearerNotManaged,
+  type BearerStatusView,
+  bearerStatusView,
+  expiredError,
+} from './auth-bearer.js';
+import { authSession, notOAuth, notOAuthOf, oauthOf } from './auth-session.js';
 import { type LoginView, loginView, type LogoutView, viewRows } from './auth-view.js';
 import type { UtilityCommand } from './types.js';
 
 const LOGIN_OPTIONS = ['profile', 'config', 'output', 'timeout', 'verbose'];
-const STATUS_OPTIONS = ['profile', 'config', 'output'];
+/** `--auth-token-stdin` lets `auth status` show a piped bearer token (design §18). */
+const STATUS_OPTIONS = ['profile', 'config', 'output', 'auth-token-stdin'];
 const OPTIONS_GROUP = 'Options:';
 const DEFAULT_LOGIN_TIMEOUT_MS = 300_000;
 
@@ -59,11 +59,17 @@ const DESCRIPTION = [
   'Log in with OAuth 2.0 (authorization code flow with PKCE) and manage the cached tokens.',
   '',
   'A person runs "operate auth login" once in a terminal; every other command reads the token cache and refreshes the token on its own. Agents never log in themselves: without a usable login a command fails with LOGIN_REQUIRED (exit 4).',
+  '',
+  'A bearer token from elsewhere (--auth bearer, OPERATE_TOKEN) needs no login: "operate auth status" shows where it comes from and, for a JWT, its subject, issuer, audience and expiry.',
 ].join('\n');
 
 type Format = Pick<Display, 'format' | 'pretty' | 'maxWidth'>;
 
-function printView(view: LoginView | LogoutView, display: Format, runtime: Runtime): void {
+function printView(
+  view: LoginView | LogoutView | BearerStatusView,
+  display: Format,
+  runtime: Runtime,
+): void {
   const value = display.format === 'json' ? view : viewRows(view);
   runtime.stdout.write(renderValue(value, display));
 }
@@ -77,85 +83,6 @@ function safeStderr(runtime: Runtime): OutputStream {
       stderr.write(typeof chunk === 'string' && stderr.isTTY ? terminalSafe(chunk) : chunk);
     },
   };
-}
-
-/** Why a configuration does not use OAuth: its type, where that came from, the `off` reason. */
-interface NotOAuth {
-  readonly profile: string | undefined;
-  readonly type: string;
-  readonly source: Source;
-  readonly off?: string | undefined;
-}
-
-function notOAuthOf(config: ResolvedConfig): NotOAuth {
-  const { auth } = config;
-  const off = auth.type === 'none' ? auth.off : undefined;
-  return { profile: config.profile, type: auth.type, source: config.sources.auth, off };
-}
-
-/**
- * The hint when OAuth is not selected: why stored or exported OAuth settings are not used (the
- * `off` reason of resolution) and how to switch them on, else how to configure OAuth. `auth`
- * commands have no `--auth` option, so the hint never suggests one.
- */
-function notOAuthHint(state: NotOAuth, env: Env): string {
-  const profile = state.profile ?? '<profile>';
-  const variable = oauthEnvVariable(env);
-  const off = state.off?.includes('OAuth') === true ? state.off : undefined;
-  if (off === undefined) {
-    return `Configure it: operate config set ${profile} --auth oauth --oauth-issuer <url> --oauth-client-id <id>`;
-  }
-  switch (state.source) {
-    case 'profile':
-      return `${off}. Switch it on: operate config set ${profile} --auth oauth`;
-    case 'env':
-      return `${off}. Switch it on: ${ENV.auth}=oauth`;
-    default:
-      // OPERATE_OAUTH_* values without any auth type
-      return `OAuth settings are set (from ${variable ?? 'OPERATE_OAUTH_*'}), but no auth type selects OAuth. Switch it on: ${ENV.auth}=oauth`;
-  }
-}
-
-function notOAuth(command: string, state: NotOAuth, env: Env) {
-  const owner = state.profile === undefined ? 'the configuration' : `profile "${state.profile}"`;
-  return configError(
-    `operate auth ${command} needs OAuth, but ${owner} uses ${state.type}`,
-    notOAuthHint(state, env),
-  );
-}
-
-/**
- * CONFIG `needs OAuth, but profile "p" uses basic` when the selected profile uses Basic auth,
- * decided without resolving its credentials: a Basic profile whose password variable is not set
- * must not ask for that password when the user wants to log in with OAuth.
- */
-async function basicInstead(context: CliContext, globals: GlobalOptions, command: string) {
-  const { runtime } = context;
-  try {
-    const path = configPath(runtime, globals.config);
-    const file = await readConfigFile(runtime.fs, path, isExplicit(runtime, globals.config));
-    const flags = configFlags(globals);
-    const selected = selectProfile(flags, runtime.env, file);
-    if (selectedAuthType(flags, runtime.env, selected) !== 'basic') return undefined;
-    const state = { profile: selected.name, type: 'basic', source: 'profile' } as const;
-    return notOAuth(command, state, runtime.env);
-  } catch {
-    return undefined;
-  }
-}
-
-/** The session of `auth login|status`: the configuration must select OAuth. */
-async function oauthSession(command: Command, context: CliContext, name: string) {
-  const globals = readGlobals(command);
-  let session: Session;
-  try {
-    session = await openSession(context, globals, { authCommand: true });
-  } catch (error) {
-    throw (await basicInstead(context, globals, name)) ?? error;
-  }
-  const { auth } = session.config;
-  if (auth.type !== 'oauth') throw notOAuth(name, notOAuthOf(session.config), context.runtime.env);
-  return { session, config: auth };
 }
 
 /** `--login-timeout <ms>`: a positive whole number up to the largest timer delay. */
@@ -173,7 +100,8 @@ async function runLogin(command: Command, context: CliContext): Promise<void> {
   const { runtime } = context;
   const options = command.opts<{ browser?: boolean; loginTimeout?: string }>();
   const loginTimeoutMs = parseLoginTimeout(options.loginTimeout);
-  const { session, config } = await oauthSession(command, context, 'login');
+  const session = await authSession(command, context, 'login');
+  const config = oauthOf(session, 'login', runtime.env);
   const deps: LoginDeps = {
     ...sessionOAuthDeps(session, runtime),
     randomBytes: (length) => runtime.randomBytes(length),
@@ -188,9 +116,23 @@ async function runLogin(command: Command, context: CliContext): Promise<void> {
   printView(view, { ...session, maxWidth: maxWidthOf(runtime) }, runtime);
 }
 
+/** `auth status` of a bearer token: the view, then TOKEN_EXPIRED for an expired JWT. */
+function bearerStatus(auth: BearerAuthConfig, session: Session, runtime: Runtime): void {
+  const now = runtime.now();
+  printView(bearerStatusView(auth, now), { ...session, maxWidth: maxWidthOf(runtime) }, runtime);
+  const expired = expiredError(auth, now);
+  if (expired !== undefined) throw expired;
+}
+
 async function runStatus(command: Command, context: CliContext): Promise<void> {
   const { runtime } = context;
-  const { session, config } = await oauthSession(command, context, 'status');
+  const session = await authSession(command, context, 'status');
+  const { auth } = session.config;
+  if (auth.type === 'bearer') {
+    bearerStatus(auth, session, runtime);
+    return;
+  }
+  const config = oauthOf(session, 'status', runtime.env);
   const deps = sessionOAuthDeps(session, runtime);
   const path = await cachePath(config, deps);
   const cached = await readCache(path, deps, config.profile);
@@ -250,6 +192,12 @@ function targetOf(
   };
 }
 
+/** What selected bearer auth for logout, or undefined when another type is selected. */
+function bearerSelection(globals: GlobalOptions, env: Env, selected: SelectedProfile) {
+  const auth = selectedAuth(configFlags(globals), env, selected);
+  return auth?.type === 'bearer' ? { profile: selected.name, source: auth.source, env } : undefined;
+}
+
 /** What logout works on: the selected profile and, if they resolve, the OAuth settings. */
 async function logoutTarget(globals: GlobalOptions, context: CliContext) {
   const { runtime } = context;
@@ -260,9 +208,16 @@ async function logoutTarget(globals: GlobalOptions, context: CliContext) {
   const resolved = 'config' in resolution ? resolution.config : undefined;
   const deps = oauthDeps(runtime, { ...globals, timeoutMs: logoutTimeout(globals, resolved) });
   const target = targetOf(selected, resolution);
+  const bearer = bearerSelection(globals, runtime.env, selected);
   if (selected.name !== undefined) {
-    return { target, deps, tokenCache: deps.tokenPath(profileTokenFile(selected.name)) };
+    const tokenCache = deps.tokenPath(profileTokenFile(selected.name));
+    // a bearer profile may still have the OAuth login it used before (config set says so)
+    if (bearer !== undefined && !(await runtime.fs.exists(tokenCache))) {
+      throw bearerNotManaged('logout', bearer);
+    }
+    return { target, deps, tokenCache };
   }
+  if (bearer !== undefined) throw bearerNotManaged('logout', bearer);
   // without a profile the file name is derived from the resolved OAuth settings
   if (target.settings === undefined) {
     if ('error' in resolution) throw resolution.error;
@@ -309,7 +264,7 @@ function registerStatus(auth: Command, context: CliContext): void {
   const command = authSubcommand(
     auth,
     'status',
-    'Show the cached OAuth login without network access: user, scopes and the expiry of the access and refresh token. Exit 0 when commands can run without a new login, else LOGIN_REQUIRED (exit 4). Never prints a token.',
+    'Show the cached OAuth login without network access: user, scopes and the expiry of the access and refresh token. Exit 0 when commands can run without a new login, else LOGIN_REQUIRED (exit 4). With a bearer token: its source and, for a JWT, subject, issuer, audience and expiry; an expired JWT exits with TOKEN_EXPIRED (exit 4). Never prints a token.',
   );
   addGlobalOptions(command, STATUS_OPTIONS, OPTIONS_GROUP);
   command.action(() => runStatus(command, context));
@@ -330,7 +285,7 @@ export const authCommand: UtilityCommand = {
   nested: true,
   register(program, context) {
     const auth = subcommand(program, 'auth')
-      .summary('Log in with OAuth and manage the cached tokens')
+      .summary('Log in with OAuth, manage the cached tokens, check a bearer token')
       .description(DESCRIPTION);
     registerLogin(auth, context);
     registerStatus(auth, context);

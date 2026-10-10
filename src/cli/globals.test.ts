@@ -27,6 +27,7 @@ const NONE: GlobalOptions = {
   verbose: false,
   showSecrets: false,
   authPasswordStdin: false,
+  authTokenStdin: false,
 };
 
 describe('global options', () => {
@@ -51,6 +52,7 @@ describe('global options', () => {
       '--auth <type>',
       '--auth-user <name>',
       '--auth-password-stdin',
+      '--auth-token-stdin',
       '--verbose',
       '--out-file <path>',
       '--show-secrets',
@@ -140,6 +142,7 @@ describe('readGlobals', () => {
       verbose: true,
       showSecrets: true,
       authPasswordStdin: true,
+      authTokenStdin: false,
     });
   });
 });
@@ -175,9 +178,19 @@ describe('configFlags', () => {
   });
 
   it('passes the password read from stdin', () => {
-    expect(configFlags({ ...NONE, authPasswordStdin: true }, 'p:w')).toEqual({
+    expect(configFlags({ ...NONE, authPasswordStdin: true }, { password: 'p:w' })).toEqual({
       authPassword: 'p:w',
     });
+  });
+
+  it('passes the token read from stdin', () => {
+    expect(configFlags({ ...NONE, authTokenStdin: true }, { token: 'abc.def' })).toEqual({
+      authToken: 'abc.def',
+    });
+  });
+
+  it('reads --auth-token-stdin', () => {
+    expect(parsed(['--auth-token-stdin'])).toEqual({ ...NONE, authTokenStdin: true });
   });
 
   it('leaves out absent values, empty headers and read-only false', () => {

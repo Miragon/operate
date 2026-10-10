@@ -59,7 +59,7 @@ describe('operate __complete', () => {
     ],
     [
       ['task', 'list', '--auth', ''],
-      ['none', 'basic', 'oauth'],
+      ['none', 'basic', 'oauth', 'bearer'],
     ],
     [
       ['auth', ''],
@@ -117,7 +117,7 @@ describe('operate __complete', () => {
     ],
     [
       ['config', 'set', 'dev', '--auth', ''],
-      ['none', 'basic', 'oauth'],
+      ['none', 'basic', 'oauth', 'bearer'],
     ],
     [
       ['config', 'set', 'dev', '-o', ''],
@@ -186,6 +186,8 @@ describe('operate __complete', () => {
       'scopes',
       'audience',
       'redirectPort',
+      'token',
+      'tokenEnv',
     ]);
     expect(await values(['config', 'unset', 'prod', 'url', 'e'], { files })).toEqual([
       'engine',
@@ -259,7 +261,7 @@ describe('operate __complete output', () => {
     expect(await complete(['completion', ''])).toBe('bash\t\nzsh\t\nfish\t\n');
     expect(await complete(['-o', ''])).toBe('json\t\ntable\t\n');
     expect(await complete(['config', 'sh'])).toBe(
-      'show\tPrint the effective configuration and where each value comes from; header values, the password and …\n',
+      'show\tPrint the effective configuration and where each value comes from; header values, the password, the…\n',
     );
   });
 });

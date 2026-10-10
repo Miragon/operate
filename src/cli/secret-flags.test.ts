@@ -45,7 +45,7 @@ describe('secretHint', () => {
   it('is given for names that ask for a secret only', () => {
     for (const name of ['--password', '--PASSWD', '--pwd', '--client-secret', '--token']) {
       expect(secretHint(name)).toMatch(
-        /^Secrets are never flag values: .* OPERATE_HEADERS; an OAuth token comes from `operate auth login`\. $/,
+        /^Secrets are never flag values: .* OPERATE_TOKEN or --auth-token-stdin; an OAuth token comes from `operate auth login`\. $/,
       );
     }
     for (const name of ['--pass', '--pass-word', '--auth-pass']) {
@@ -75,6 +75,15 @@ describe('mentionsSecret', () => {
     expect(mentionsSecret(['ping', '--auth-user=password'])).toBe(false);
     expect(mentionsSecret([])).toBe(false);
   });
+
+  it('counts --auth bearer: the word after it is most likely the token', () => {
+    expect(mentionsSecret(['ping', '--auth', 'bearer', 'x'])).toBe(true);
+    expect(mentionsSecret(['ping', '--auth', 'Bearer', 'x'])).toBe(true);
+    expect(mentionsSecret(['ping', '--auth=BEARER', 'x'])).toBe(true);
+    expect(mentionsSecret(['ping', '--auth', 'basic', 'x'])).toBe(false);
+    expect(mentionsSecret(['ping', '--auth=basic', 'bearer'])).toBe(false);
+    expect(mentionsSecret(['ping', 'bearer', '--auth'])).toBe(false);
+  });
 });
 
 describe('stdinHint', () => {
@@ -85,5 +94,15 @@ describe('stdinHint', () => {
     expect(stdinHint(['ping', '--auth-password-stdin=x'])).not.toBe('');
     expect(stdinHint(['ping', '--auth-password-stdinx', 'x'])).toBe('');
     expect(stdinHint(['ping', 'x'])).toBe('');
+  });
+
+  it('says that --auth takes only the type after --auth bearer', () => {
+    const bearer =
+      '--auth takes only the type: the token goes into OPERATE_TOKEN or --auth-token-stdin, not after --auth bearer. ';
+    expect(stdinHint(['ping', '--auth', 'bearer', 'x'])).toBe(bearer);
+    expect(stdinHint(['--auth=bearer', '--auth-token-stdin', 'x', 'ping'])).toBe(
+      `--auth-token-stdin takes no value: pipe the token into it, e.g. printf '%s\\n' "$TOKEN" | operate ... --auth-token-stdin. ${bearer}`,
+    );
+    expect(stdinHint(['ping', '--auth', 'oauth', 'x'])).toBe('');
   });
 });

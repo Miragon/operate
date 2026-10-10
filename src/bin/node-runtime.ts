@@ -69,7 +69,7 @@ async function readStdin(stdin: NodeJS.ReadStream = process.stdin): Promise<Uint
   if (stdin.isTTY) {
     throw usageError(
       'stdin is a terminal; pipe the input into the command',
-      `Examples: echo '{}' | operate ... --body - (or --body @file.json); printf '%s\\n' "$PASSWORD" | operate ... --auth-password-stdin.`,
+      `Examples: echo '{}' | operate ... --body - (or --body @file.json); printf '%s\\n' "$PASSWORD" | operate ... --auth-password-stdin (a token: --auth-token-stdin).`,
     );
   }
   const chunks: Buffer[] = [];

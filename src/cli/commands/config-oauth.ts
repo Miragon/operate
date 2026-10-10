@@ -1,20 +1,30 @@
 /**
  * The OAuth part of `operate config set|delete` (design §16.2.2): the `--oauth-*` options, the
- * client secret from stdin, the notices on stderr after `config set` (also those of Basic auth)
- * and the removal of a deleted profile's token cache file, under the cache lock so that a
- * refresh in flight cannot write it back.
+ * secrets `config set` reads from stdin, the notices on stderr after `config set` (also those of
+ * Basic auth and bearer tokens) and the removal of a deleted profile's token cache file, under
+ * the cache lock so that a refresh in flight cannot write it back.
  */
 
 import type { Command } from 'commander';
 import { removeCache, withCacheLock } from '../../auth/oauth/cache.js';
-import { replacedAuthorization, replacedFamily } from '../../config/auth-edit.js';
+import {
+  FAMILY_NAMES,
+  replacedAuthorization,
+  replacedFamily,
+  SETTING_NAMES,
+  settingsFamily,
+  storedFamily,
+} from '../../config/auth-edit.js';
+import type { ProfileChanges } from '../../config/edit.js';
 import { profileTokenFile, tokenDirectory, tokenPath } from '../../config/file.js';
 import type { OAuthChanges } from '../../config/oauth-edit.js';
+import type { Env } from '../../config/pick.js';
 import { DEFAULT_TIMEOUT_MS, type Profile } from '../../config/types.js';
 import { usageError } from '../../errors.js';
 import { compact } from '../../util.js';
 import type { CliContext } from '../context.js';
 import { readStdinPassword, type StdinSecret } from '../stdin-password.js';
+import { bearerWarnings, STORED_TOKEN } from './config-bearer.js';
 
 interface OAuthSetOptions {
   readonly oauthIssuer?: string;
@@ -83,22 +93,40 @@ export function oauthChanges(command: Command, clientSecret: string | undefined)
   });
 }
 
-/** The secrets `config set` reads from stdin: a Basic auth password or an OAuth client secret. */
-export async function readSetSecrets(command: Command, context: CliContext) {
-  const { authPasswordStdin, oauthClientSecretStdin } = command.opts<
-    OAuthSetOptions & { readonly authPasswordStdin?: boolean }
-  >();
-  if (authPasswordStdin === true && oauthClientSecretStdin === true) {
+/** The secrets `config set` read from stdin; each is stored literally. */
+export interface SetSecrets {
+  readonly password?: string | undefined;
+  readonly clientSecret?: string | undefined;
+  readonly token?: string | undefined;
+}
+
+/** The stdin options of `config set`, by the flag that reads them. */
+const STDIN_OPTIONS = [
+  ['authPasswordStdin', '--auth-password-stdin'],
+  ['oauthClientSecretStdin', '--oauth-client-secret-stdin'],
+  ['authTokenStdin', '--auth-token-stdin'],
+] as const;
+
+/**
+ * The secrets `config set` reads from stdin: a Basic auth password, an OAuth client secret or a
+ * bearer token; two of them would both read stdin.
+ */
+export async function readSetSecrets(command: Command, context: CliContext): Promise<SetSecrets> {
+  const options = command.opts<Partial<Record<(typeof STDIN_OPTIONS)[number][0], boolean>>>();
+  const given = STDIN_OPTIONS.filter(([key]) => options[key] === true).map(([, flag]) => flag);
+  if (given.length > 1) {
     throw usageError(
-      '--auth-password-stdin and --oauth-client-secret-stdin both read stdin',
-      'A profile uses Basic auth or OAuth; give the option of one of them.',
+      `${given.join(' and ')} both read stdin`,
+      'A profile uses Basic auth, OAuth or a bearer token; give the option of one of them.',
     );
   }
   const { runtime } = context;
+  const read = async (key: (typeof STDIN_OPTIONS)[number][0], secret?: StdinSecret) =>
+    options[key] === true ? await readStdinPassword(runtime, secret) : undefined;
   return {
-    password: authPasswordStdin === true ? await readStdinPassword(runtime) : undefined,
-    clientSecret:
-      oauthClientSecretStdin === true ? await readStdinPassword(runtime, CLIENT_SECRET) : undefined,
+    password: await read('authPasswordStdin'),
+    clientSecret: await read('oauthClientSecretStdin', CLIENT_SECRET),
+    token: await read('authTokenStdin', STORED_TOKEN),
   };
 }
 
@@ -108,30 +136,38 @@ export interface SetOutcome {
   readonly path: string;
   readonly before: Profile | undefined;
   readonly after: Profile | undefined;
-  /** A literal password was stored. */
-  readonly storedPassword: boolean;
-  /** The variable named by --auth-password-env is not set in this environment. */
-  readonly unsetVariable: boolean;
-  /** A literal client secret was stored. */
-  readonly storedClientSecret: boolean;
-  /** The variable named by --oauth-client-secret-env is not set in this environment. */
-  readonly unsetSecretVariable: boolean;
+  /** What was read from stdin (and stored literally). */
+  readonly secrets: SetSecrets;
+  /** The variable names given to the `--*-env` options. */
+  readonly changes: Pick<
+    ProfileChanges,
+    'authPasswordEnv' | 'oauthClientSecretEnv' | 'authTokenEnv'
+  >;
+  readonly env: Env;
 }
 
 function familyNotice(outcome: SetOutcome): string | undefined {
   const replaced = replacedFamily(outcome.before?.auth, outcome.after?.auth);
-  if (replaced === 'basic') {
-    return 'Notice: removed the Basic auth settings of the profile; OAuth replaces them.';
-  }
-  return replaced === 'oauth'
-    ? `Notice: removed the OAuth settings of the profile; Basic auth replaces them. \`operate auth logout --profile ${outcome.name}\` removes its login.`
-    : undefined;
+  const by = settingsFamily(outcome.after?.auth);
+  if (replaced === undefined || by === undefined) return undefined;
+  const logout =
+    replaced === 'oauth'
+      ? ` \`operate auth logout --profile ${outcome.name}\` removes its login.`
+      : '';
+  return `Notice: removed the ${SETTING_NAMES[replaced]} settings of the profile; ${FAMILY_NAMES[by]} replaces them.${logout}`;
 }
 
 function headerNotice(outcome: SetOutcome): string | undefined {
-  if (!replacedAuthorization(outcome.before, outcome.after)) return undefined;
-  const family = outcome.after?.auth?.type === 'oauth' ? 'OAuth' : 'Basic auth';
-  return `Notice: removed the Authorization header of the profile; ${family} replaces it.`;
+  const family = storedFamily(outcome.after?.auth);
+  if (family === undefined || !replacedAuthorization(outcome.before, outcome.after)) {
+    return undefined;
+  }
+  return `Notice: removed the Authorization header of the profile; ${FAMILY_NAMES[family]} replaces it.`;
+}
+
+/** True when `variable` was given and names a variable without a non-blank value in `env`. */
+function unsetVariable(env: Env, variable: string | undefined): boolean {
+  return variable !== undefined && (env[variable.trim()] ?? '').trim() === '';
 }
 
 /**
@@ -139,21 +175,23 @@ function headerNotice(outcome: SetOutcome): string | undefined {
  * "name" may be the secret itself.
  */
 export function setNotices(outcome: SetOutcome): string[] {
+  const { secrets, changes, env, path } = outcome;
   return [
     familyNotice(outcome),
     headerNotice(outcome),
-    outcome.storedPassword
-      ? `Warning: the password is stored in plain text in ${outcome.path} (mode 0600). Prefer --auth-password-env <VAR>, which stores only the name of an environment variable.`
+    secrets.password !== undefined
+      ? `Warning: the password is stored in plain text in ${path} (mode 0600). Prefer --auth-password-env <VAR>, which stores only the name of an environment variable.`
       : undefined,
-    outcome.unsetVariable
+    unsetVariable(env, changes.authPasswordEnv)
       ? 'Warning: the variable named by --auth-password-env is not set in this environment. Pass the name of a variable that holds the password (e.g. CAMUNDA_PASSWORD), never the password itself; commands read it when they run.'
       : undefined,
-    outcome.storedClientSecret
-      ? `Warning: the client secret is stored in plain text in ${outcome.path} (mode 0600). Prefer --oauth-client-secret-env <VAR>.`
+    secrets.clientSecret !== undefined
+      ? `Warning: the client secret is stored in plain text in ${path} (mode 0600). Prefer --oauth-client-secret-env <VAR>.`
       : undefined,
-    outcome.unsetSecretVariable
+    unsetVariable(env, changes.oauthClientSecretEnv)
       ? 'Warning: the variable named by --oauth-client-secret-env is not set in this environment. Pass the name of a variable that holds the client secret (e.g. OPERATE_CLIENT_SECRET), never the secret itself; commands read it when they run.'
       : undefined,
+    ...bearerWarnings(path, secrets.token !== undefined, unsetVariable(env, changes.authTokenEnv)),
     outcome.after?.auth?.type === 'oauth'
       ? `Next: run \`operate auth login --profile ${outcome.name}\` in a terminal to log in.`
       : undefined,

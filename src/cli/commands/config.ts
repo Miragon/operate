@@ -4,6 +4,7 @@
  */
 
 import type { Command } from 'commander';
+import { BEARER_UNSET_KEYS } from '../../config/bearer-edit.js';
 import {
   deleteProfile,
   listProfiles,
@@ -15,6 +16,7 @@ import {
 } from '../../config/edit.js';
 import { readConfigFile, writeConfigFile } from '../../config/file.js';
 import { OAUTH_UNSET_KEYS } from '../../config/oauth-edit.js';
+import type { Env } from '../../config/pick.js';
 import { findProfile, validateOutput } from '../../config/resolve.js';
 import { AUTH_TYPES, type ConfigFile, OUTPUT_FORMATS, PROFILE_KEYS } from '../../config/types.js';
 import { renderValue } from '../../output/render.js';
@@ -27,11 +29,13 @@ import { addGlobalOptions, readGlobals } from '../globals.js';
 import { collect } from '../options.js';
 import { maxWidthOf } from '../output-format.js';
 import { configPath, isExplicit, openSession } from '../session.js';
+import { addBearerOptions, bearerChanges } from './config-bearer.js';
 import {
   addOAuthOptions,
   oauthChanges,
   readSetSecrets,
   removeLogin,
+  type SetSecrets,
   setNotices,
 } from './config-oauth.js';
 import { maskedView, profileView, showHeader, showRows } from './config-view.js';
@@ -52,6 +56,7 @@ const SHOW_OPTIONS = [
   'auth',
   'auth-user',
   'auth-password-stdin',
+  'auth-token-stdin',
   'read-only',
   'show-secrets',
 ];
@@ -141,23 +146,20 @@ async function editConfig(command: Command, context: CliContext, edit: Edit) {
 
 /**
  * The changes of `config set`; only options given on the command line. The secrets are what
- * `--auth-password-stdin` and `--oauth-client-secret-stdin` read.
+ * `--auth-password-stdin`, `--oauth-client-secret-stdin` and `--auth-token-stdin` read.
  */
-function profileChanges(
-  command: Command,
-  secrets: { readonly password?: string | undefined; readonly clientSecret?: string | undefined },
-): ProfileChanges {
+function profileChanges(command: Command, secrets: SetSecrets, env: Env): ProfileChanges {
   // --read-only is defined before --no-read-only, so neither sets a default value
   const options = command.opts<SetOptions>();
-  const password = secrets.password;
   return compact({
     ...oauthChanges(command, secrets.clientSecret),
+    ...bearerChanges(command, secrets.token, env),
     url: options.url,
     engine: options.engine,
     auth: options.auth,
     authUser: options.authUser,
     authPasswordEnv: options.authPasswordEnv,
-    authPassword: password,
+    authPassword: secrets.password,
     output: options.output,
     timeout: options.timeout,
     headers: options.header,
@@ -173,35 +175,18 @@ async function editProfile(name: string, command: Command, context: CliContext, 
   return edited;
 }
 
-/** True for a variable name that has no non-blank value in `env` (blank passwords count as unset). */
-function isUnset(env: CliContext['runtime']['env'], name: string): boolean {
-  return (env[name.trim()] ?? '').trim() === '';
-}
-
-/** True when `variable` was given and names a variable that is not set. */
-function unsetVariable(env: CliContext['runtime']['env'], variable: string | undefined): boolean {
-  return variable !== undefined && isUnset(env, variable);
-}
-
 /** `config set`: reads literal secrets from stdin first, and warns after storing them. */
 async function setProfileFrom(name: string, command: Command, context: CliContext) {
   const { runtime } = context;
   const secrets = await readSetSecrets(command, context);
-  const changes = profileChanges(command, secrets);
+  const changes = profileChanges(command, secrets, runtime.env);
   const { file, previous, path } = await editProfile(name, command, context, (current) =>
     setProfile(current, name, changes),
   );
-  const notices = setNotices({
-    name,
-    path,
-    before: findProfile(previous, name),
-    after: findProfile(file, name),
-    storedPassword: secrets.password !== undefined,
-    unsetVariable: unsetVariable(runtime.env, changes.authPasswordEnv),
-    storedClientSecret: secrets.clientSecret !== undefined,
-    unsetSecretVariable: unsetVariable(runtime.env, changes.oauthClientSecretEnv),
-  });
-  for (const notice of notices) runtime.stderr.write(`${notice}\n`);
+  const before = findProfile(previous, name);
+  const after = findProfile(file, name);
+  const outcome = { name, path, before, after, secrets, changes, env: runtime.env };
+  for (const notice of setNotices(outcome)) runtime.stderr.write(`${notice}\n`);
 }
 
 async function removeProfile(name: string, command: Command, context: CliContext): Promise<void> {
@@ -232,7 +217,7 @@ function registerReadCommands(config: Command, context: CliContext): void {
   const show = configSubcommand(
     config,
     'show',
-    'Print the effective configuration and where each value comes from; header values, the password and the client secret are masked unless --show-secrets. -o only formats this output: the values are what an operation command resolves without it.',
+    'Print the effective configuration and where each value comes from; header values, the password, the client secret and the bearer token are masked unless --show-secrets. -o only formats this output: the values are what an operation command resolves without it.',
     SHOW_OPTIONS,
   );
   show.action(() => printConfig(show, context));
@@ -262,12 +247,12 @@ function completeProfiles(command: Command, rest?: readonly string[]): Command {
 function registerSet(config: Command, context: CliContext): void {
   const set = subcommand(config, 'set')
     .description(
-      'Create or update a profile; only the given values change. The first profile becomes the default. --output is the output format stored in the profile; -o <format> chooses how the profile is printed. Basic auth: --auth basic --auth-user <name> --auth-password-env <VAR> keeps the password in an environment variable. OAuth: --auth oauth --oauth-issuer <url> --oauth-client-id <id>, then operate auth login --profile <profile> in a terminal.',
+      'Create or update a profile; only the given values change. The first profile becomes the default. --output is the output format stored in the profile; -o <format> chooses how the profile is printed. Basic auth: --auth basic --auth-user <name> --auth-password-env <VAR> keeps the password in an environment variable. OAuth: --auth oauth --oauth-issuer <url> --oauth-client-id <id>, then operate auth login --profile <profile> in a terminal. A bearer token from elsewhere: --auth bearer --auth-token-env <VAR>.',
     )
     .argument('<profile>', 'Profile name, e.g. local or prod-eu')
     .option('--url <url>', 'REST API root, e.g. http://localhost:8080/engine-rest')
     .option('--engine <name>', 'Named process engine')
-    .option('--auth <type>', 'Authentication: none, basic or oauth')
+    .option('--auth <type>', 'Authentication: none, basic, oauth or bearer')
     .option('--auth-user <name>', 'Username for Basic auth')
     .option(
       '--auth-password-env <VAR>',
@@ -277,7 +262,7 @@ function registerSet(config: Command, context: CliContext): void {
       '--auth-password-stdin',
       'Store the password read from the first line of stdin (plain text in the file; discouraged)',
     );
-  addOAuthOptions(set)
+  addBearerOptions(addOAuthOptions(set))
     .option('--output <format>', 'Output format to store in the profile: json or table')
     .option('--timeout <ms>', 'Request timeout in milliseconds')
     .option(
@@ -299,15 +284,15 @@ function registerEditCommands(config: Command, context: CliContext): void {
   const unset = configSubcommand(
     config,
     'unset',
-    'Remove values from a profile; auth removes all auth settings, an OAuth setting only itself',
+    'Remove values from a profile; auth removes all auth settings, an OAuth setting only itself, token (or tokenEnv) the bearer token',
     FILE_OPTIONS,
   )
     .argument('<profile>', 'Profile name')
     .argument(
       '<keys...>',
-      `Keys to remove: ${PROFILE_KEYS.join(', ')}; OAuth settings: ${OAUTH_UNSET_KEYS.join(', ')}`,
+      `Keys to remove: ${PROFILE_KEYS.join(', ')}; OAuth settings: ${OAUTH_UNSET_KEYS.join(', ')}; bearer token: ${BEARER_UNSET_KEYS.join(', ')}`,
     );
-  completeProfiles(unset, [...PROFILE_KEYS, ...OAUTH_UNSET_KEYS]);
+  completeProfiles(unset, [...PROFILE_KEYS, ...OAUTH_UNSET_KEYS, ...BEARER_UNSET_KEYS]);
   unset.action(async (name: string, keys: string[]) => {
     await editProfile(name, unset, context, (file) => unsetProfileKeys(file, name, keys));
   });

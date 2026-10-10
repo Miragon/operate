@@ -255,26 +255,27 @@ default**. `operate config show` prints the effective values and where each one 
 These work on every API command, `api` and `ping`, after the command path
 (`operate task list -o table`):
 
-| Option                  | Meaning                                                                        |
-| ----------------------- | ------------------------------------------------------------------------------ |
-| `--url <url>`           | REST API root, default `http://localhost:8080/engine-rest`                     |
-| `--engine <name>`       | Named process engine, adds `/engine/<name>` to the path                        |
-| `--profile <name>`      | Profile of the config file                                                     |
-| `--config <path>`       | Config file location                                                           |
-| `-o, --output <format>` | `json` or `table`; default: `table` on a terminal, else `json`                 |
-| `--fields <list>`       | Comma separated fields to keep, e.g. `id,name,variables.amount`; table columns |
-| `--pretty`              | Indent JSON output (default on a terminal)                                     |
-| `--dry-run`             | Print the request instead of sending it                                        |
-| `-y, --yes`             | Confirm `delete` and `bulk` operations                                         |
-| `--read-only`           | Refuse every operation that is not a read                                      |
-| `--timeout <ms>`        | Request timeout in milliseconds, default 30000                                 |
-| `-H, --header <header>` | Extra request header `Name: value`; repeatable                                 |
-| `--auth <type>`         | `none`, `basic` or `oauth`; a username alone selects `basic`                   |
-| `--auth-user <name>`    | Username for Basic auth                                                        |
-| `--auth-password-stdin` | Read the Basic auth password from the first line of stdin                      |
-| `--verbose`             | Trace requests and responses on stderr                                         |
-| `--out-file <path>`     | Write the response body to a file                                              |
-| `--show-secrets`        | Do not mask secret headers and passwords in dry-run, verbose and config output |
+| Option                  | Meaning                                                                            |
+| ----------------------- | ---------------------------------------------------------------------------------- |
+| `--url <url>`           | REST API root, default `http://localhost:8080/engine-rest`                         |
+| `--engine <name>`       | Named process engine, adds `/engine/<name>` to the path                            |
+| `--profile <name>`      | Profile of the config file                                                         |
+| `--config <path>`       | Config file location                                                               |
+| `-o, --output <format>` | `json` or `table`; default: `table` on a terminal, else `json`                     |
+| `--fields <list>`       | Comma separated fields to keep, e.g. `id,name,variables.amount`; table columns     |
+| `--pretty`              | Indent JSON output (default on a terminal)                                         |
+| `--dry-run`             | Print the request instead of sending it                                            |
+| `-y, --yes`             | Confirm `delete` and `bulk` operations                                             |
+| `--read-only`           | Refuse every operation that is not a read                                          |
+| `--timeout <ms>`        | Request timeout in milliseconds, default 30000                                     |
+| `-H, --header <header>` | Extra request header `Name: value`; repeatable                                     |
+| `--auth <type>`         | `none`, `basic`, `oauth` or `bearer`; a username selects `basic`, a token `bearer` |
+| `--auth-user <name>`    | Username for Basic auth                                                            |
+| `--auth-password-stdin` | Read the Basic auth password from the first line of stdin                          |
+| `--auth-token-stdin`    | Read the bearer token from the first line of stdin                                 |
+| `--verbose`             | Trace requests and responses on stderr                                             |
+| `--out-file <path>`     | Write the response body to a file                                                  |
+| `--show-secrets`        | Do not mask secret headers and passwords in dry-run, verbose and config output     |
 
 ### Environment variables
 
@@ -286,11 +287,12 @@ These work on every API command, `api` and `ping`, after the command path
 | `OPERATE_CONFIG`    | Config file location; the file must exist                                  |
 | `OPERATE_OUTPUT`    | `json` or `table`                                                          |
 | `OPERATE_TIMEOUT`   | Request timeout in milliseconds                                            |
-| `OPERATE_AUTH`      | Authentication type: `none`, `basic` or `oauth`                            |
+| `OPERATE_AUTH`      | Authentication type: `none`, `basic`, `oauth` or `bearer`                  |
 | `OPERATE_USERNAME`  | Username for Basic auth                                                    |
 | `OPERATE_PASSWORD`  | Password for Basic auth                                                    |
+| `OPERATE_TOKEN`     | Bearer token obtained elsewhere, see [Bearer tokens](#bearer-tokens)       |
 | `OPERATE_OAUTH_*`   | OAuth settings, see [OAuth](#oauth)                                        |
-| `OPERATE_HEADERS`   | Extra headers `Name: value`, one per line, e.g. a token                    |
+| `OPERATE_HEADERS`   | Extra headers `Name: value`, one per line, e.g. an API key                 |
 | `OPERATE_READ_ONLY` | `1`/`true`/`yes`/`on` or `0`/`false`/`no`/`off`; anything else is an error |
 
 ### Config file
@@ -326,15 +328,20 @@ is never readable under another mode); you can also edit it by hand:
         "clientId": "operate-cli"
       },
       "readOnly": true
+    },
+    "ci": {
+      "url": "https://camunda.example.com/engine-rest",
+      "auth": { "type": "bearer", "tokenEnv": "CI_ENGINE_TOKEN" }
     }
   }
 }
 ```
 
 Profile keys: `url`, `engine`, `auth` (`type`, then either the Basic auth keys `username` and
-`passwordEnv` or `password`, or the OAuth keys `issuer`, `authorizationEndpoint`, `tokenEndpoint`,
-`clientId`, `clientSecretEnv` or `clientSecret`, `scopes`, `audience`, `redirectPort`; see
-[Authentication](#authentication)), `output`, `timeout`, `headers`, `readOnly`. Profile names
+`passwordEnv` or `password`, the OAuth keys `issuer`, `authorizationEndpoint`, `tokenEndpoint`,
+`clientId`, `clientSecretEnv` or `clientSecret`, `scopes`, `audience`, `redirectPort`, or the
+bearer token keys `tokenEnv` or `token`; see [Authentication](#authentication)), `output`,
+`timeout`, `headers`, `readOnly`. Profile names
 use letters, digits, `.`, `_` and `-` and start with a letter or digit, also in a hand-written
 file. URLs with credentials (`https://user:pass@host`) or a query string are rejected, and so are
 header values with control characters and connection headers (`Connection`, `Transfer-Encoding`,
@@ -355,13 +362,14 @@ operate config delete prod
 
 - `config set <profile>` creates or updates a profile; only the given values change
   (`--url`, `--engine`, `--auth`, `--auth-user`, `--auth-password-env`, `--auth-password-stdin`,
-  the `--oauth-*` options of [OAuth](#oauth), `--output`, `--timeout`, `-H/--header`,
-  `--read-only`, `--no-read-only`, `--default`). The
+  the `--oauth-*` options of [OAuth](#oauth), `--auth-token-env`, `--auth-token-stdin` of
+  [Bearer tokens](#bearer-tokens), `--output`, `--timeout`, `-H/--header`, `--read-only`,
+  `--no-read-only`, `--default`). The
   first profile becomes the default. Here `--output` is the output format stored in the profile;
   `-o <format>` chooses how the profile is printed, as `-o/--output` does for every other config
   command. `config unset <profile> auth` removes all auth settings; `config unset <profile>
 audience` (also `issuer`, `endpoints`, `clientId`, `clientSecret`, `scopes`, `redirectPort`)
-  removes a single OAuth setting. `config delete <profile>` also removes the cached OAuth login of
+  removes a single OAuth setting, `config unset <profile> token` the bearer token. `config delete <profile>` also removes the cached OAuth login of
   the profile (without revoking it).
 - `config use <profile>` makes a profile the default; `--profile` or `OPERATE_PROFILE` pick another
   one per call.
@@ -396,10 +404,11 @@ readOnly               true                                      profile
 
 ## Authentication
 
-`operate` supports [HTTP Basic authentication](#basic-auth) and [OAuth 2.0](#oauth) with the
+`operate` supports [HTTP Basic authentication](#basic-auth), [OAuth 2.0](#oauth) with the
 authorization code flow and PKCE, for engines behind a gateway that checks tokens of Keycloak,
-Microsoft Entra ID, Auth0 or another OpenID Connect provider. Other schemes go into
-[headers](#tokens-in-headers).
+Microsoft Entra ID, Auth0 or another OpenID Connect provider, and [bearer tokens](#bearer-tokens)
+you get elsewhere (SSO tooling, a CI secret, `az`, `gcloud`). Other schemes go into
+[headers](#other-headers).
 
 ### Basic auth
 
@@ -567,20 +576,80 @@ Client registration:
   it with the discovery document exactly), the API identifier goes into `--oauth-audience`;
   register `http://127.0.0.1:8765/callback` with a fixed `--oauth-redirect-port 8765`.
 
-### Tokens in headers
+### Bearer tokens
 
-Other schemes, such as bearer tokens from elsewhere, are passed as headers: per call with `-H`, in the
-environment with `OPERATE_HEADERS` (keeps the credential out of the command line and shell
-history), or stored in a profile. Headers merge per name: profile, then `OPERATE_HEADERS`, then
-`-H`. An `Authorization` header together with Basic auth or OAuth is a configuration error; in a
-profile, `config set` with auth options replaces a stored `Authorization` header (with a notice on
-stderr), and `--auth none` keeps the header and switches the auth off. `Authorization`
-and other secret headers (cookies, names containing `token`, `secret`, `password`, `api-key`) are
-masked as `***` in dry-run, verbose and config output unless `--show-secrets` is given.
+When you already get an access token elsewhere (company SSO tooling, a CI secret,
+`az account get-access-token`, `gcloud auth print-access-token`, a token copied from another tool)
+because the OAuth login of `operate auth login` is not possible or not wanted, `--auth bearer`
+sends it as `Authorization: Bearer <token>` and does nothing else: no login, no refresh, no cache.
+
+| Value | Flag                 | Environment     | Profile (`auth` object) / `config set` option                                            |
+| ----- | -------------------- | --------------- | ---------------------------------------------------------------------------------------- |
+| type  | `--auth bearer`      | `OPERATE_AUTH`  | `type: "bearer"` / `--auth bearer`                                                       |
+| token | `--auth-token-stdin` | `OPERATE_TOKEN` | `tokenEnv` (variable name) / `--auth-token-env <VAR>`, or `token` / `--auth-token-stdin` |
 
 ```sh
-export OPERATE_HEADERS='Authorization: Bearer eyJhbGciOi...'
-operate config set prod --header 'Authorization: Bearer eyJhbGciOi...'
+# Microsoft Entra ID: a token for the app registration of the API the engine's gateway expects
+# (without --resource, az returns a token for Azure Resource Manager, whose audience a gateway rejects)
+export OPERATE_TOKEN=$(az account get-access-token --resource api://<engine-api-app-id> --query accessToken -o tsv)
+operate process-instance list
+# Google Cloud
+export OPERATE_TOKEN=$(gcloud auth print-access-token)
+# CI job: the token is the secret CI_ENGINE_TOKEN; the profile stores only the variable name
+operate config set ci --url https://camunda.example.com/engine-rest --auth bearer --auth-token-env CI_ENGINE_TOKEN
+```
+
+- The token comes from `--auth-token-stdin` (the first line of stdin, e.g.
+  `gcloud auth print-access-token | operate task list --auth-token-stdin`; not together with
+  `--body -` or `--auth-password-stdin`), else `OPERATE_TOKEN`, else the variable named by the
+  profile's `tokenEnv` (it must be set), else the profile's `token`. It is never a plain flag.
+- Without an auth type anywhere, `OPERATE_TOKEN` or `--auth-token-stdin` selects `bearer`, as a
+  username selects `basic`; both at once is a configuration error asking for an explicit `--auth`.
+  An explicit type always wins: `--auth none` switches the token off, and with `basic` or `oauth`
+  (also the type a profile made by `config set` always stores) `OPERATE_TOKEN` is ignored:
+  `config show` lists it as unused, and the hints of `LOGIN_REQUIRED`, 401/403 and configuration
+  errors say to add `--auth bearer` or `OPERATE_AUTH=bearer`. A token never selects OAuth.
+- A pasted `Bearer ` prefix and surrounding blanks are dropped; the rest must be an RFC 6750
+  token (letters, digits, `-._~+/`, trailing `=`), otherwise exit 3 without repeating it. In a
+  profile prefer `--auth-token-env <VAR>`; a token stored with `config set --auth-token-stdin` is
+  plain text in the `0600` config file (`config set` warns), and an unset variable gets a warning
+  that does not repeat its "name" (it may be the token itself). An unset name that is not in the
+  usual upper-case form (`--auth-token-env "$CI_TOKEN"` instead of `CI_TOKEN`) is refused without
+  being stored or repeated.
+- JWTs: operate reads `exp`, `sub`, `preferred_username`, `iss` and `aud` without checking the
+  signature (the engine or its gateway does). A JWT whose `exp` lies more than 30 s in the past
+  fails before any request with `TOKEN_EXPIRED` (exit 4): fetch a new token. Opaque tokens are sent
+  as they are.
+- `operate auth status` shows where the token comes from and, for a JWT, subject, user, issuer,
+  audience and expiry (exit 4 when it expired), also for a piped token (`--auth-token-stdin`;
+  with a Basic or OAuth profile add `OPERATE_AUTH=bearer`, `auth` commands have no `--auth`); it
+  never prints the token. `auth login` and `auth logout` do not apply: operate neither fetches nor
+  stores such tokens.
+- A 401 names the token's source and, for a JWT, the expiry, issuer and audience to check; a 403
+  points to missing roles or scopes. operate never retries a rejected token.
+- The token is masked as `Bearer ***` in `--dry-run`, curl, `--verbose` and `config show` unless
+  `--show-secrets`; usage errors never repeat a word typed after `--auth bearer`,
+  `--auth-token-stdin` or `operate auth` (`--auth bearer $TOKEN` is a mistake: `--auth` takes only
+  the type). `operate ping` reports `"auth": "bearer"` and, for a JWT, `user` and
+  `subject`. A bearer token together with an `Authorization` header is a configuration error, and
+  operate warns when it sends the token over plain `http://` beyond `localhost`.
+
+### Other headers
+
+Other schemes, such as API keys or gateway specific headers, are passed as headers: per call with
+`-H`, in the environment with `OPERATE_HEADERS` (keeps the credential out of the command line and
+shell history), or stored in a profile. A bearer token can still go into an `Authorization` header,
+but [`--auth bearer`](#bearer-tokens) also checks its syntax and expiry and explains a 401. Headers
+merge per name: profile, then `OPERATE_HEADERS`, then `-H`. An `Authorization` header together
+with Basic auth, OAuth or a bearer token is a configuration error; in a profile, `config set` with
+auth options replaces a stored `Authorization` header (with a notice on stderr), and `--auth none`
+keeps the header and switches the auth off. `Authorization` and other secret headers (cookies,
+names containing `token`, `secret`, `password`, `api-key`) are masked as `***` in dry-run, verbose
+and config output unless `--show-secrets` is given.
+
+```sh
+export OPERATE_HEADERS='X-API-Key: k-7f3a...'
+operate config set prod --header 'X-Tenant-Id: acme'
 ```
 
 ## Command structure
@@ -795,7 +864,7 @@ validation problems).
 | 1    | internal error                                                                                                             |
 | 2    | usage error, invalid body (`VALIDATION`), `READ_ONLY`, `CONFIRMATION_REQUIRED`                                             |
 | 3    | configuration error, also an HTTP redirect (`HTTP_REDIRECT`)                                                               |
-| 4    | 401, 403, `LOGIN_REQUIRED` (a person must log in), `LOGIN_FAILED`                                                          |
+| 4    | 401, 403, `LOGIN_REQUIRED` (a person must log in), `LOGIN_FAILED`, `TOKEN_EXPIRED` (a bearer token expired)                |
 | 5    | not found (404)                                                                                                            |
 | 6    | other 4xx: the engine rejected the request                                                                                 |
 | 7    | engine error (5xx)                                                                                                         |
@@ -858,6 +927,8 @@ itself:
 - With OAuth, a person logs in once with `operate auth login`; agents never do. A command that
   needs a new login fails with `LOGIN_REQUIRED` (exit 4) and the hint names the command to run in
   a terminal; `operate auth status` tells an agent whether the login is usable.
+- A bearer token from elsewhere (`OPERATE_TOKEN`) is never refreshed by operate: on
+  `TOKEN_EXPIRED` (exit 4) the agent asks for a new token.
 
 A typical agent workflow is discover, describe, preview, run:
 
@@ -1216,7 +1287,7 @@ src/workflow/   the workflow commands: engine access, instance views, waiting, p
 src/docs/       commands, describe, examples, workflow docs, completion and the agent guide (pure)
 src/catalog/    catalog access, schema helpers, body validation (pure)
 src/config/     config resolution and profile editing (pure), file store
-src/auth/       auth providers (none, basic, OAuth with token cache, refresh and login; pure)
+src/auth/       auth providers (none, basic, bearer with JWT expiry, OAuth with token cache; pure)
 src/http/       fetch based HTTP client and error mapping
 src/output/     JSON, tables, field projection, errors, secret masking (pure)
 scripts/        catalog generator

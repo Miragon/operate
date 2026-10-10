@@ -24,6 +24,7 @@ export const GLOBAL_FLAGS: readonly string[] = [
   'auth',
   'auth-user',
   'auth-password-stdin',
+  'auth-token-stdin',
   'verbose',
   'out-file',
   'show-secrets',

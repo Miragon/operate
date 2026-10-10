@@ -126,7 +126,7 @@ describe('commanderUsageError', () => {
     root.addCommand(auth);
     auth.option('--auth <type>').option('--auth-user <name>').option('--auth-password-stdin');
     const secret =
-      'Secrets are never flag values: pipe the password into --auth-password-stdin, or set OPERATE_PASSWORD (a profile stores the name of a variable: config set --auth-password-env <VAR>); pass a token with OPERATE_HEADERS; an OAuth token comes from `operate auth login`. ';
+      'Secrets are never flag values: pipe the password into --auth-password-stdin, or set OPERATE_PASSWORD (a profile stores the name of a variable: config set --auth-password-env <VAR>); pass a bearer token with OPERATE_TOKEN or --auth-token-stdin; an OAuth token comes from `operate auth login`. ';
     const help = 'Run "operate ping --help" for the usage.';
     const unknown = (flag: string) =>
       commanderUsageError(
@@ -185,6 +185,68 @@ describe('commanderUsageError', () => {
         "Too many arguments for 'ping'. Expected 0 arguments but got 2: S3:cr3t, x\ny.",
       );
       expect(excess(['ping', 'password', 'x']).message).toContain('got 2: S3:cr3t, x\ny.');
+      const bearer = excess(['ping', '--auth', 'bearer', 'S3:cr3t', 'x']);
+      expect(bearer.message).toBe("Too many arguments for 'ping'. Expected 0 arguments but got 2.");
+      expect(bearer.details.hint).toBe(
+        `--auth takes only the type: the token goes into OPERATE_TOKEN or --auth-token-stdin, not after --auth bearer. ${help}`,
+      );
+    });
+
+    it('leaves out an unknown command next to an option about a secret', () => {
+      const unknownCommand = (argv: readonly string[]) =>
+        commanderUsageError(
+          exitOf(root, 'commander.unknownCommand', "error: unknown command 'S3cr3t'"),
+          argv,
+        );
+      const hidden = unknownCommand(['--auth-password-stdin', 'S3cr3t', 'task', 'list']);
+      expect(hidden.message).toBe('Unknown command (not repeated: it may be a token or password)');
+      expect(hidden.details.hint).toBe(
+        `--auth-password-stdin takes no value: pipe the password into it, e.g. printf '%s\\n' "$PASSWORD" | operate ... --auth-password-stdin. Run "operate --help" for the commands.`,
+      );
+      expect(unknownCommand(['--auth', 'bearer', 'S3cr3t']).message).not.toContain('S3cr3t');
+      expect(unknownCommand(['S3cr3t']).message).toBe('Unknown command "S3cr3t"');
+    });
+  });
+
+  describe('auth commands', () => {
+    const authGroup = new Command('auth');
+    root.addCommand(authGroup);
+    const status = new Command('status');
+    const logout = new Command('logout');
+    authGroup.addCommand(status);
+    authGroup.addCommand(logout);
+    const excess = (command: Command) =>
+      commanderUsageError(
+        exitOf(
+          command,
+          'commander.excessArguments',
+          `error: too many arguments for '${command.name()}'. Expected 0 arguments but got 1: S3cr3t.`,
+        ),
+        ['auth', command.name(), 'S3cr3t'],
+      );
+
+    it('leaves out extra arguments: the most likely one is a token', () => {
+      expect(excess(status)).toMatchObject({
+        message: "Too many arguments for 'status'. Expected 0 arguments but got 1.",
+        details: {
+          hint: `operate auth status takes no token argument: pipe the token into --auth-token-stdin, e.g. printf '%s\\n' "$TOKEN" | operate auth status --auth-token-stdin. Run "operate auth status --help" for the usage.`,
+        },
+      });
+      expect(excess(logout)).toMatchObject({
+        message: "Too many arguments for 'logout'. Expected 0 arguments but got 1.",
+        details: { hint: 'Run "operate auth logout --help" for the usage.' },
+      });
+    });
+
+    it('leaves out an unknown subcommand but keeps the suggestion', () => {
+      const error = commanderUsageError(
+        exitOf(authGroup, 'commander.unknownCommand', "error: unknown command 'stauts'"),
+        ['auth', 'stauts'],
+      );
+      expect(error.message).not.toContain('stauts');
+      expect(error.details.hint).toBe(
+        'Did you mean status? Run "operate auth --help" for the commands.',
+      );
     });
   });
 

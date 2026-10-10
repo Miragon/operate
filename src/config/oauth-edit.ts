@@ -184,7 +184,7 @@ export function oauthUnsetKeys(key: string): readonly OAuthKey[] | undefined {
 /** The auth object without `keys`; undefined when nothing is left. */
 export function withoutAuthKeys(
   auth: ProfileAuth | undefined,
-  keys: readonly OAuthKey[],
+  keys: readonly (keyof ProfileAuth)[],
 ): ProfileAuth | undefined {
   if (auth === undefined) return undefined;
   const kept = Object.fromEntries(

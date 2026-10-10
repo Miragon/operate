@@ -5,10 +5,39 @@ export interface PingOutput {
   readonly reachable: boolean;
   readonly version: string;
   readonly engines: readonly string[];
-  /** Auth type: `none`, `basic` or `oauth`. */
+  /** Auth type: `none`, `basic`, `oauth` or `bearer`. */
   readonly auth: string;
-  /** The username with `basic`; with `oauth` the logged-in user (null when unknown). */
+  /**
+   * The username with `basic`; with `oauth` the logged-in user (null when unknown); with `bearer`
+   * the `preferred_username` of a JWT.
+   */
   readonly user?: string | null;
+  /** With `bearer` and a JWT: its `sub` (`user` is its `preferred_username`). */
+  readonly subject?: string | null;
+}
+
+/**
+ * `operate auth status` of a bearer token (design §18): where it came from and, for a JWT, what its
+ * claims say (no signature check); never the token.
+ */
+export interface BearerStatusOutput {
+  readonly type: 'bearer';
+  readonly profile: string | null;
+  /** `flag`, `env` or `profile`. */
+  readonly source: string;
+  /** `OPERATE_TOKEN`, `--auth-token-stdin`, `IT_TOKEN (auth.tokenEnv of profile "p")`, ... */
+  readonly origin: string;
+  readonly format: 'jwt' | 'opaque';
+  /** `sub` of a JWT. */
+  readonly subject: string | null;
+  /** `preferred_username` of a JWT. */
+  readonly user: string | null;
+  readonly issuer: string | null;
+  readonly audience: readonly string[];
+  /** `exp` of a JWT (ISO 8601 UTC); null for an opaque token. */
+  readonly expiresAt: string | null;
+  /** `exp` lies more than 30 s in the past. */
+  readonly expired: boolean;
 }
 
 /** `operate auth login` (stdout) and `operate auth status`: the cached login, never a token. */
