@@ -37,6 +37,11 @@ export interface AuthProvider {
    */
   rejectedHint?(status: number): string | undefined;
   /**
+   * Appended to the hint of a 401 or 403 (and by `withAuthNote` to LOGIN_REQUIRED and the dry-run
+   * note): a bearer token that is set but not used by this provider's auth type.
+   */
+  readonly note?: string;
+  /**
    * The command that shows whether the login is usable, for the hint of a redirect (OAuth:
    * `operate auth status --profile p`).
    */

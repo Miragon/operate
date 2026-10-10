@@ -174,7 +174,7 @@ describe('changedAuth with both families (rules 1–3)', () => {
     const both = failure(() => changedAuth(undefined, { authUser: 'u', oauthClientId: 'c' }));
     expect(both.message).toBe('Basic auth options and OAuth options exclude each other');
     expect(both.details.hint).toBe(
-      'A profile uses Basic auth (--auth basic --auth-user <name> --auth-password-env <VAR>) or OAuth (--auth oauth --oauth-issuer <url> --oauth-client-id <id>).',
+      'A profile uses Basic auth (--auth basic --auth-user <name> --auth-password-env <VAR>), OAuth (--auth oauth --oauth-issuer <url> --oauth-client-id <id>) or a bearer token (--auth bearer --auth-token-env <VAR>).',
     );
     expect(
       failure(() => changedAuth(undefined, { auth: 'none', authUser: 'u', oauthClientId: 'c' }))

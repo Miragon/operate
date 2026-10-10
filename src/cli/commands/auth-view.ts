@@ -70,7 +70,7 @@ export function loginView(
 }
 
 /** Rows of the table format: KEY VALUE; lists space-joined, null empty. */
-export function viewRows(view: LoginView | LogoutView): Record<string, unknown>[] {
+export function viewRows(view: object): Record<string, unknown>[] {
   return Object.entries(view).map(([key, value]: [string, unknown]) => ({
     KEY: key,
     VALUE: Array.isArray(value) ? value.join(' ') : (value ?? ''),

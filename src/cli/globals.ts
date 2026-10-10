@@ -75,7 +75,7 @@ export const GLOBAL_OPTIONS: readonly GlobalOptionSpec[] = [
     long: 'auth',
     value: '<type>',
     description:
-      'Authentication: none, basic or oauth; a username alone selects basic (env OPERATE_AUTH)',
+      'Authentication: none, basic, oauth or bearer; a username alone selects basic, a token bearer (env OPERATE_AUTH)',
   },
   {
     long: 'auth-user',
@@ -85,6 +85,10 @@ export const GLOBAL_OPTIONS: readonly GlobalOptionSpec[] = [
   {
     long: 'auth-password-stdin',
     description: 'Read the Basic auth password from the first line of stdin (env OPERATE_PASSWORD)',
+  },
+  {
+    long: 'auth-token-stdin',
+    description: 'Read the bearer token from the first line of stdin (env OPERATE_TOKEN)',
   },
   { long: 'verbose', description: 'Trace requests and responses on stderr' },
   { long: 'out-file', value: '<path>', description: 'Write the response body to a file' },
@@ -118,6 +122,7 @@ export interface GlobalOptions {
   readonly verbose: boolean;
   readonly showSecrets: boolean;
   readonly authPasswordStdin: boolean;
+  readonly authTokenStdin: boolean;
 }
 
 /** commander flags of a spec, e.g. `-o, --output <format>`. */
@@ -194,14 +199,18 @@ export function readGlobals(command: Command): GlobalOptions {
     verbose: flag('verbose'),
     showSecrets: flag('showSecrets'),
     authPasswordStdin: flag('authPasswordStdin'),
+    authTokenStdin: flag('authTokenStdin'),
   };
 }
 
-/**
- * The config related global options as input for `resolveConfig`; `password` is what
- * `--auth-password-stdin` read from stdin.
- */
-export function configFlags(globals: GlobalOptions, password?: string): ConfigFlags {
+/** What `--auth-password-stdin` and `--auth-token-stdin` read from stdin. */
+export interface StdinSecrets {
+  readonly password?: string | undefined;
+  readonly token?: string | undefined;
+}
+
+/** The config related global options as input for `resolveConfig`, with the stdin secrets. */
+export function configFlags(globals: GlobalOptions, secrets: StdinSecrets = {}): ConfigFlags {
   return compact({
     url: globals.url,
     engine: globals.engine,
@@ -212,6 +221,7 @@ export function configFlags(globals: GlobalOptions, password?: string): ConfigFl
     readOnly: globals.readOnly ? true : undefined,
     auth: globals.auth,
     authUser: globals.authUser,
-    authPassword: password,
+    authPassword: secrets.password,
+    authToken: secrets.token,
   });
 }

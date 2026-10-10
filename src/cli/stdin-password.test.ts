@@ -67,24 +67,51 @@ describe('firstLine', () => {
 });
 
 describe('checkStdinUse', () => {
+  const use = (password: boolean, token: boolean, body: boolean) => ({ password, token, body });
+
   it('allows one reader of stdin', () => {
     expect(() => {
-      checkStdinUse(true, false);
-      checkStdinUse(false, true);
-      checkStdinUse(false, false);
+      checkStdinUse(use(true, false, false));
+      checkStdinUse(use(false, true, false));
+      checkStdinUse(use(false, false, true));
+      checkStdinUse(use(false, false, false));
     }).not.toThrow();
   });
 
   it('refuses the password and the body from stdin together', async () => {
     const error = await usage(
       Promise.resolve().then(() => {
-        checkStdinUse(true, true);
+        checkStdinUse(use(true, false, true));
       }),
     );
     expect(error.message).toBe('--auth-password-stdin and --body - both read stdin');
     expect(error.details.hint).toBe(
       'Pass the body as a file (--body @file.json), or the password with OPERATE_PASSWORD or a profile (--auth-password-env).',
     );
+  });
+
+  it('refuses the token and the body from stdin together', async () => {
+    const error = await usage(
+      Promise.resolve().then(() => {
+        checkStdinUse(use(false, true, true));
+      }),
+    );
+    expect(error.message).toBe('--auth-token-stdin and --body - both read stdin');
+    expect(error.details.hint).toBe(
+      'Pass the body as a file (--body @file.json), or the token with OPERATE_TOKEN or a profile (--auth-token-env).',
+    );
+  });
+
+  it('refuses the password and the token from stdin together, also with a body', async () => {
+    for (const body of [false, true]) {
+      const error = await usage(
+        Promise.resolve().then(() => {
+          checkStdinUse(use(true, true, body));
+        }),
+      );
+      expect(error.message).toBe('--auth-password-stdin and --auth-token-stdin both read stdin');
+      expect(error.details.hint).toContain('OPERATE_PASSWORD or OPERATE_TOKEN');
+    }
   });
 });
 

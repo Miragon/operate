@@ -24,7 +24,8 @@ export async function sendRequest(
       response.status === 401 || response.status === 403
         ? auth.rejectedHint?.(response.status)
         : undefined;
-    throw httpError(response, { ...request, principal, authOff: off, rejectedHint }, ref);
+    const failed = { ...request, principal, authOff: off, rejectedHint, authNote: auth.note };
+    throw httpError(response, failed, ref);
   }
   if (response.status >= 300) {
     throw redirectError(response, { ...request, loginStatusCommand: auth.loginStatusCommand });

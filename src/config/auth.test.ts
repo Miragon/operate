@@ -1,5 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
+import { opaqueTokens } from '../../test/support/bearer.js';
 import { OperateError } from '../errors.js';
 import {
   profileAuthProblem,
@@ -23,7 +24,7 @@ const CONTROL_HINT =
   'Remove line breaks, tabs, NUL and other control characters; Basic auth (RFC 7617) does not allow them.';
 
 describe('validateAuthType', () => {
-  it.each(['none', 'basic', 'oauth'] as const)('accepts %s', (type) => {
+  it.each(['none', 'basic', 'oauth', 'bearer'] as const)('accepts %s', (type) => {
     expect(validateAuthType(type)).toBe(type);
   });
 
@@ -34,9 +35,29 @@ describe('validateAuthType', () => {
       expect(error.code).toBe('CONFIG');
       expect(error.exitCode).toBe(3);
       expect(error.message).toBe(`Unsupported auth type "${type}"`);
-      expect(error.details.hint).toBe('Supported: none, basic, oauth.');
+      expect(error.details.hint).toBe('Supported: none, basic, oauth, bearer.');
     },
   );
+
+  it('never repeats a value that does not look like a type name: it may be a token', () => {
+    const forms = (token: string) => [token, `Bearer ${token}`, `bearer:${token}`, ` ${token}`];
+    fc.assert(
+      fc.property(opaqueTokens, (token) => {
+        for (const value of forms(token)) {
+          const error = failure(() => validateAuthType(value));
+          expect(error.code).toBe('CONFIG');
+          expect(error.message).toBe(
+            'Unsupported auth type (not one of none, basic, oauth, bearer)',
+          );
+          expect(error.details.hint).toContain(
+            'A bearer token itself goes into OPERATE_TOKEN or --auth-token-stdin',
+          );
+          expect(`${error.message}${error.details.hint ?? ''}`).not.toContain(token);
+        }
+      }),
+    );
+    expect(failure(() => validateAuthType('a'.repeat(21))).message).not.toContain('aaa');
+  });
 });
 
 describe('validateUsername', () => {
@@ -143,8 +164,8 @@ describe('profileAuthProblem', () => {
     expect(profileAuthProblem('prod', [])).toBe(
       'profile "prod" has an invalid auth (expected {"type": "basic", "username": "demo", "passwordEnv": "CAMUNDA_PASSWORD"})',
     );
-    expect(profileAuthProblem('prod', { username: 'x', token: 'abc' })).toBe(
-      'unknown key(s) token in the auth of profile "prod" (allowed: type, username, passwordEnv, password, issuer, authorizationEndpoint, tokenEndpoint, clientId, clientSecretEnv, clientSecret, scopes, audience, redirectPort)',
+    expect(profileAuthProblem('prod', { username: 'x', apiKey: 'abc' })).toBe(
+      'unknown key(s) apiKey in the auth of profile "prod" (allowed: type, username, passwordEnv, password, issuer, authorizationEndpoint, tokenEndpoint, clientId, clientSecretEnv, clientSecret, scopes, audience, redirectPort, tokenEnv, token)',
     );
     expect(profileAuthProblem('prod', { username: 7 })).toBe(
       'profile "prod" has an invalid auth.username (expected a non-empty string)',

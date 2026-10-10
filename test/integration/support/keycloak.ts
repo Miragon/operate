@@ -1,7 +1,8 @@
 /**
- * Keycloak as the authorization server of the OAuth tests (realm fixture
+ * Keycloak as the authorization server of the OAuth and bearer token tests (realm fixture
  * `fixtures/keycloak-realm.json`): the browser step of a login done over HTTP, direct calls of the
- * token endpoint, and an admin logout that ends the user's online sessions.
+ * token endpoint (also the client credentials grant of a CI pipeline), and an admin logout that
+ * ends the user's online sessions.
  */
 
 import { createHash, randomBytes } from 'node:crypto';
@@ -26,9 +27,15 @@ export const CLIENTS = {
   confidential: 'operate-cli-confidential',
   /** like `public` without the audience mapper: Envoy answers 403 */
   noAudience: 'operate-cli-noaud',
+  /**
+   * a CI pipeline's service account: confidential ({@link CI_CLIENT_SECRET}), client credentials
+   * grant only, audience mapper `engine-rest`, 300 s access tokens (bearer token tests)
+   */
+  ci: 'operate-ci',
 } as const;
 
 export const CLIENT_SECRET = 'it-client-secret';
+export const CI_CLIENT_SECRET = 'it-ci-secret';
 
 /** The admin of the master realm (`KC_BOOTSTRAP_ADMIN_*` of the container). */
 const ADMIN: Credentials = { username: 'admin', password: 'admin' };
@@ -221,6 +228,23 @@ export async function adminLogout(keycloakUrl: string, username: string): Promis
   const [user] = users;
   if (user === undefined) throw new Error(`Keycloak has no user ${username}`);
   await adminRequest(keycloakUrl, token, `/users/${user.id}/logout`, 'POST');
+}
+
+/**
+ * An access token of the client credentials grant (RFC 6749 §4.4), as a CI pipeline gets one with
+ * its client secret, without operate.
+ */
+export async function clientCredentialsToken(
+  issuer: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<string> {
+  const answer = await tokenRequest(issuer, {
+    grant_type: 'client_credentials',
+    client_id: clientId,
+    client_secret: clientSecret,
+  });
+  return requireString(answer, 'access_token', 'The client credentials grant');
 }
 
 interface TokenSet {

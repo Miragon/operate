@@ -253,7 +253,7 @@ const CONFIG_FLAGS: Flags = withFlags(OUTPUT_FLAGS, {
   auth: {
     takesValue: true,
     check: (value) => {
-      expect(['none', 'basic', 'oauth']).toContain(value);
+      expect(['none', 'basic', 'oauth', 'bearer']).toContain(value);
     },
   },
   'auth-user': {
@@ -269,6 +269,13 @@ const CONFIG_FLAGS: Flags = withFlags(OUTPUT_FLAGS, {
     },
   },
   'auth-password-stdin': { takesValue: false },
+  'auth-token-env': {
+    takesValue: true,
+    check: (value) => {
+      expect(value).toMatch(/^[A-Za-z_][A-Za-z0-9_]*$/);
+    },
+  },
+  'auth-token-stdin': { takesValue: false },
   'oauth-issuer': {
     takesValue: true,
     check: (value) => {
@@ -427,6 +434,7 @@ describe('the command line checker', () => {
     expect(ok('operate config set p --auth digest')).toThrow();
     expect(ok('operate config set p --oauth-issuer http://login.example.com')).toThrow();
     expect(ok('operate config set p --auth-password-env MY-VAR')).toThrow();
+    expect(ok('operate config set p --auth-token-env MY-VAR')).toThrow();
     expect(ok('operate config set p --auth-user a:b')).toThrow();
     expect(ok('operate config rename a b')).toThrow();
     expect(ok('operate api FETCH /x')).toThrow();

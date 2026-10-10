@@ -267,7 +267,7 @@ describe('unsetProfileKeys', () => {
     expect(error.code).toBe('CONFIG');
     expect(error.message).toBe('Unknown profile key "user"');
     expect(error.details.hint).toBe(
-      'Valid keys: url, engine, auth, output, timeout, headers, readOnly; OAuth settings: issuer, endpoints, clientId, clientSecret, scopes, audience, redirectPort.',
+      'Valid keys: url, engine, auth, output, timeout, headers, readOnly; OAuth settings: issuer, endpoints, clientId, clientSecret, scopes, audience, redirectPort; bearer token: token, tokenEnv.',
     );
   });
 

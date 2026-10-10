@@ -31,7 +31,7 @@ operate config set local --url http://localhost:8080/engine-rest --default
 - Precedence for every setting: flag > environment variable > profile > default.
 - Environment: \`OPERATE_URL\`, \`OPERATE_ENGINE\`, \`OPERATE_PROFILE\`, \`OPERATE_CONFIG\`,
   \`OPERATE_OUTPUT\`, \`OPERATE_TIMEOUT\`, \`OPERATE_READ_ONLY\`, \`OPERATE_AUTH\`, \`OPERATE_USERNAME\`,
-  \`OPERATE_PASSWORD\`, \`OPERATE_OAUTH_*\`, \`OPERATE_HEADERS\`.
+  \`OPERATE_PASSWORD\`, \`OPERATE_TOKEN\`, \`OPERATE_OAUTH_*\`, \`OPERATE_HEADERS\`.
 - \`--engine <name>\` addresses a named process engine (\`/engine/{name}/...\`); \`ping\` checks it.
 - \`operate config path\` prints the config file location (\`--config <path>\` overrides it; a file
   named with \`--config\` or \`OPERATE_CONFIG\` must exist, \`config set\` creates it).
@@ -82,8 +82,7 @@ operate wait --business-key B-1 --until ended
 operate status
 \`\`\`
 
-- Use \`operate wait\` (or \`--wait\` of advance, retry, deploy) instead of \`sleep\` after asynchronous
-  steps; it fails fast when an incident appears.
+- Use \`operate wait\` or \`--wait\` (advance, retry, deploy) instead of \`sleep\`; it fails on incidents.
 - \`advance\` needs \`--activity-id\` when the instance waits at several places; the error lists them.
 - With \`--dry-run\`, \`advance\` and \`retry\` still send their reads (to plan) and preview the writes.
 - Exit code 9 (\`INCIDENT\`, \`WAIT_TIMEOUT\`, \`JOB_FAILED\`, ...) still prints the view on stdout.
@@ -104,8 +103,7 @@ operate status
   \`name:Type=value\` (String, Integer, Short, Long, Double, Boolean, Date, Json, Xml, Null), e.g.
   \`--var zip:String=01234\`. Other variable maps have their own flags: \`--local-var\`,
   \`--correlation-key\`, \`--local-correlation-key\`, \`--triggered-scope-var\`.
-- Single variable commands (\`process-instance set-variable\`, \`task-variable set\`, ...) take
-  \`--value <raw>\` plus an optional \`--type <Type>\`.
+- Single variable commands (\`task-variable set\`, ...) take \`--value <raw>\` and \`--type <Type>\`.
 - \`--body <json>\`, \`--body @file.json\` or \`--body -\` (stdin) is the base JSON body; flags are
   merged on top (flags win, \`--var\` entries win per name). Use it for nested structures. The final
   body is validated against the API schema before sending; \`--no-validate\` skips that.
@@ -113,8 +111,8 @@ operate status
   \`--max-results\`, default ${DEFAULT_PAGE_SIZE}) and print one list.
 - Global options work after the command: \`--url\`, \`--engine\`, \`--profile\`, \`--config\`,
   \`-o/--output\`, \`--fields\`, \`--pretty\`, \`--dry-run\`, \`-y/--yes\`, \`--read-only\`, \`--timeout\`,
-  \`-H/--header\`, \`--auth\`, \`--auth-user\`, \`--auth-password-stdin\`, \`--verbose\`, \`--out-file\`,
-  \`--show-secrets\`.
+  \`-H/--header\`, \`--auth\`, \`--auth-user\`, \`--auth-password-stdin\`, \`--auth-token-stdin\`,
+  \`--verbose\`, \`--out-file\`, \`--show-secrets\`.
 
 \`\`\`sh
 operate process-definition start invoice --var 'order:Json={"id":42}' --var due:Date=2024-06-01
@@ -133,8 +131,7 @@ echo '{"businessKey":"INV-1003"}' | operate process-definition start invoice --b
   Text responses (\`job get-stacktrace\`, ...) print raw; binary ones need \`--out-file\` on a terminal.
 - \`--out-file <path>\` writes the response body to the file exactly as received (projected with
   \`--fields\`) and prints \`{"outFile", "bytes", "contentType"}\`.
-- No content (HTTP 204): stdout stays empty, stderr gets \`Done: <METHOD> <path> → 204 No Content\`,
-  the path relative to the REST root (as \`operate api\` takes it).
+- No content (HTTP 204): stdout stays empty, stderr gets \`Done: <METHOD> <path> → 204 No Content\`.
 - \`--verbose\` traces request and response on stderr (secret headers masked unless \`--show-secrets\`).
 
 ## Errors and exit codes
@@ -151,7 +148,7 @@ Errors are one JSON line on stderr (\`-o table\` prints readable text instead):
 | 1    | internal error                                                                                         |
 | 2    | usage error, invalid body (\`VALIDATION\`), \`READ_ONLY\`, \`CONFIRMATION_REQUIRED\`                         |
 | 3    | configuration error, also an HTTP redirect (\`HTTP_REDIRECT\`, see below)                                |
-| 4    | auth failed: 401, 403, \`LOGIN_REQUIRED\` (a person must log in), \`LOGIN_FAILED\`                         |
+| 4    | auth failed: 401, 403, \`LOGIN_REQUIRED\` (a person must log in), \`LOGIN_FAILED\`, \`TOKEN_EXPIRED\`        |
 | 5    | not found (404)                                                                                        |
 | 6    | other 4xx: the engine rejected the request, read \`engineMessage\`                                       |
 | 7    | engine error (5xx)                                                                                     |
@@ -180,7 +177,6 @@ Deploy and start:
 
 \`\`\`sh
 operate deploy src/main/resources --start-key invoice --business-key INV-1001 --var amount=250
-operate deployment create invoice.bpmn invoice-approval.dmn --deployment-name invoice
 operate process-definition start invoice --business-key INV-1001 --var amount=250
 \`\`\`
 
@@ -224,7 +220,6 @@ Messages, signals, decisions and history:
 operate message correlate --message-name PaymentReceived --business-key INV-1001 --var paid=true
 operate signal throw --name invoice-cancelled
 operate decision-definition evaluate-by-key invoice-approval --var amount=250 --var category=travel
-operate historic-activity-instance list --process-instance-id $INSTANCE_ID --sort-by startTime --sort-order asc
 \`\`\`
 
 Raw requests: \`operate api <METHOD> <path>\` sends a request relative to the REST root with the
@@ -241,7 +236,11 @@ Basic auth: the username comes from \`--auth-user\`, \`OPERATE_USERNAME\` or the
 from \`--auth-password-stdin\` (first line of stdin, never a flag), \`OPERATE_PASSWORD\` or the profile
 (best as a variable name: \`--auth-password-env <VAR>\`). A username or \`--auth-password-stdin\`
 selects Basic auth, \`--auth none\` or \`OPERATE_AUTH=none\` switch it off; missing values exit 3.
-Other tokens go into a header (\`-H\`, \`OPERATE_HEADERS\`); secrets are masked unless \`--show-secrets\`.
+
+Bearer tokens from elsewhere (SSO tooling, CI): \`OPERATE_TOKEN\`, \`--auth-token-stdin\` or a profile
+(\`--auth-token-env <VAR>\`) select \`--auth bearer\` (add it if \`OPERATE_AUTH\` or the profile sets
+another type); \`operate auth status\` shows its source and JWT expiry. It is never refreshed: on
+exit 4 \`TOKEN_EXPIRED\` ask the user for a new token. Secrets are masked unless \`--show-secrets\`.
 
 OAuth (\`OPERATE_OAUTH_*\` or a profile): a person runs \`operate auth login --profile <name>\` once in
 a terminal, then commands refresh the token. Never run \`auth login\` yourself. On exit 4 with
@@ -254,5 +253,6 @@ tells if the login is usable. Use only \`--config\` files you trust: profiles sh
 printf '%s\\n' "$CAMUNDA_PASSWORD" | operate ping --auth basic --auth-user demo --auth-password-stdin
 operate config set prod --auth basic --auth-user demo --auth-password-env CAMUNDA_PASSWORD
 operate config set sso --auth oauth --oauth-issuer https://login.example.com/realms/camunda --oauth-client-id operate-cli
+operate config set ci --auth bearer --auth-token-env CI_ENGINE_TOKEN
 \`\`\`
 `;

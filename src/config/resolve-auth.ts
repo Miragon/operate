@@ -1,17 +1,29 @@
 /**
- * Resolves the authentication (design §15, §16). Type: `--auth` > OPERATE_AUTH > the profile's
- * auth.type; without a type anywhere, a username from any source or `--auth-password-stdin`
- * selects Basic auth, otherwise none (OAuth is never implied; resolve-oauth.ts resolves it).
- * Username: `--auth-user` > OPERATE_USERNAME > the profile's auth.username. Password:
- * `--auth-password-stdin` > OPERATE_PASSWORD > the variable named by the profile's auth.passwordEnv
- * > the profile's auth.password. Basic auth needs both values; errors never show a secret.
+ * Resolves the authentication (design §15, §16, §18). Type: `--auth` > OPERATE_AUTH > the
+ * profile's auth.type; without a type anywhere, a username from any source or
+ * `--auth-password-stdin` selects Basic auth, a token from `--auth-token-stdin` or OPERATE_TOKEN
+ * selects bearer auth (both at once is a CONFIG error), otherwise none (OAuth is never implied;
+ * resolve-oauth.ts resolves it, resolve-bearer.ts the bearer token). Username: `--auth-user` >
+ * OPERATE_USERNAME > the profile's auth.username. Password: `--auth-password-stdin` >
+ * OPERATE_PASSWORD > the variable named by the profile's auth.passwordEnv > the profile's
+ * auth.password. Basic auth needs both values; errors never show a secret.
  */
 
 import type { OperateError } from '../errors.js';
+import { compact } from '../util.js';
 import { validateAuthType, validatePassword, validateUsername } from './auth.js';
+import { hasBearerKeys } from './bearer.js';
 import { configError } from './config-error.js';
 import { hasOAuthKeys } from './oauth.js';
 import { type Env, nonEmpty, pick } from './pick.js';
+import {
+  givenToken,
+  inferenceConflict,
+  mentioningUnused,
+  resolveBearer,
+  unusedToken,
+  unusedTokenNote,
+} from './resolve-bearer.js';
 import { oauthEnvVariable, resolveOAuth } from './resolve-oauth.js';
 import {
   type AuthConfig,
@@ -22,12 +34,14 @@ import {
   type ProfileAuth,
   type SelectedProfile,
   type Source,
+  type UnusedToken,
 } from './types.js';
 
 interface Context {
   readonly flags: ConfigFlags;
   readonly env: Env;
   readonly selected: SelectedProfile;
+  readonly authCommand?: boolean;
 }
 
 /** A value, its source and where exactly it came from, for messages (which never show values). */
@@ -39,8 +53,10 @@ interface Found<T> {
 
 export interface ResolvedAuth {
   readonly auth: AuthConfig;
-  /** Where the type came from; for a type implied by a username, the username's source. */
+  /** Where the type came from; for a type implied by a username or token, its source. */
   readonly source: Source;
+  /** OPERATE_TOKEN (or a switched off `--auth-token-stdin`) that the type does not use. */
+  readonly unusedToken?: UnusedToken;
 }
 
 type Credential = 'username' | 'password';
@@ -166,7 +182,7 @@ function basicAuth(
  * Basic auth selected without a type: by a username (from any source), else by
  * `--auth-password-stdin`, which reads stdin for nothing else. The label names the source.
  */
-function impliedType(
+function impliedBasic(
   username: Found<string> | undefined,
   flags: ConfigFlags,
 ): Found<AuthType> | undefined {
@@ -177,6 +193,25 @@ function impliedType(
   return present(flags.authPassword) === undefined
     ? undefined
     : { value: 'basic', source: 'flag', label: '--auth-password-stdin without an auth type' };
+}
+
+/**
+ * The type without an explicit one: Basic auth (`impliedBasic`), or bearer auth for a token of
+ * `--auth-token-stdin` or OPERATE_TOKEN. Both at once is a CONFIG error.
+ */
+function impliedType(
+  username: Found<string> | undefined,
+  context: Context,
+): Found<AuthType> | undefined {
+  const basic = impliedBasic(username, context.flags);
+  const token = givenToken(context);
+  if (token === undefined) return basic;
+  if (basic !== undefined) {
+    const by = username === undefined ? '--auth-password-stdin' : `A username (${username.label})`;
+    throw inferenceConflict(by, token);
+  }
+  const label = `a bearer token (from ${token.origin}) without an auth type`;
+  return { value: 'bearer', source: token.source, label };
 }
 
 /** Where a password is set that nothing uses (no username, no type); never reads a variable. */
@@ -198,31 +233,63 @@ function unusedSettings(context: Context): string | undefined {
     : `OAuth settings are set (from ${variable}), but no auth type selects OAuth; set ${ENV.auth}=oauth or --auth oauth`;
 }
 
+/** What an explicit none switches off: stored OAuth settings, a bearer token, else Basic auth. */
+function offFamily(context: Context): string {
+  const auth = context.selected.profile?.auth;
+  if (hasOAuthKeys(auth)) return 'OAuth';
+  return hasBearerKeys(auth) || givenToken(context) !== undefined ? 'Bearer auth' : 'Basic auth';
+}
+
 /**
  * No credentials, and why when that may surprise: an explicit none (switching off the OAuth
  * settings of the profile, else Basic auth), an unused password or OAuth values in the env.
  */
 function withoutAuth(type: Found<AuthType> | undefined, context: Context): NoAuthConfig {
   if (type !== undefined) {
-    const family = hasOAuthKeys(context.selected.profile?.auth) ? 'OAuth' : 'Basic auth';
-    return { type: 'none', off: `${family} is switched off by ${type.label}` };
+    return { type: 'none', off: `${offFamily(context)} is switched off by ${type.label}` };
   }
   const off = unusedSettings(context);
   return off === undefined ? { type: 'none' } : { type: 'none', off };
 }
 
-export function resolveAuth(flags: ConfigFlags, env: Env, selected: SelectedProfile): ResolvedAuth {
-  const context: Context = { flags, env, selected };
+function authOf(
+  type: Found<AuthType> | undefined,
+  username: Found<string> | undefined,
+  context: Context,
+): AuthConfig {
+  switch (type?.value) {
+    case 'oauth':
+      return resolveOAuth(context, type.label);
+    case 'bearer':
+      return resolveBearer(context, type.label);
+    case 'basic':
+      return basicAuth(username, type.label, context);
+    default:
+      return withoutAuth(type, context);
+  }
+}
+
+/** `authCommand`: for `operate auth` commands, whose hints never suggest `--auth`. */
+export function resolveAuth(
+  flags: ConfigFlags,
+  env: Env,
+  selected: SelectedProfile,
+  authCommand = false,
+): ResolvedAuth {
+  const context: Context = { flags, env, selected, authCommand };
   const explicit = pickType(context);
-  if (explicit?.value === 'oauth') {
-    return { auth: resolveOAuth(context, explicit.label), source: explicit.source };
-  }
   const username = pickUsername(context);
-  const type = explicit ?? impliedType(username, flags);
-  if (type?.value !== 'basic') {
-    return { auth: withoutAuth(type, context), source: type?.source ?? 'default' };
-  }
-  return { auth: basicAuth(username, type.label, context), source: type.source };
+  const type = explicit ?? impliedType(username, context);
+  const unused =
+    explicit === undefined || explicit.value === 'bearer'
+      ? undefined
+      : unusedToken(context, explicit.value, explicit.label);
+  const note = unused === undefined ? undefined : unusedTokenNote(unused, authCommand);
+  return {
+    auth: mentioningUnused(note, () => authOf(type, username, context)),
+    source: type?.source ?? 'default',
+    ...compact({ unusedToken: unused }),
+  };
 }
 
 function headerOrigin(source: Source, profile: string | undefined): string {
@@ -232,10 +299,17 @@ function headerOrigin(source: Source, profile: string | undefined): string {
   return `from the headers of profile "${name}"; \`operate config unset ${name} headers\` removes them`;
 }
 
+/** The credentials of an auth type, and what operate sends in the Authorization header. */
+const CREDENTIALS: Readonly<Record<Exclude<AuthType, 'none'>, readonly [string, string]>> = {
+  basic: ['Basic auth', 'with Basic auth, operate sends the credentials in it'],
+  oauth: ['OAuth', 'with OAuth, operate sends the access token in it'],
+  bearer: ['Bearer auth', 'with bearer auth, operate sends the token in it'],
+};
+
 /**
- * Basic auth or OAuth and an explicit Authorization header (`-H`, OPERATE_HEADERS, profile
- * headers) would fight over the same header: a CONFIG error asks to drop one. For `operate auth`
- * commands (`authCommand`), whose purpose is OAuth, only the header can go.
+ * Basic auth, OAuth or a bearer token and an explicit Authorization header (`-H`,
+ * OPERATE_HEADERS, profile headers) would fight over the same header: a CONFIG error asks to drop
+ * one. For `operate auth` commands (`authCommand`) only the header can go.
  */
 export function authorizationConflict(
   auth: AuthConfig,
@@ -244,29 +318,41 @@ export function authorizationConflict(
   authCommand = false,
 ): OperateError | undefined {
   if (auth.type === 'none' || authorization === undefined) return undefined;
-  const name = auth.type === 'basic' ? 'Basic auth' : 'OAuth';
+  const [name, sent] = CREDENTIALS[auth.type];
   const origin = headerOrigin(authorization, profile);
   return configError(
     `${name} and an Authorization header are both configured`,
     authCommand
-      ? `Remove the Authorization header (${origin}): with OAuth, operate sends the access token in it.`
+      ? `Remove the Authorization header (${origin}): ${sent}.`
       : `Drop one: remove the Authorization header (${origin}), or switch ${name} off with --auth none, ${ENV.auth}=none or \`operate config unset ${profile ?? '<profile>'} auth\`.`,
   );
 }
 
+/** The auth type of `selectedAuth`; `label` says what selected it (`OPERATE_AUTH=basic`). */
+export interface SelectedAuth {
+  readonly type: AuthType;
+  readonly source: Source;
+  readonly label: string;
+}
+
 /**
- * The auth type a command would use, without resolving credentials (no password variable is
- * read): the explicit type, else basic for a username or `--auth-password-stdin`, else none.
- * Undefined for an unknown type (resolution reports it).
+ * The auth type a command would use and where it came from, without resolving credentials (no
+ * password or token variable is read): the explicit type, else basic for a username or
+ * `--auth-password-stdin`, bearer for a token of `--auth-token-stdin` or OPERATE_TOKEN, else none
+ * (source default). Undefined for an unknown type or an inference conflict (resolution reports
+ * them).
  */
-export function selectedAuthType(
+export function selectedAuth(
   flags: ConfigFlags,
   env: Env,
   selected: SelectedProfile,
-): AuthType | undefined {
+): SelectedAuth | undefined {
   const context: Context = { flags, env, selected };
   try {
-    return (pickType(context) ?? impliedType(pickUsername(context), flags))?.value ?? 'none';
+    const type = pickType(context) ?? impliedType(pickUsername(context), context);
+    return type === undefined
+      ? { type: 'none', source: 'default', label: 'no auth settings' }
+      : { type: type.value, source: type.source, label: type.label };
   } catch {
     return undefined;
   }

@@ -8,7 +8,7 @@ import { isRecord } from '../util.js';
 import { configError } from './config-error.js';
 import { redactUrl } from './redact.js';
 import { CONTROL, ENV_NAME, isNonEmptyString } from './syntax.js';
-import { BASIC_AUTH_KEYS, OAUTH_AUTH_KEYS, type ProfileAuth } from './types.js';
+import { AUTH_TYPES, BASIC_AUTH_KEYS, OAUTH_AUTH_KEYS, type ProfileAuth } from './types.js';
 
 /** RFC 6749 VSCHAR: printable ASCII (client id, audience). */
 const VSCHAR = /^[\x20-\x7e]+$/;
@@ -204,7 +204,7 @@ function typeProblem(name: string, type: unknown, basic: string[], oauth: string
       : (['Basic auth', basic, 'basic', ['basic', 'none', undefined]] as const);
   if (keys.length === 0 || (allowed as readonly unknown[]).includes(type)) return undefined;
   // unknown types are reported by resolution, which names the supported ones
-  if (type !== undefined && !['none', 'basic', 'oauth'].includes(type as string)) return undefined;
+  if (type !== undefined && !(AUTH_TYPES as readonly unknown[]).includes(type)) return undefined;
   const actual = type === undefined ? 'is not set' : `is ${type as string}`;
   return `profile "${name}" has ${family} keys (${keys.join(', ')}) but its auth.type ${actual}; set "type": "${wanted}"`;
 }

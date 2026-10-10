@@ -7,6 +7,7 @@
 import { configError } from '../../config/config-error.js';
 import { OperateError } from '../../errors.js';
 import { isRecord } from '../../util.js';
+import { decodeBase64Url } from '../jwt.js';
 import { loginCommand, loginFailed, loginRequired, owner, REFRESH_REJECTED } from './errors.js';
 import {
   type ClientCredentials,
@@ -51,15 +52,6 @@ function seconds(value: unknown): number | null {
 
 function text(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null;
-}
-
-/** base64url → UTF-8 text; throws on invalid input. */
-function decodeBase64Url(segment: string): string {
-  const base64 = segment.replaceAll('-', '+').replaceAll('_', '/');
-  const binary = atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '='));
-  return new TextDecoder('utf-8', { fatal: true }).decode(
-    Uint8Array.from(binary, (char) => char.charCodeAt(0)),
-  );
 }
 
 function displayClaim(claims: Record<string, unknown>, key: string): string | null {

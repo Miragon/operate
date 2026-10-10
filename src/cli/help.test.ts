@@ -86,6 +86,8 @@ describe('root help texts', () => {
       '',
       'OAuth: a person runs "operate auth login --profile <name>" once in a terminal; commands then refresh the token on their own.',
       '',
+      'Bearer token from elsewhere (SSO tooling, a CI secret): OPERATE_TOKEN, --auth-token-stdin or a profile (operate config set <profile> --auth bearer --auth-token-env <VAR>).',
+      '',
       'Get started:',
       '  operate ping                        check the connection to the engine',
       '  operate commands                    list the API groups',
@@ -116,7 +118,8 @@ describe('root help texts', () => {
       '  1  internal error',
       '  2  usage error, invalid body (VALIDATION), READ_ONLY, CONFIRMATION_REQUIRED',
       '  3  configuration error, or an HTTP redirect (wrong --url)',
-      '  4  not authenticated or authorized (401, 403), LOGIN_REQUIRED, LOGIN_FAILED',
+      '  4  not authenticated or authorized (401, 403), LOGIN_REQUIRED, LOGIN_FAILED,',
+      '     TOKEN_EXPIRED',
       '  5  not found (404)',
       '  6  other 4xx: the engine rejected the request',
       '  7  engine error (5xx)',
@@ -140,7 +143,7 @@ describe('root help texts', () => {
   });
 
   it('keeps the root help texts within 80 columns', () => {
-    const lines = [...ROOT_DESCRIPTION.split('\n').slice(8), ...rootFooter().split('\n')];
+    const lines = [...ROOT_DESCRIPTION.split('\n').slice(10), ...rootFooter().split('\n')];
     expect(Math.max(...lines.map((line) => line.length))).toBeLessThanOrEqual(80);
   });
 });

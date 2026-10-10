@@ -53,7 +53,7 @@ describe('createAuthProvider', () => {
       expect((error as OperateError).code).toBe('CONFIG');
       expect((error as OperateError).exitCode).toBe(3);
       expect((error as OperateError).message).toBe(`Unsupported auth type "${type}"`);
-      expect((error as OperateError).details.hint).toBe('Supported: none, basic, oauth.');
+      expect((error as OperateError).details.hint).toBe('Supported: none, basic, oauth, bearer.');
       return;
     }
     throw new Error('expected an error');

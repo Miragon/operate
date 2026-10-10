@@ -1,11 +1,12 @@
 /**
- * Validation of the auth settings (design §15, §16): the auth type, Basic auth usernames and
+ * Validation of the auth settings (design §15, §16, §18): the auth type, Basic auth usernames and
  * passwords (RFC 7617: no control characters, no ":" in the username), the name of a password
- * variable and the auth object of a profile in the config file (the OAuth rules live in oauth.ts).
- * Messages never repeat a username or password.
+ * variable and the auth object of a profile in the config file (the OAuth rules live in oauth.ts,
+ * the bearer token rules in bearer.ts). Messages never repeat a username, password or token.
  */
 
 import { isRecord } from '../util.js';
+import { BEARER_CHECKS, bearerMixProblem, bearerProfileProblem } from './bearer.js';
 import { configError } from './config-error.js';
 import { OAUTH_CHECKS, oauthProfileProblem } from './oauth.js';
 import { CONTROL, ENV_NAME, isNonEmptyString } from './syntax.js';
@@ -14,12 +15,22 @@ import { AUTH_TYPES, type AuthType, PROFILE_AUTH_KEYS, type ProfileAuth } from '
 const CONTROL_HINT =
   'Remove line breaks, tabs, NUL and other control characters; Basic auth (RFC 7617) does not allow them.';
 
+/** A value that may be quoted as a mistyped auth type; anything else may be a credential. */
+const TYPE_LIKE = /^[A-Za-z-]{0,20}$/;
+
+/**
+ * The auth type. An unsupported value is quoted only when it looks like a type name: since
+ * `bearer` is a type, `--auth "Bearer <token>"` or `OPERATE_AUTH=<token>` are likely mistakes.
+ */
 export function validateAuthType(type: string): AuthType {
   const known = AUTH_TYPES.find((candidate) => candidate === type);
-  if (known === undefined) {
-    throw configError(`Unsupported auth type "${type}"`, `Supported: ${AUTH_TYPES.join(', ')}.`);
-  }
-  return known;
+  if (known !== undefined) return known;
+  const supported = `Supported: ${AUTH_TYPES.join(', ')}.`;
+  if (TYPE_LIKE.test(type)) throw configError(`Unsupported auth type "${type}"`, supported);
+  throw configError(
+    `Unsupported auth type (not one of ${AUTH_TYPES.join(', ')})`,
+    'The auth type (--auth, OPERATE_AUTH, auth.type) is only the word, so the value is not repeated: it may be a credential. A bearer token itself goes into OPERATE_TOKEN or --auth-token-stdin, e.g. --auth bearer with OPERATE_TOKEN=<token>.',
+  );
 }
 
 /** Checks a Basic auth username; `label` says where it came from (`from --auth-user`). */
@@ -79,6 +90,7 @@ const AUTH_CHECKS: Readonly<Record<keyof ProfileAuth, Check>> = {
   ],
   password: [isNonEmptyString, 'a non-empty string'],
   ...OAUTH_CHECKS,
+  ...BEARER_CHECKS,
 };
 
 const AUTH_EXAMPLE = '{"type": "basic", "username": "demo", "passwordEnv": "CAMUNDA_PASSWORD"}';
@@ -103,5 +115,7 @@ export function profileAuthProblem(name: string, value: unknown): string | undef
   }
   return Object.hasOwn(value, 'password') && Object.hasOwn(value, 'passwordEnv')
     ? `profile "${name}" sets both auth.password and auth.passwordEnv; keep one (passwordEnv is recommended)`
-    : oauthProfileProblem(name, value);
+    : (bearerMixProblem(name, value) ??
+        oauthProfileProblem(name, value) ??
+        bearerProfileProblem(name, value));
 }

@@ -77,14 +77,42 @@ function capitalized(text: string): string {
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }
 
+/** `operate auth` and its subcommands: an extra word there is most likely a token. */
+function isAuthCommand(command: Command): boolean {
+  return command.name() === 'auth' || command.parent?.name() === 'auth';
+}
+
+const STATUS_TOKEN_HINT = `operate auth status takes no token argument: pipe the token into --auth-token-stdin, e.g. printf '%s\\n' "$TOKEN" | operate auth status --auth-token-stdin. `;
+
 /**
- * Too many arguments. Next to an option about a secret the extra values are left out: the most
- * likely one is a password given to `--auth-password-stdin`, which takes no value.
+ * Too many arguments. Next to an option about a secret, `--auth bearer` or on an `auth` command
+ * the extra values are left out: the most likely one is a password or token given to a flag that
+ * takes none (`--auth-password-stdin`, `--auth-token-stdin`), after `--auth bearer`, or to `auth
+ * status`.
  */
 function excessArguments(text: string, command: Command, argv: readonly string[]): OperateError {
-  const hint = `${stdinHint(argv)}${usageHint(command)}`;
-  if (!mentionsSecret(argv)) return usageError(capitalized(text), hint);
+  const status = isAuthCommand(command) && command.name() === 'status' ? STATUS_TOKEN_HINT : '';
+  const hint = `${stdinHint(argv)}${status}${usageHint(command)}`;
+  if (!mentionsSecret(argv) && !isAuthCommand(command)) {
+    return usageError(capitalized(text), hint);
+  }
   return usageError(capitalized(text.replace(/: .*/s, '.')), hint);
+}
+
+/**
+ * An unknown command. Next to an option about a secret, `--auth bearer` or under `auth` the word
+ * is not repeated (`operate --auth-token-stdin $TOKEN task list` makes the token the command
+ * name); suggestions name known commands only, so they stay.
+ */
+function unknownCommand(name: string, command: Command, argv: readonly string[]): OperateError {
+  const suggestions = didYouMean(closeNames(name, subcommandNames(command)));
+  if (!mentionsSecret(argv) && !isAuthCommand(command)) {
+    return usageError(`Unknown command "${name}"`, `${suggestions}${commandsHint(command)}`);
+  }
+  return usageError(
+    'Unknown command (not repeated: it may be a token or password)',
+    `${suggestions}${stdinHint(argv)}Run "${commandPath(command)} --help" for the commands.`,
+  );
 }
 
 /**
@@ -134,8 +162,7 @@ export function commanderUsageError(
   }
   const name = unknownName(text);
   if (name === WORKFLOW_GROUP.group) return workflowGroupError(argv);
-  const suggestions = didYouMean(closeNames(name, subcommandNames(command)));
-  return usageError(`Unknown command "${name}"`, `${suggestions}${commandsHint(command)}`);
+  return unknownCommand(name, command, argv);
 }
 
 /**

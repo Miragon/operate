@@ -211,7 +211,9 @@ describe('resolveConfig precedence', () => {
     expect(error.code).toBe('CONFIG');
     expect(error.message).toBe('Invalid OPERATE_HEADERS: Invalid header: expected "Name: value"');
     expect(error.message).not.toContain('secret');
-    expect(error.details.hint).toContain("OPERATE_HEADERS='Authorization: Bearer <token>'");
+    expect(error.details.hint).toBe(
+      "Example: OPERATE_HEADERS='X-API-Key: <key>'; separate several headers with line breaks. A bearer token goes into OPERATE_TOKEN (--auth bearer).",
+    );
     expect(parseEnvHeaders(undefined)).toEqual({});
   });
 
