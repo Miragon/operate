@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0](https://github.com/Miragon/operate/compare/v0.4.0...v0.5.0) (2026-10-10)
+
+
+### Features
+
+* add bearer token authentication ([77e000d](https://github.com/Miragon/operate/commit/77e000da0ec8d9c45a7a44990eb73417c827be93))
+* add bearer token authentication ([990c707](https://github.com/Miragon/operate/commit/990c70743b5dccec69543f3b3d7454180bda4ca4))
+* add Claude Code plugin marketplace with the operate plugin ([85a67ea](https://github.com/Miragon/operate/commit/85a67ea0014d405f5c1f2c39812e4fe2a468edb0))
+* add Claude Code plugin marketplace with the operate plugin ([6c4b7a8](https://github.com/Miragon/operate/commit/6c4b7a893cfbbf651f23215fe610b9e8e5c7a707))
+
 ## [0.4.0](https://github.com/Miragon/operate/compare/v0.3.0...v0.4.0) (2026-10-10)
 
 
