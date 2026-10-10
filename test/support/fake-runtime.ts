@@ -1,16 +1,18 @@
 /**
  * In-memory Runtime for in-process CLI tests: environment, files, stdin, terminal flags per stream,
- * captured stdout/stderr (text and bytes), a fixed clock, deterministic random bytes, an in-memory
- * loopback server, a recording browser, in-memory locks and controllable timers. Nothing touches
- * the real system.
+ * captured stdout/stderr (text and bytes), a fake clock that `sleep` advances at once (so tests of
+ * waiting commands run instantly), deterministic random bytes, an in-memory loopback server, a
+ * recording browser, in-memory locks and a controllable deadline. Nothing touches the real system.
  */
 
 import type {
+  DirectoryEntry,
   FileSystem,
   LoopbackRequest,
   LoopbackResponse,
   LoopbackServer,
   OutputStream,
+  PathKind,
   Runtime,
 } from '../../src/runtime.js';
 
@@ -29,8 +31,12 @@ export interface FakeStream extends OutputStream {
 
 export interface FakeRuntimeOptions {
   readonly env?: Readonly<Record<string, string | undefined>>;
-  /** Initial files by path. */
+  /** Initial files by path; their parent directories exist implicitly. */
   readonly files?: Readonly<Record<string, string | Uint8Array>>;
+  /** Empty directories. */
+  readonly dirs?: readonly string[];
+  /** Paths that are neither files nor directories, e.g. symlinked directories. */
+  readonly others?: readonly string[];
   /** stdin content; without it, reading stdin fails like a terminal would. */
   readonly stdin?: string | Uint8Array;
   readonly stdoutTTY?: boolean;
@@ -40,8 +46,10 @@ export interface FakeRuntimeOptions {
   /** Terminal width of stderr (only reported when stderr is a TTY). */
   readonly stderrColumns?: number;
   readonly fetch?: typeof globalThis.fetch;
-  /** Clock; defaults to a fixed instant. */
+  /** Clock; defaults to a fake clock starting at a fixed instant, advanced by `sleep`. */
   readonly now?: () => number;
+  /** Called on every `sleep` (time passes for a fake engine, e.g. its job executor runs). */
+  readonly onSleep?: (ms: number) => void;
   readonly homedir?: string;
   readonly platform?: string;
   /** Random bytes; default: deterministic, a different counter-seeded value per call. */
@@ -57,8 +65,8 @@ export interface FakeRuntimeOptions {
   readonly browser?: boolean | ((url: string, runtime: FakeRuntime) => Promise<boolean>);
   /** `withLock` gives up at once, like a lock that cannot be taken. */
   readonly lockTimeout?: boolean;
-  /** `sleep` resolves at once (default: never). */
-  readonly sleepResolves?: boolean;
+  /** `deadline` resolves at once (default: never). */
+  readonly deadlineResolves?: boolean;
 }
 
 /** The in-memory loopback server: tests drive its handler with requests. */
@@ -86,8 +94,10 @@ export interface FakeRuntime extends Runtime {
   readonly browserUrls: string[];
   /** Every `withLock` call: path and holdMs. */
   readonly locks: { readonly path: string; readonly holdMs: number }[];
-  /** Delays passed to `sleep`. */
+  /** Every `sleep` in milliseconds, in order. */
   readonly sleeps: number[];
+  /** Delays passed to `deadline`. */
+  readonly deadlines: number[];
   /** Lengths passed to `randomBytes`. */
   readonly randomRequests: number[];
   readonly loopback: FakeLoopback;
@@ -135,11 +145,50 @@ function fsError(code: string, path: string): Error {
   return Object.assign(new Error(`${code}: no such file or directory, open '${path}'`), { code });
 }
 
-function fakeFileSystem(
-  files: Map<string, StoredFile>,
-  dirs: Set<string>,
-  dirModes: Map<string, number | undefined>,
-): FileSystem {
+interface FakeTree {
+  readonly files: Map<string, StoredFile>;
+  readonly dirs: Set<string>;
+  readonly others: ReadonlySet<string>;
+  readonly dirModes: Map<string, number | undefined>;
+}
+
+function withoutSlash(path: string): string {
+  return path.length > 1 ? path.replace(/\/+$/, '') : path;
+}
+
+/** `dir/`, or nothing for the current directory. */
+function prefixOf(path: string): string {
+  const trimmed = withoutSlash(path);
+  return trimmed === '.' ? '' : `${trimmed}/`;
+}
+
+function allPaths(tree: FakeTree): string[] {
+  return [...tree.files.keys(), ...tree.dirs, ...tree.others];
+}
+
+function pathKind(tree: FakeTree, raw: string): PathKind {
+  const path = withoutSlash(raw);
+  if (tree.others.has(path)) return 'other';
+  if (tree.files.has(path)) return 'file';
+  const prefix = prefixOf(path);
+  const below = allPaths(tree).some((entry) => entry.startsWith(prefix));
+  return tree.dirs.has(path) || below ? 'directory' : 'missing';
+}
+
+function entriesOf(tree: FakeTree, path: string): DirectoryEntry[] {
+  const prefix = prefixOf(path);
+  const entries = new Map<string, DirectoryEntry>();
+  for (const entry of allPaths(tree)) {
+    if (!entry.startsWith(prefix) || entry === prefix) continue;
+    const [name = '', ...rest] = entry.slice(prefix.length).split('/');
+    const kind = rest.length > 0 ? 'directory' : pathKind(tree, entry);
+    entries.set(name, { name, kind: kind === 'missing' ? 'other' : kind });
+  }
+  return [...entries.values()];
+}
+
+function fakeFileSystem(tree: FakeTree): FileSystem {
+  const { files, dirs, dirModes } = tree;
   return {
     readFile(path) {
       const file = files.get(path);
@@ -161,6 +210,12 @@ function fakeFileSystem(
     },
     exists: (path) => Promise.resolve(files.has(path) || dirs.has(path)),
     remove: (path) => Promise.resolve(files.delete(path)),
+    readdir(path) {
+      const kind = pathKind(tree, path);
+      if (kind === 'directory') return Promise.resolve(entriesOf(tree, path));
+      return Promise.reject(fsError(kind === 'missing' ? 'ENOENT' : 'ENOTDIR', path));
+    },
+    kind: (path) => Promise.resolve(pathKind(tree, path)),
   };
 }
 
@@ -239,38 +294,62 @@ function streams(options: FakeRuntimeOptions) {
   };
 }
 
-export function fakeRuntime(options: FakeRuntimeOptions = {}): FakeRuntime {
-  const files = new Map<string, StoredFile>(
+function fakeStdin(stdin: string | Uint8Array | undefined): () => Promise<Uint8Array> {
+  return () =>
+    stdin === undefined
+      ? Promise.reject(new Error('stdin is a terminal in this test'))
+      : Promise.resolve(toBytes(stdin));
+}
+
+function initialFiles(options: FakeRuntimeOptions): Map<string, StoredFile> {
+  return new Map<string, StoredFile>(
     Object.entries(options.files ?? {}).map(([path, data]) => [path, { data: toBytes(data) }]),
   );
-  const dirs = new Set<string>();
+}
+
+/** A fake clock starting at a fixed instant; `sleep` advances it at once and records the delay. */
+function fakeClock(options: FakeRuntimeOptions) {
+  const sleeps: number[] = [];
+  let clock = FIXED_NOW;
+  return {
+    sleeps,
+    now: options.now ?? (() => clock),
+    sleep(ms: number): Promise<void> {
+      sleeps.push(ms);
+      clock += ms;
+      options.onSleep?.(ms);
+      return Promise.resolve();
+    },
+  };
+}
+
+export function fakeRuntime(options: FakeRuntimeOptions = {}): FakeRuntime {
+  const files = initialFiles(options);
+  const dirs = new Set<string>(options.dirs ?? []);
+  const others = new Set<string>(options.others ?? []);
   const dirModes = new Map<string, number | undefined>();
-  const { stdin } = options;
   const { loopback, listen } = fakeLoopback(options);
   const browserUrls: string[] = [];
   const locks: FakeRuntime['locks'] = [];
-  const sleeps: number[] = [];
+  const deadlines: number[] = [];
   const randomRequests: number[] = [];
   const random = options.randomBytes ?? counterBytes();
   const runtime: FakeRuntime = {
     ...streams(options),
-    readStdin: () =>
-      stdin === undefined
-        ? Promise.reject(new Error('stdin is a terminal in this test'))
-        : Promise.resolve(toBytes(stdin)),
+    readStdin: fakeStdin(options.stdin),
     fetch: options.fetch ?? rejectFetch,
-    fs: fakeFileSystem(files, dirs, dirModes),
+    fs: fakeFileSystem({ files, dirs, others, dirModes }),
     files,
     dirs,
     dirModes,
     browserUrls,
     locks,
-    sleeps,
+    deadlines,
     randomRequests,
     loopback,
     homedir: options.homedir ?? HOME,
     platform: options.platform ?? 'linux',
-    now: options.now ?? (() => FIXED_NOW),
+    ...fakeClock(options),
     randomBytes: (length) => {
       randomRequests.push(length);
       return random(length);
@@ -284,9 +363,9 @@ export function fakeRuntime(options: FakeRuntimeOptions = {}): FakeRuntime {
         : Promise.resolve(browser === true);
     },
     withLock: fakeLocks(options, locks),
-    sleep: (ms) => {
-      sleeps.push(ms);
-      return options.sleepResolves === true ? Promise.resolve() : new Promise(() => undefined);
+    deadline: (ms) => {
+      deadlines.push(ms);
+      return options.deadlineResolves === true ? Promise.resolve() : new Promise(() => undefined);
     },
   };
   return runtime;

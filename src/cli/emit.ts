@@ -19,7 +19,7 @@ import { renderOptionsOf, type Session } from './session.js';
 
 type Response = Exclude<OperationResult, { readonly kind: 'dry-run' }>;
 
-interface FileBody {
+export interface FileBody {
   readonly data: string | Uint8Array;
   readonly contentType: string;
 }
@@ -28,7 +28,7 @@ interface FileBody {
  * Writes text to a stream; on a terminal control characters are replaced (response bodies could
  * carry escape sequences). Bytes and output to pipes and files stay raw.
  */
-function writeText(stream: OutputStream, chunk: string | Uint8Array): void {
+export function writeText(stream: OutputStream, chunk: string | Uint8Array): void {
   stream.write(typeof chunk === 'string' && stream.isTTY ? terminalSafe(chunk) : chunk);
 }
 
@@ -73,13 +73,16 @@ function byteLength(data: string | Uint8Array): number {
   return typeof data === 'string' ? new TextEncoder().encode(data).length : data.length;
 }
 
-async function writeOutFile(
-  result: Response,
-  path: string,
+/**
+ * `--out-file`: writes the body to the file and prints the summary `{outFile, bytes,
+ * contentType}` (json) or `Wrote n bytes to <path>` (table). `warnings` go to stderr first.
+ */
+export async function writeOutFile(
+  file: { readonly body: FileBody; readonly path: string; readonly warnings: string },
   options: RenderOptions,
   runtime: Runtime,
 ): Promise<void> {
-  const body = fileBody(result, options);
+  const { body, path, warnings } = file;
   try {
     await runtime.fs.writeFile(path, body.data);
   } catch (error) {
@@ -88,8 +91,7 @@ async function writeOutFile(
   }
   const bytes = byteLength(body.data);
   const summary = { outFile: path, bytes, contentType: body.contentType };
-  if (result.kind === 'json')
-    writeText(runtime.stderr, fieldWarnings(result.value, options.fields));
+  writeText(runtime.stderr, warnings);
   writeText(
     runtime.stdout,
     options.format === 'json'
@@ -108,7 +110,12 @@ export async function emitResult(
   const options = renderOptionsOf(session, runtime, unwrap);
   const outFile = session.globals.outFile;
   if (outFile !== undefined && result.kind !== 'dry-run') {
-    await writeOutFile(result, outFile, options, runtime);
+    const warnings = result.kind === 'json' ? fieldWarnings(result.value, options.fields) : '';
+    await writeOutFile(
+      { body: fileBody(result, options), path: outFile, warnings },
+      options,
+      runtime,
+    );
     return;
   }
   if (result.kind === 'binary' && runtime.stdout.isTTY) {

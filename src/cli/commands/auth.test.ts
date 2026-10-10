@@ -249,7 +249,7 @@ describe('operate auth login', () => {
   });
 
   it('reports a login timeout as LOGIN_FAILED with exit 4', async () => {
-    const { cli } = setup({ runtime: { browser: false, sleepResolves: true } });
+    const { cli } = setup({ runtime: { browser: false, deadlineResolves: true } });
     const result = await cli(['auth', 'login', '--login-timeout', '1000']);
     expect(result.code).toBe(4);
     expect(errorOf(result.stderr)).toMatchObject({

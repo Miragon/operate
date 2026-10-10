@@ -128,7 +128,7 @@ describe('run: help and version', () => {
     expect(plain.stdout).toContain('  help [command]  ');
     expect(plain.stdout).toContain('\nGet started:\n  operate ping ');
     expect(plain.stdout).toMatch(
-      /\nExit codes:\n {2}0 {2}success\n(?:.*\n)* {2}8 {2}network error or timeout\n$/,
+      /\nExit codes:\n {2}0 {2}success\n(?:.*\n)* {2}9 {2}the process did not reach the expected state .*\n {5}INSTANCE_ENDED, JOB_FAILED, CHECK_FAILED\)\n$/,
     );
     for (const args of [['--help'], ['-h'], ['help']]) {
       const result = await cli(args);
@@ -143,6 +143,7 @@ describe('run: help and version', () => {
       'Get started:',
       'Options:',
       'Commands:',
+      'Workflow commands:',
       'API groups:',
       'Exit codes:',
     ]);
@@ -160,7 +161,16 @@ describe('run: help and version', () => {
       'ping',
       'config',
       'auth',
+      'completion',
       'help',
+    ]);
+    expect(section('Workflow commands:')).toEqual([
+      'inspect',
+      'wait',
+      'advance',
+      'retry',
+      'deploy',
+      'status',
     ]);
     const groups = section('API groups:');
     expect(groups).toHaveLength(52);

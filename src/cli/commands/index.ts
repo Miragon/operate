@@ -7,6 +7,7 @@
 import { apiCommand } from './api.js';
 import { authCommand } from './auth.js';
 import { commandsCommand } from './commands.js';
+import { completionCommand } from './completion.js';
 import { configCommand } from './config.js';
 import { describeCommand } from './describe.js';
 import { guideCommand } from './guide.js';
@@ -21,4 +22,5 @@ export const UTILITY_COMMANDS: readonly UtilityCommand[] = [
   pingCommand,
   configCommand,
   authCommand,
+  completionCommand,
 ];

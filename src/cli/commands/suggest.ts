@@ -6,6 +6,7 @@
 
 import type { Catalog } from '../../catalog/types.js';
 import { listCommands } from '../../docs/commands.js';
+import { WORKFLOW_DOCS, WORKFLOW_GROUP } from '../../docs/workflow.js';
 import { closeNames } from '../../util.js';
 
 const MAX_SUGGESTIONS = 5;
@@ -19,7 +20,7 @@ function startsWord(name: string, word: string): boolean {
 
 /** Groups for an unknown group name: close spellings, else groups with a word starting so. */
 export function groupSuggestions(catalog: Catalog, word: string): string[] {
-  const names = catalog.groups.map((group) => group.name);
+  const names = [...catalog.groups.map((group) => group.name), WORKFLOW_GROUP.group];
   const close = closeNames(word, names);
   if (close.length > 0 || word.length < MIN_SEARCH_LENGTH) return close;
   const wanted = word.toLowerCase();
@@ -33,10 +34,12 @@ function commandNames(catalog: Catalog): string[] {
   );
 }
 
-/** Group names and operationIds: what `operate describe <word>` accepts. */
+/** Group names, workflow commands and operationIds: what `operate describe <word>` accepts. */
 function singleNames(catalog: Catalog): string[] {
   return [
     ...catalog.groups.map((group) => group.name),
+    WORKFLOW_GROUP.group,
+    ...WORKFLOW_DOCS.map((doc) => doc.name),
     ...catalog.operations.map((operation) => operation.operationId),
   ];
 }

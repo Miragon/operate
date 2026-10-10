@@ -373,31 +373,31 @@ describe('login', () => {
   });
 
   it('gives up after the login timeout with the redirect URI hint, never the ephemeral port', async () => {
-    const test = setup({}, { sleepResolves: true, loopbackPort: 5555 });
+    const test = setup({}, { deadlineResolves: true, loopbackPort: 5555 });
     const error = await rejection(run(test, {}, { loginTimeoutMs: 1500 }));
     expect(error.code).toBe('LOGIN_FAILED');
     expect(error.message).toBe('No login arrived within 1.5 s');
     expect(error.details.hint).toBe(
       'Complete the login in the browser. If it showed an error such as "Invalid parameter: redirect_uri", register http://127.0.0.1/callback (any port; Keycloak, Entra ID) for client operate-cli, or set a fixed port (operate config set p --oauth-redirect-port <port>) and register http://127.0.0.1:<port>/callback; then run the command again.',
     );
-    expect(test.runtime.sleeps).toEqual([1500]);
+    expect(test.runtime.deadlines).toEqual([1500]);
     expect(test.runtime.stderr.text()).toContain('Waiting up to 1.5 s for the login');
     expect(test.runtime.loopback.closed).toBe(true);
   });
 
   it('names the fixed port, and the variable that sets it, in the timeout hint', async () => {
-    const fixed = setup({}, { sleepResolves: true, loopbackPort: 8765 });
+    const fixed = setup({}, { deadlineResolves: true, loopbackPort: 8765 });
     const error = await rejection(run(fixed, { redirectPort: 8765 }, { loginTimeoutMs: 1000 }));
     expect(error.details.hint).toContain(
       'register http://127.0.0.1/callback (any port; Keycloak, Entra ID) or http://127.0.0.1:8765/callback for client operate-cli; then',
     );
-    const env = setup({}, { sleepResolves: true });
+    const env = setup({}, { deadlineResolves: true });
     const sources = { ...oauthConfig().sources, redirectPort: 'env' as const };
     const fromEnv = await rejection(run(env, { sources }, { loginTimeoutMs: 1000 }));
     expect(fromEnv.details.hint).toContain(
       'or set a fixed port (OPERATE_OAUTH_REDIRECT_PORT=<port>)',
     );
-    const noProfile = setup({}, { sleepResolves: true });
+    const noProfile = setup({}, { deadlineResolves: true });
     const withoutProfile = await rejection(
       run(noProfile, { profile: undefined }, { loginTimeoutMs: 1000 }),
     );

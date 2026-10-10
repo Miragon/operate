@@ -13,6 +13,8 @@ function failingFs(error: unknown): FileSystem {
     mkdir: () => Promise.resolve(),
     exists: () => Promise.resolve(false),
     remove: () => Promise.resolve(false),
+    readdir: () => Promise.resolve([]),
+    kind: () => Promise.resolve('missing' as const),
   };
 }
 

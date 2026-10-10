@@ -5,6 +5,7 @@ import {
   compact,
   editDistance,
   isRecord,
+  mapLimit,
   mergeHeaders,
   parseJson,
   stringifyJson,
@@ -200,6 +201,65 @@ describe('parseJson and stringifyJson', () => {
         (value, big) => {
           const text = JSON.stringify({ value, big: 0 }).replace(/0\}$/, `${big}}`);
           expect(stringifyJson(parseJson(text))).toBe(text);
+        },
+      ),
+    );
+  });
+});
+
+describe('mapLimit', () => {
+  it('keeps the order of the items and runs at most `limit` calls at a time', async () => {
+    let running = 0;
+    let peak = 0;
+    const results = await mapLimit([5, 1, 4, 2, 3], 2, async (item, index) => {
+      running += 1;
+      peak = Math.max(peak, running);
+      await new Promise((resolve) => setTimeout(resolve, item));
+      running -= 1;
+      return `${index}:${item}`;
+    });
+    expect(results).toEqual(['0:5', '1:1', '2:4', '3:2', '4:3']);
+    expect(peak).toBe(2);
+  });
+
+  it('resolves to an empty list without calls for no items', async () => {
+    expect(await mapLimit([], 8, () => Promise.reject(new Error('never')))).toEqual([]);
+  });
+
+  it('starts no item after the first failure', async () => {
+    const started: number[] = [];
+    const items = Array.from({ length: 20 }, (_, index) => index);
+    await expect(
+      mapLimit(items, 3, async (item) => {
+        started.push(item);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        if (item === 1) throw new Error('boom');
+        return item;
+      }),
+    ).rejects.toThrow('boom');
+    // let the calls that were running finish
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // the three first calls run in parallel; at most the two others pull one more each
+    expect(started.length).toBeLessThanOrEqual(5);
+    expect(started).not.toContain(19);
+  });
+
+  it('rejects with the first failure', async () => {
+    await expect(
+      mapLimit([1, 2, 3], 8, (item) =>
+        item === 2 ? Promise.reject(new Error('two')) : Promise.resolve(item),
+      ),
+    ).rejects.toThrow('two');
+  });
+
+  it('maps every item exactly once for any limit (property)', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.integer()),
+        fc.integer({ min: 1, max: 10 }),
+        async (items, limit) => {
+          const results = await mapLimit(items, limit, (item) => Promise.resolve(item * 2));
+          expect(results).toEqual(items.map((item) => item * 2));
         },
       ),
     );

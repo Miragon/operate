@@ -16,10 +16,11 @@ import {
 import { readConfigFile, writeConfigFile } from '../../config/file.js';
 import { OAUTH_UNSET_KEYS } from '../../config/oauth-edit.js';
 import { findProfile, validateOutput } from '../../config/resolve.js';
-import { type ConfigFile, PROFILE_KEYS } from '../../config/types.js';
+import { AUTH_TYPES, type ConfigFile, OUTPUT_FORMATS, PROFILE_KEYS } from '../../config/types.js';
 import { renderValue } from '../../output/render.js';
 import { compact } from '../../util.js';
 import { subcommand } from '../command.js';
+import { setOptionCompletion, setPositional } from '../completion-meta.js';
 import type { CliContext } from '../context.js';
 import { type DisplayFlags, displayOf } from '../display.js';
 import { addGlobalOptions, readGlobals } from '../globals.js';
@@ -239,6 +240,25 @@ function registerReadCommands(config: Command, context: CliContext): void {
   list.action(() => printProfiles(list, context));
 }
 
+/** Fixed values of the options of `config set`, for shell completion. */
+const SET_VALUES: Readonly<Record<string, readonly string[]>> = {
+  '--auth': AUTH_TYPES,
+  '--output': OUTPUT_FORMATS,
+  '-o': OUTPUT_FORMATS,
+};
+
+/**
+ * Completion facts: the profile positional completes to the profile names of the file, the
+ * positionals after it (`config unset`) to `rest`.
+ */
+function completeProfiles(command: Command, rest?: readonly string[]): Command {
+  for (const option of command.options) {
+    const values = SET_VALUES[option.long ?? option.short ?? ''];
+    if (values !== undefined) setOptionCompletion(option, { values });
+  }
+  return setPositional(command, { kind: 'profiles', ...(rest === undefined ? {} : { rest }) });
+}
+
 function registerSet(config: Command, context: CliContext): void {
   const set = subcommand(config, 'set')
     .description(
@@ -270,6 +290,7 @@ function registerSet(config: Command, context: CliContext): void {
     .option('--default', 'Make this the default profile')
     .option('-o <format>', 'Output format of the printed profile: json or table');
   addGlobalOptions(set, SET_OPTIONS, OPTIONS_GROUP);
+  completeProfiles(set);
   set.action((name: string) => setProfileFrom(name, set, context));
 }
 
@@ -286,16 +307,17 @@ function registerEditCommands(config: Command, context: CliContext): void {
       '<keys...>',
       `Keys to remove: ${PROFILE_KEYS.join(', ')}; OAuth settings: ${OAUTH_UNSET_KEYS.join(', ')}`,
     );
+  completeProfiles(unset, [...PROFILE_KEYS, ...OAUTH_UNSET_KEYS]);
   unset.action(async (name: string, keys: string[]) => {
     await editProfile(name, unset, context, (file) => unsetProfileKeys(file, name, keys));
   });
   const use = configSubcommand(config, 'use', 'Make a profile the default', FILE_OPTIONS);
-  use.argument('<profile>', 'Profile name');
+  completeProfiles(use.argument('<profile>', 'Profile name'));
   use.action(async (name: string) => {
     await editProfile(name, use, context, (file) => useProfile(file, name));
   });
   const remove = configSubcommand(config, 'delete', 'Delete a profile', FILE_OPTIONS);
-  remove.argument('<profile>', 'Profile name');
+  completeProfiles(remove.argument('<profile>', 'Profile name'));
   remove.action((name: string) => removeProfile(name, remove, context));
 }
 

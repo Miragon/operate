@@ -18,6 +18,10 @@ one JSON line on stderr and uses stable exit codes.
   `--fields` projection, `-o table` and `--pretty`.
 - **Guard rails.** `--dry-run` prints the request and a `curl` line, `delete` and `bulk` commands
   need `--yes`, and read-only mode (flag, environment or profile) refuses every change.
+- **Comfort commands.** `inspect`, `wait`, `advance`, `retry`, `deploy` and `status` combine
+  several requests for the everyday questions: where does this instance wait and why, wait until
+  it is idle instead of `sleep`, complete what it waits for, retry its incidents, deploy and
+  start, triage the engine. Shell completion for bash, zsh and fish.
 - **Self-describing.** `operate commands`, `operate describe` and `operate guide` tell an agent
   which commands exist, what they accept and how to use them, so it never has to guess.
 - **Typed input.** Process variables with auto typing (`--var amount=250`), lenient date-time
@@ -27,6 +31,7 @@ one JSON line on stderr and uses stable exit codes.
 
 - [Installation](#installation)
 - [Quick start](#quick-start)
+- [Comfort commands](#comfort-commands)
 - [Configuration](#configuration)
 - [Authentication](#authentication)
 - [Command structure](#command-structure)
@@ -134,6 +139,111 @@ id                                    businessKey  state
 
 Where next: `operate commands` lists the API groups, `operate describe <group> <command>` explains
 a command and `operate guide` prints the usage guide.
+
+## Comfort commands
+
+### Workflow commands
+
+The generated commands map the REST API one to one. Six top-level workflow commands combine
+several requests for the questions a developer, an operator or an agent asks most. They select a
+process instance by id, `--business-key` or `--process-definition-key <key> --latest`, print views
+built by operate (JSON with a documented key order, `-o table` prints sections) whose `next` lists
+ready-to-run follow-ups, and follow the same guards as every other command:
+
+| Command           | Effect                              | What it does                                                                                                                                                                                                      |
+| ----------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operate inspect` | read                                | Where an instance waits and why: wait states across its called instances, open root incidents with their root cause, called instances, variables; ended instances from the history, `--history` adds the timeline |
+| `operate wait`    | read (write with `--execute-jobs`)  | Waits until the instance is idle, or `--until ended`, `incident`, `task[:<key>]`, `activity:<id>`; fails fast on incidents; `--batch <id>` waits for a batch                                                      |
+| `operate advance` | write                               | Completes what the instance waits for: user task, external task (locked first), message, signal, receive task, timer or asynchronous job                                                                          |
+| `operate retry`   | write (bulk for a whole definition) | Sets the retries behind open incidents (propagated ones replaced by their root cause); `--now` executes the jobs and reports a job that failed again with its root cause                                          |
+| `operate deploy`  | write                               | Deploys files and directories with a stable deployment name and source, so unchanged files are skipped; reports the versions in effect; `--start` / `--start-key` starts an instance                              |
+| `operate status`  | read                                | Engine triage: grouped root incidents with root cause, overdue jobs, external task workers, failed batches; each finding names the next command, `--fail-on` fails CI                                             |
+
+The development loop, without a single id passed around:
+
+```sh
+operate deploy bpmn --start --business-key B-1 --var amount=250
+operate inspect --business-key B-1
+operate advance --business-key B-1 --var approved=true --wait
+operate retry --business-key B-1 --now
+operate wait --business-key B-1 --until ended
+operate status
+```
+
+```text
+$ operate inspect --business-key WF-1 -o table
+Process instance  adff9abe-c3e6-11f1-aa2b-66e6c1afd69e
+State             ACTIVE
+Definition        workflow-parent v1
+Business key      WF-1
+Started           2026-10-09T13:38:15.430+0000
+
+Waiting at:
+ACTIVITY  KIND      ID                                    DETAIL   INSTANCE
+approve   userTask  adffc1d7-c3e6-11f1-aa2b-66e6c1afd69e  Approve  adffc1d4-c3e6-11f1-aa2b-66e6c1afd69e
+
+Called instances:
+ID                                    KEY             VERSION  STATE   PARENT
+adffc1d4-c3e6-11f1-aa2b-66e6c1afd69e  workflow-child  1        ACTIVE  adff9abe-c3e6-11f1-aa2b-66e6c1afd69e
+
+Variables:
+NAME         VALUE  TYPE
+failBooking  true
+
+Next:
+  operate advance adff9abe-c3e6-11f1-aa2b-66e6c1afd69e
+```
+
+- **Waiting** replaces `sleep` and poll loops: `operate wait` (and `--wait` / `--until` of
+  advance, retry and deploy) polls after 0, 250, 500 and 1000 ms, then every 2 s, until the
+  condition holds. `--wait-timeout <duration>` (`500ms`, `30s`, `2m`, `1h`; default `60s`) is the
+  budget; `--timeout` stays the per-request timeout. An incident ends the wait at once
+  (`--no-fail-on-incident` keeps waiting), and so does a job that failed for good, which would
+  otherwise look idle. `wait`, `advance` and `retry` look up the ids of `--until activity:<id>`
+  and `task:<key>` in the BPMN of the instance first, so a typo fails at once with the close
+  names instead of waiting the whole budget. On a terminal one stderr line says that it waits.
+- **Exit code 9**: every request succeeded, but the process did not reach the expected state:
+  `WAIT_TIMEOUT`, `INCIDENT`, `INSTANCE_ENDED`, `JOB_FAILED` (a job executed by operate failed
+  again) or `CHECK_FAILED` (`status --fail-on`). The command still prints its view on stdout; the
+  error with its `data` goes to stderr.
+- **`--dry-run`**: inspect, wait and status send nothing and preview their first requests;
+  advance and retry send their reads (to plan) and preview the writes, each with a `summary`;
+  deploy previews the multipart request.
+- **Guards**: inspect, wait and status work in read-only mode; advance, deploy, retry and
+  `wait --execute-jobs` are writes; `retry --process-definition-key` alone is a bulk operation that
+  needs `--yes`.
+- `advance` needs `--activity-id` when the instance waits at several places; the error lists them
+  with ready commands. External tasks are locked as worker `operate` (`--worker-id`) first.
+- `operate commands workflow` lists the workflow commands, and `operate describe inspect`
+  describes one with the requests it may send.
+
+More examples:
+
+```sh
+operate wait --business-key B-1 --until task --until ended --wait-timeout 2m
+operate deploy src/main/resources --start-key invoice --business-key B-2
+operate advance --business-key B-2 --activity-id approve --var approved=true --dry-run
+operate retry --process-definition-key invoice --activity-id book --dry-run
+operate status --process-definition-key invoice --fail-on critical
+operate wait --batch $BATCH_ID
+```
+
+### Shell completion
+
+`operate completion <bash|zsh|fish>` prints a completion script. It completes commands (also
+`auth login|status|logout`), groups, options and their fixed values (enum values, output formats,
+auth types, `--until` conditions, profile names of the config file) and falls back to file
+completion for paths. It never contacts the engine, so ids and definition keys are not completed.
+
+```sh
+eval "$(operate completion bash)"
+mkdir -p ~/.zfunc && operate completion zsh > ~/.zfunc/_operate
+operate completion fish > ~/.config/fish/completions/operate.fish
+```
+
+Put the bash line into `~/.bashrc`; it works on every bash, also the 3.2 of macOS, where
+`source <(...)` registers nothing. For zsh add `fpath=(~/.zfunc $fpath)` to `~/.zshrc` before
+`compinit`.
 
 ## Configuration
 
@@ -679,17 +789,18 @@ Fields: `code`, `exitCode`, `message`, and when available `status`, `engineType`
 `engineMessage`, `engineCode`, `hint`, `request` (`method`, `url`) and `data` (e.g. the list of
 validation problems).
 
-| Exit | Meaning                                                                        |
-| ---- | ------------------------------------------------------------------------------ |
-| 0    | success                                                                        |
-| 1    | internal error                                                                 |
-| 2    | usage error, invalid body (`VALIDATION`), `READ_ONLY`, `CONFIRMATION_REQUIRED` |
-| 3    | configuration error, also an HTTP redirect (`HTTP_REDIRECT`)                   |
-| 4    | 401, 403, `LOGIN_REQUIRED` (a person must log in), `LOGIN_FAILED`              |
-| 5    | not found (404)                                                                |
-| 6    | other 4xx: the engine rejected the request                                     |
-| 7    | engine error (5xx)                                                             |
-| 8    | network error or timeout                                                       |
+| Exit | Meaning                                                                                                                    |
+| ---- | -------------------------------------------------------------------------------------------------------------------------- |
+| 0    | success                                                                                                                    |
+| 1    | internal error                                                                                                             |
+| 2    | usage error, invalid body (`VALIDATION`), `READ_ONLY`, `CONFIRMATION_REQUIRED`                                             |
+| 3    | configuration error, also an HTTP redirect (`HTTP_REDIRECT`)                                                               |
+| 4    | 401, 403, `LOGIN_REQUIRED` (a person must log in), `LOGIN_FAILED`                                                          |
+| 5    | not found (404)                                                                                                            |
+| 6    | other 4xx: the engine rejected the request                                                                                 |
+| 7    | engine error (5xx)                                                                                                         |
+| 8    | network error or timeout                                                                                                   |
+| 9    | expected state not reached (workflow commands): `WAIT_TIMEOUT`, `INCIDENT`, `INSTANCE_ENDED`, `JOB_FAILED`, `CHECK_FAILED` |
 
 Camunda 7 engines report many rule violations as HTTP 500 (exit 7), e.g. a task that is already
 completed or a deployment that still has running instances. Read `engineMessage` and fix the cause
@@ -741,6 +852,9 @@ itself:
 - `--dry-run` previews a write before it is sent.
 - `operate api <METHOD> <path>` sends a raw request relative to the REST root with the same
   guards, output and errors, for anything the agent prefers to write by hand.
+- The workflow commands (`inspect`, `wait`, `advance`, `retry`, `deploy`, `status`) drive a
+  process instance without passing ids around; `operate wait` replaces `sleep`, and exit code 9
+  says that the process did not reach the expected state.
 - With OAuth, a person logs in once with `operate auth login`; agents never do. A command that
   needs a new login fails with `LOGIN_REQUIRED` (exit 4) and the hint names the command to run in
   a terminal; `operate auth status` tells an agent whether the login is usable.
@@ -777,7 +891,12 @@ The recipes use the variables `$INSTANCE_ID`, `$TASK_ID`, ... for ids from earli
 
 ### Deploy
 
+`operate deploy` sends only what changed and reports the versions in effect; `deployment create`
+is the raw operation.
+
 ```sh
+operate deploy src/main/resources
+operate deploy invoice.bpmn invoice-approval.dmn --start --business-key INV-1001 --var amount=250 --wait
 operate deployment create invoice.bpmn invoice-approval.dmn --deployment-name invoice
 operate deployment create bpmn/invoice.bpmn forms/approve.form --base-dir . --deploy-changed-only
 operate process-definition list --key invoice --latest-version
@@ -815,10 +934,14 @@ operate external-task handle-bpmn-error $EXTERNAL_TASK_ID --worker-id worker-1 -
 
 ### Incidents and job retries
 
-Failed job and external task incidents disappear when retries are set again; `incident resolve`
-only resolves custom incidents.
+Failed job and external task incidents disappear when retries are set again: `operate retry`
+does it for the root causes behind the incidents, and `--now` executes the jobs at once.
+`incident resolve` only resolves custom incidents.
 
 ```sh
+operate inspect $INSTANCE_ID --stacktrace
+operate retry $INSTANCE_ID --now
+operate retry --incident $INCIDENT_ID
 operate incident list --process-instance-id $INSTANCE_ID --fields id,incidentType,activityId,incidentMessage
 operate job list --process-instance-id $INSTANCE_ID --with-exception
 operate job get-stacktrace $JOB_ID
@@ -903,8 +1026,12 @@ npx tsx src/bin/operate.ts --help
 | `npm run test:mutation`    | Mutation testing with StrykerJS                                                    |
 | `npm run test:integration` | Build, then run the Testcontainers tests against real engines                      |
 
-`test:integration` runs all engines, each twice: the scenario suite without authentication and the
-Basic auth suite (`*-auth.it.test.ts`) against a second container with authentication enabled.
+`test:integration` runs all engines, each three times: the scenario suite without authentication,
+the Basic auth suite (`*-auth.it.test.ts`) against a second container with authentication enabled,
+and the workflow suite (`*-workflow.it.test.ts`) that drives the workflow commands through a
+process with a call activity, an external task, a message, a timer, a failing asynchronous job and
+a receive task. The OAuth suite (`oauth.it.test.ts`) runs once, against the first selected engine
+behind Keycloak and an Envoy JWT gateway.
 `OPERATE_IT_ENGINES=operaton,camunda` selects a comma separated subset (`operaton`, `cibseven`,
 `camunda`), and `OPERATE_IT_SKIP_PACK=1` skips the packed-tarball smoke test (`npm pack`,
 install, run).
@@ -1033,10 +1160,11 @@ release pull request branch) before merging the release pull request; the workfl
 ### Architecture
 
 ```text
-src/bin/        entry point and the Node runtime (fs, stdio, fetch, env)
+src/bin/        entry point and the Node runtime (I/O, timers, loopback server, browser, lock file)
 src/cli/        commander wiring and the utility commands; the only layer that imports commander
 src/operation/  input building, variables, dates, guards, request building, execution, pagination
-src/docs/       commands, describe, examples and the agent guide (pure)
+src/workflow/   the workflow commands: engine access, instance views, waiting, plans (pure)
+src/docs/       commands, describe, examples, workflow docs, completion and the agent guide (pure)
 src/catalog/    catalog access, schema helpers, body validation (pure)
 src/config/     config resolution and profile editing (pure), file store
 src/auth/       auth providers (none, basic, OAuth with token cache, refresh and login; pure)
@@ -1047,10 +1175,11 @@ test/           fakes for unit tests, Testcontainers integration tests
 ```
 
 dependency-cruiser enforces the layering: no cycles or orphans, only `src/bin` imports `src/cli`,
-only `src/cli` imports commander, the pure layers import no Node builtins, `http` does not depend
-on `config`, `cli` or `operation`, `config` does not depend on `auth`, only `operate auth login`
-can reach the interactive login (loopback server, browser), and the generated catalog is only
-read through `src/catalog/catalog.ts`.
+only `src/cli` imports commander and `src/workflow`, the pure layers import no Node builtins, `http`
+does not depend on `config`, `cli` or `operation`, `config` does not depend on `auth`, `workflow`
+does not depend on `cli`, `config`, `auth` or `bin`, only `operate auth login` can reach the
+interactive login (loopback server, browser), and the generated catalog is only read through
+`src/catalog/catalog.ts`.
 
 ### Quality gates
 
@@ -1066,8 +1195,8 @@ read through `src/catalog/catalog.ts`.
   the token cache, body validation and secret masking (also of every OAuth token and secret).
 - **StrykerJS** mutation testing (break threshold 65 %) on `main`, weekly and on demand.
 - **Testcontainers** integration tests against the three engines, with and without Basic auth,
-  behind a Keycloak and Envoy JWT gateway for OAuth, plus a packed-tarball smoke test, on every
-  pull request.
+  behind a Keycloak and Envoy JWT gateway for OAuth, through the workflow commands, plus a
+  packed-tarball smoke test, on every pull request.
 
 ## License
 

@@ -13,6 +13,7 @@ import { globalFromArgv, outputFromArgv, verboseRequested } from './argv.js';
 import type { CliState } from './context.js';
 import { commandPath } from './help.js';
 import { envFormat, profileFormat, terminalFormat } from './output-format.js';
+import { WORKFLOW_GROUP } from '../docs/workflow.js';
 import { didYouMean } from './commands/suggest.js';
 import { authFlagFor, mentionsSecret, optionName, secretHint, stdinHint } from './secret-flags.js';
 
@@ -104,6 +105,16 @@ function unknownOption(text: string, command: Command): OperateError {
   return usageError(`Unknown option "${name}"`, `${suggestions}${secret}${help}`);
 }
 
+/** `operate workflow <x>`: the workflow commands are top-level commands. */
+function workflowGroupError(argv: readonly string[]): OperateError {
+  const next = argv[argv.indexOf(WORKFLOW_GROUP.group) + 1];
+  const command = next === undefined || next.startsWith('-') ? '<command>' : next;
+  return usageError(
+    'Unknown command "workflow"',
+    `Workflow commands are top-level: operate ${command}. "operate commands workflow" lists them.`,
+  );
+}
+
 /**
  * commander's message without its `error: ` prefix and capitalized. Unknown commands and options
  * read `Unknown command "tsk"`; their suggestions (the same `closeNames` rule as everywhere) go
@@ -122,6 +133,7 @@ export function commanderUsageError(
     return usageError(capitalized(text), usageHint(command));
   }
   const name = unknownName(text);
+  if (name === WORKFLOW_GROUP.group) return workflowGroupError(argv);
   const suggestions = didYouMean(closeNames(name, subcommandNames(command)));
   return usageError(`Unknown command "${name}"`, `${suggestions}${commandsHint(command)}`);
 }

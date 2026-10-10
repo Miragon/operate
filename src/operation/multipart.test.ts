@@ -30,6 +30,8 @@ function fakeFs(files: Record<string, string>): FileSystem & { reads: string[] }
     mkdir: () => Promise.resolve(),
     exists: (path) => Promise.resolve(path in files),
     remove: () => Promise.resolve(false),
+    readdir: () => Promise.resolve([]),
+    kind: () => Promise.resolve('missing' as const),
   };
 }
 

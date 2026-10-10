@@ -10,6 +10,8 @@ import type { Runtime } from '../runtime.js';
  */
 export interface CliState {
   format?: OutputFormat;
+  /** The arguments of the run (`operate` left out): ready commands in hints keep the options. */
+  readonly argv?: readonly string[];
 }
 
 export interface CliContext {

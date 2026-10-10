@@ -87,7 +87,19 @@ export interface CommandRef {
   readonly listCommand?: string;
 }
 
-function notFoundHint(ref: CommandRef | undefined): string {
+/**
+ * `job execute` answers 404 also for a job that ran and failed (the job stays, with one retry
+ * less); only `No job found with id` means a missing job.
+ */
+const JOB_EXECUTE = 'job execute';
+const NO_JOB = 'No job found with id';
+const FAILED_JOB_HINT =
+  'The job ran and failed; the engine reports failures of job execute as 404. See `operate job get-stacktrace <id>` or `operate retry --incident <incident-id> --now`.';
+
+function notFoundHint(ref: CommandRef | undefined, engine: EngineError | undefined): string {
+  if (ref?.command === JOB_EXECUTE && engine?.message?.includes(NO_JOB) !== true) {
+    return FAILED_JOB_HINT;
+  }
   if (ref === undefined) {
     return 'Check the id or key. List existing resources with the `list` command of the group.';
   }
@@ -172,9 +184,36 @@ function statusHint(status: number, request: FailedRequest): string | undefined 
   return status >= 500 ? HINTS.server : undefined;
 }
 
+/** Longest error message a parse hint quotes. */
+const MAX_PARSE_MESSAGE = 200;
+
+/** The errors of the first resource of a ParseException's `details` (deployments). */
+function parseErrors(engine: EngineError): { resource: string; errors: Record<string, unknown>[] } {
+  const details = engine.data?.details;
+  const [resource = 'a resource', report] = isRecord(details)
+    ? (Object.entries(details)[0] ?? [])
+    : [];
+  const errors = isRecord(report) && Array.isArray(report.errors) ? report.errors : [];
+  return { resource, errors: (errors as unknown[]).filter(isRecord) };
+}
+
+/** `The engine could not parse x.bpmn: <first error> (line 5, column 72)`, pointing to data. */
+function parseHint(engine: EngineError): string {
+  const { resource, errors } = parseErrors(engine);
+  const [first] = errors;
+  const text = typeof first?.message === 'string' ? (first.message.split('\n')[0] ?? '') : '';
+  const message =
+    text.length > MAX_PARSE_MESSAGE ? `${text.slice(0, MAX_PARSE_MESSAGE - 1)}…` : text;
+  const where =
+    typeof first?.line === 'number' ? ` (line ${first.line}, column ${String(first.column)})` : '';
+  const more = errors.length > 1 ? ` and ${errors.length - 1} more` : '';
+  return `The engine could not parse ${resource}${message === '' ? '' : `: ${message}`}${where}${more}. Fix the file and deploy again; data.details lists every error with its line per resource.`;
+}
+
 /** Hints for engine errors that mean something else than their status suggests. */
 function engineHint(engine: EngineError | undefined): string | undefined {
   if (engine?.message !== undefined && UNKNOWN_ENGINE.test(engine.message)) return HINTS.engine;
+  if (engine?.type === 'ParseException') return parseHint(engine);
   return engine?.type === QUERY_PARAM_EXCEPTION ? HINTS.queryParam : undefined;
 }
 
@@ -187,7 +226,7 @@ function hintFor(
   const hint = statusHint(status, request) ?? engineHint(engine);
   if (hint !== undefined) return hint;
   if (status !== 404) return clientErrorHint(ref);
-  return isUnknownEndpoint(engine) ? HINTS.endpoint : notFoundHint(ref);
+  return isUnknownEndpoint(engine) ? HINTS.endpoint : notFoundHint(ref, engine);
 }
 
 function codeFor(status: number, engine: EngineError | undefined): ErrorCode {

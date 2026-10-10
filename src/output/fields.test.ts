@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { getPath, parseFieldList, project } from './fields.js';
+import { getPath, missingFields, parseFieldList, project } from './fields.js';
 
 const FORBIDDEN = ['__proto__', 'constructor', 'prototype'];
 
@@ -121,6 +121,21 @@ describe('getPath', () => {
   });
 });
 
+describe('missingFields', () => {
+  it('finds paths through nested lists and reports only what no element has', () => {
+    const view = { waitingAt: [{ activityId: 'a' }, { kind: 'k' }], findings: [] };
+    expect(
+      missingFields(view, ['waitingAt.activityId', 'waitingAt.kind', 'waitingAt.nope', 'nope']),
+    ).toEqual({ missing: ['waitingAt.nope', 'nope'], available: ['waitingAt', 'findings'] });
+    expect(missingFields([{ a: [{ b: 1 }] }, { c: 1 }], ['a.b', 'c', 'a.c']).missing).toEqual([
+      'a.c',
+    ]);
+    // an empty list cannot tell whether its objects would have the field
+    expect(missingFields(view, ['findings.code']).missing).toEqual([]);
+    expect(missingFields([], ['x'])).toEqual({ missing: [], available: [] });
+  });
+});
+
 describe('project', () => {
   it('returns the value itself without fields', () => {
     const data = { a: 1 };
@@ -159,6 +174,31 @@ describe('project', () => {
       [1],
       {},
     ]);
+  });
+
+  it('picks the rest of a path from every object of a nested list', () => {
+    const view = {
+      id: 'p1',
+      waitingAt: [
+        { activityId: 'approve', kind: 'userTask', taskId: 't1' },
+        { activityId: 'charge', kind: 'externalTask', topic: 'pay' },
+        'odd',
+      ],
+      findings: [],
+      nested: { list: [{ a: { b: 1, c: 2 } }, { a: 3 }] },
+    };
+    expect(
+      project(view, ['waitingAt.activityId', 'waitingAt.kind', 'findings.code', 'nested.list.a.b']),
+    ).toEqual({
+      waitingAt: [
+        { activityId: 'approve', kind: 'userTask' },
+        { activityId: 'charge', kind: 'externalTask' },
+        'odd',
+      ],
+      findings: [],
+      nested: { list: [{ a: { b: 1 } }, {}] },
+    });
+    expect(project(view, ['waitingAt', 'waitingAt.kind'])).toEqual({ waitingAt: view.waitingAt });
   });
 
   it('returns scalars unchanged', () => {

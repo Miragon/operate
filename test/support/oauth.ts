@@ -63,7 +63,7 @@ export function loginDeps(runtime: FakeRuntime, overrides: Partial<LoginDeps> = 
     randomBytes: (length) => runtime.randomBytes(length),
     listenLoopback: (port, handler) => runtime.listenLoopback(port, handler),
     openBrowser: (url) => runtime.openBrowser(url),
-    sleep: (ms) => runtime.sleep(ms),
+    deadline: (ms) => runtime.deadline(ms),
     stderr: runtime.stderr,
     ...overrides,
   };

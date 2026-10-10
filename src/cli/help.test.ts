@@ -91,6 +91,8 @@ describe('root help texts', () => {
       '  operate commands                    list the API groups',
       '  operate commands --search <text>    find a command',
       '  operate describe <group> <command>  options, body, responses, examples',
+      '  operate inspect <id>                where an instance waits and why',
+      '  operate status                      incidents, jobs and workers at a glance',
       '  operate guide                       usage guide for agents (markdown)',
     ]);
   });
@@ -105,7 +107,8 @@ describe('root help texts', () => {
 
   it('lists every exit code once, in order, with its meaning', () => {
     const lines = exitCodeLines();
-    expect(lines.map((line) => Number(line.trim().split(' ')[0]))).toEqual(
+    const entries = lines.filter((line) => /^ {2}\d/.test(line));
+    expect(entries.map((line) => Number(line.trim().split(' ')[0]))).toEqual(
       Object.values(EXIT_CODES).toSorted((left, right) => left - right),
     );
     expect(lines).toEqual([
@@ -118,6 +121,8 @@ describe('root help texts', () => {
       '  6  other 4xx: the engine rejected the request',
       '  7  engine error (5xx)',
       '  8  network error or timeout',
+      '  9  the process did not reach the expected state (WAIT_TIMEOUT, INCIDENT,',
+      '     INSTANCE_ENDED, JOB_FAILED, CHECK_FAILED)',
     ]);
   });
 
