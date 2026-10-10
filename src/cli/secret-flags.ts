@@ -1,11 +1,11 @@
 /**
- * Mistyped auth flags in commander errors (design §15). The password is never a flag, so the most
- * likely mistakes (`--auth-password=...`, `--auth-password-stdin <password>`) must not echo it on
- * stderr, into CI logs and agent transcripts. The flag names proposed in issue #1 point to the
- * `--auth-*` flags they became.
+ * Mistyped auth flags in commander errors (design §15, §16.2.2). Secrets are never flags, so the
+ * most likely mistakes (`--auth-password=...`, `--auth-password-stdin <password>`) must not echo
+ * them on stderr, into CI logs and agent transcripts. The flag names proposed in issues #1 and #2
+ * point to the `--auth-*` / `--oauth-*` flags they became.
  */
 
-/** Flag names that were renamed to the `--auth-*` flags, or are guessed for them. */
+/** Flag names that were renamed to the `--auth-*` / `--oauth-*` flags, or are guessed for them. */
 const AUTH_FLAGS: Readonly<Record<string, string>> = {
   '--username': '--auth-user',
   '--user': '--auth-user',
@@ -14,13 +14,19 @@ const AUTH_FLAGS: Readonly<Record<string, string>> = {
   '--password-env': '--auth-password-env',
   '--auth-password-file': '--auth-password-stdin',
   '--auth-type': '--auth',
+  '--issuer': '--oauth-issuer',
+  '--client-id': '--oauth-client-id',
+  '--client-secret': '--oauth-client-secret-env',
+  '--oauth-client-secret': '--oauth-client-secret-env',
+  '--scope': '--oauth-scopes',
+  '--scopes': '--oauth-scopes',
 };
 
 /** Option names that ask for a secret as their value. */
 const SECRET_NAME = /password|passwd|pwd|secret|token|-pass(?:$|-)/i;
 
 const SECRET_HINT =
-  'Secrets are never flag values: pipe the password into --auth-password-stdin, or set OPERATE_PASSWORD (a profile stores the name of a variable: config set --auth-password-env <VAR>); pass a token with OPERATE_HEADERS. ';
+  'Secrets are never flag values: pipe the password into --auth-password-stdin, or set OPERATE_PASSWORD (a profile stores the name of a variable: config set --auth-password-env <VAR>); pass a token with OPERATE_HEADERS; an OAuth token comes from `operate auth login`. ';
 
 const STDIN_HINT = `--auth-password-stdin takes no value: pipe the password into it, e.g. printf '%s\\n' "$PASSWORD" | operate ... --auth-password-stdin. `;
 
@@ -39,8 +45,16 @@ export function authFlagFor(name: string, known: readonly string[]): string[] {
   return known.filter((candidate) => candidate === flag);
 }
 
-/** A hint (with a trailing space) for an unknown option that looks like it wants a secret. */
+/** `--show-secrets` is no secret, but only some commands print credentials at all. */
+const SHOW_SECRETS_HINT =
+  '--show-secrets works where operate prints credentials: --dry-run and --verbose of API commands, api and ping, and config show. `operate auth` commands never print a token. ';
+
+/**
+ * A hint (with a trailing space) for an unknown option that looks like it wants a secret, or for
+ * `--show-secrets` on a command without it.
+ */
 export function secretHint(name: string): string {
+  if (name.toLowerCase() === '--show-secrets') return SHOW_SECRETS_HINT;
   return SECRET_NAME.test(name) ? SECRET_HINT : '';
 }
 

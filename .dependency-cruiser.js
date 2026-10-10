@@ -8,8 +8,11 @@
 /** Test code: colocated unit tests, integration tests and test support files. */
 const TEST_CODE = ['[.]test[.]ts$', '^test/'];
 
-/** Layers that must stay pure (no Node built-ins). */
-const PURE_LAYERS = '^src/(?:catalog|docs|output)/|^src/(?:errors|util)[.]ts$';
+/** Layers that must stay pure (no Node built-ins; WebCrypto and timers are globals). */
+const PURE_LAYERS = '^src/(?:auth|catalog|docs|output)/|^src/(?:errors|util)[.]ts$';
+
+/** The interactive OAuth login: loopback server, browser, callback pages. */
+const INTERACTIVE_LOGIN = '^src/auth/oauth/(?:login|callback|pages)[.]ts$';
 
 /** @type {import('dependency-cruiser').IConfiguration} */
 export default {
@@ -102,7 +105,7 @@ export default {
     {
       name: 'pure-layers-no-builtins',
       severity: 'error',
-      comment: 'catalog, docs, output, errors and util are pure: no Node built-in modules.',
+      comment: 'auth, catalog, docs, output, errors and util are pure: no Node built-in modules.',
       from: { path: PURE_LAYERS, pathNot: TEST_CODE },
       to: { dependencyTypes: ['core'] },
     },
@@ -119,6 +122,35 @@ export default {
       comment: 'src/docs may import from src/ only src/catalog/**, src/errors.ts and src/util.ts.',
       from: { path: '^src/docs/', pathNot: TEST_CODE },
       to: { path: '^src/', pathNot: '^src/(?:catalog|docs)/|^src/(?:errors|util)[.]ts$' },
+    },
+    {
+      name: 'auth-allowed-imports',
+      severity: 'error',
+      comment:
+        'src/auth may import from src/ only src/auth/**, src/config/**, src/http/{client,status,types}.ts, src/errors.ts, src/util.ts and src/runtime.ts.',
+      from: { path: '^src/auth/', pathNot: TEST_CODE },
+      to: {
+        path: '^src/',
+        pathNot:
+          '^src/(?:auth|config)/|^src/http/(?:client|status|types)[.]ts$|^src/(?:errors|util|runtime)[.]ts$',
+      },
+    },
+    {
+      name: 'config-not-to-auth',
+      severity: 'error',
+      comment: 'src/config never imports src/auth: authentication builds on the configuration.',
+      from: { path: '^src/config/', pathNot: TEST_CODE },
+      to: { path: '^src/auth/' },
+    },
+    {
+      name: 'interactive-login-only-from-auth-command',
+      severity: 'error',
+      comment:
+        'Only `operate auth login` may start a loopback server or a browser; operation commands, api and ping never start an interactive login (AI first).',
+      from: {
+        pathNot: [INTERACTIVE_LOGIN, '^src/cli/commands/auth[.]ts$', ...TEST_CODE],
+      },
+      to: { path: INTERACTIVE_LOGIN },
     },
     {
       name: 'http-not-to-config-cli-operation',

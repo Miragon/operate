@@ -85,7 +85,9 @@ async function apiRequest(
 async function runApi(rawMethod: string, rawPath: string, command: Command, context: CliContext) {
   const { runtime, catalog } = context;
   const options = command.opts<ApiOptions>();
-  const session = await openSession(context, readGlobals(command), options.body === '-');
+  const session = await openSession(context, readGlobals(command), {
+    bodyFromStdin: options.body === '-',
+  });
   const method = parseMethod(rawMethod);
   const { path, query } = parseApiPath(rawPath);
   const operation = findOperationByPath(catalog, method, path);
@@ -93,7 +95,7 @@ async function runApi(rawMethod: string, rawPath: string, command: Command, cont
   const request = await apiRequest({ method, path, query, operation }, options, session, context);
   const client = clientOf(session, runtime);
   const result: OperationResult = session.globals.dryRun
-    ? { kind: 'dry-run', request: dryRunPreview(request, client.auth) }
+    ? await dryRunPreview(request, client.auth)
     : await sendRequest(
         request,
         client,

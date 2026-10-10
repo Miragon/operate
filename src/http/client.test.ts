@@ -165,6 +165,16 @@ describe('send', () => {
       expect(calls).toHaveLength(1);
     });
 
+    it('propagates an error of refresh() instead of the 401', async () => {
+      const { fetch, calls } = fakeFetch(json(401));
+      const failure = new OperateError('LOGIN_REQUIRED', 'revoked');
+      const refresh = vi.fn(() => Promise.reject(failure));
+      await expect(send(REQUEST, options(fetch, { auth: { ...noAuth(), refresh } }))).rejects.toBe(
+        failure,
+      );
+      expect(calls).toHaveLength(1);
+    });
+
     it.each([200, 400, 403, 404, 500])('does not refresh after status %i', async (status) => {
       const { fetch, calls } = fakeFetch(json(status));
       const refresh = vi.fn(() => Promise.resolve(true));

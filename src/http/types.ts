@@ -32,4 +32,12 @@ export type TraceEvent =
       readonly durationMs: number;
       /** Size of the response body. */
       readonly bytes: number;
+    }
+  | {
+      /**
+       * A decision without an answer of its own, printed as `* <message>` (like `curl -v`): e.g. a
+       * failed token refresh after which the still valid token is used.
+       */
+      readonly type: 'note';
+      readonly message: string;
     };

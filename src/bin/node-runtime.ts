@@ -1,6 +1,7 @@
 /**
  * The Runtime on Node.js: process streams (a closed pipe such as `| head` ends output quietly),
- * stdin, the file system, fetch and the environment.
+ * stdin, the file system, fetch, the environment, and for OAuth random bytes, the loopback
+ * server, the browser, the lock file and timers.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -9,6 +10,12 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { usageError } from '../errors.js';
 import type { FileSystem, OutputStream, Runtime } from '../runtime.js';
+import { openBrowser } from './browser.js';
+import { withLock } from './lock.js';
+import { listenLoopback } from './loopback.js';
+
+/** Largest request of `crypto.getRandomValues`. */
+const RANDOM_CHUNK = 65_536;
 
 function errorCode(error: unknown): unknown {
   return typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
@@ -118,17 +125,46 @@ async function writePrivateFile(path: string, data: string | Uint8Array, mode: n
   }
 }
 
+/** Removes a file; false when it did not exist. */
+async function remove(path: string): Promise<boolean> {
+  try {
+    await rm(path);
+    return true;
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 const nodeFileSystem: FileSystem = {
   readFile: async (path) => new Uint8Array(await readFile(path)),
   async writeFile(path, data, options) {
     const mode = options?.mode;
     await (mode === undefined ? writeFile(path, data) : writePrivateFile(path, data, mode));
   },
-  async mkdir(path) {
-    await mkdir(path, { recursive: true });
+  async mkdir(path, options) {
+    await mkdir(path, {
+      recursive: true,
+      ...(options?.mode === undefined ? {} : { mode: options.mode }),
+    });
   },
   exists,
+  remove,
 };
+
+/** Cryptographically strong random bytes from WebCrypto, in chunks it accepts. */
+function strongRandomBytes(length: number): Uint8Array {
+  const bytes = new Uint8Array(length);
+  for (let offset = 0; offset < length; offset += RANDOM_CHUNK) {
+    crypto.getRandomValues(bytes.subarray(offset, Math.min(length, offset + RANDOM_CHUNK)));
+  }
+  return bytes;
+}
+
+/** Resolves after `ms` without keeping the process alive. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms).unref());
+}
 
 export function createNodeRuntime(): Runtime {
   return {
@@ -141,5 +177,10 @@ export function createNodeRuntime(): Runtime {
     homedir: homedir(),
     platform: process.platform,
     now: () => Date.now(),
+    randomBytes: strongRandomBytes,
+    listenLoopback,
+    openBrowser: (url) => openBrowser(url, process.env, process.platform),
+    withLock,
+    sleep,
   };
 }

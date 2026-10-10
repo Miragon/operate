@@ -73,7 +73,8 @@ export const GLOBAL_OPTIONS: readonly GlobalOptionSpec[] = [
   {
     long: 'auth',
     value: '<type>',
-    description: 'Authentication: none or basic; a username alone selects basic (env OPERATE_AUTH)',
+    description:
+      'Authentication: none, basic or oauth; a username alone selects basic (env OPERATE_AUTH)',
   },
   {
     long: 'auth-user',

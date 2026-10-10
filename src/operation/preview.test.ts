@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { basicAuth } from '../auth/basic.js';
 import { noAuth } from '../auth/none.js';
 import { dryRunPreview, previewRequest } from './preview.js';
@@ -47,23 +47,43 @@ describe('previewRequest', () => {
 describe('dryRunPreview', () => {
   const request = { method: 'GET', url: 'http://h/x', headers: { Accept: 'application/json' } };
 
-  it('adds the headers a provider knows without network access', () => {
+  it('adds the headers a provider knows without network access', async () => {
     const basic = basicAuth({
       type: 'basic',
       username: 'demo',
       password: 'demo',
       sources: { username: 'flag', password: 'flag' },
     });
-    expect(dryRunPreview(request, basic)).toEqual({
-      ...request,
-      headers: { Accept: 'application/json', Authorization: 'Basic ZGVtbzpkZW1v' },
+    await expect(dryRunPreview(request, basic)).resolves.toEqual({
+      kind: 'dry-run',
+      request: {
+        ...request,
+        headers: { Accept: 'application/json', Authorization: 'Basic ZGVtbzpkZW1v' },
+      },
     });
     expect(request.headers).toEqual({ Accept: 'application/json' });
   });
 
-  it('adds nothing for providers without preview headers', () => {
-    expect(dryRunPreview(request, noAuth())).toEqual(request);
-    const token = { type: 'oauth', headers: () => Promise.resolve({ Authorization: 'Bearer t' }) };
-    expect(dryRunPreview(request, token)).toEqual(request);
+  it('adds nothing for providers without a preview, and never calls headers()', async () => {
+    await expect(dryRunPreview(request, noAuth())).resolves.toEqual({ kind: 'dry-run', request });
+    const headers = vi.fn(() => Promise.resolve({ Authorization: 'Bearer t' }));
+    await expect(dryRunPreview(request, { type: 'x', headers })).resolves.toEqual({
+      kind: 'dry-run',
+      request,
+    });
+    expect(headers).not.toHaveBeenCalled();
+  });
+
+  it('passes the note of the provider on', async () => {
+    const provider = {
+      type: 'oauth',
+      headers: () => Promise.reject(new Error('no network in a dry run')),
+      preview: () => Promise.resolve({ headers: {}, note: 'Not logged in' }),
+    };
+    await expect(dryRunPreview(request, provider)).resolves.toEqual({
+      kind: 'dry-run',
+      request,
+      note: 'Not logged in',
+    });
   });
 });

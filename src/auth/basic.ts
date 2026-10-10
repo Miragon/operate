@@ -8,8 +8,8 @@ import type { AuthProvider } from './types.js';
 
 const encoder = new TextEncoder();
 
-/** Standard Base64 of the UTF-8 encoding of `text`. */
-function base64(text: string): string {
+/** Standard Base64 of the UTF-8 encoding of `text` (also for OAuth client credentials). */
+export function base64(text: string): string {
   let binary = '';
   for (const byte of encoder.encode(text)) binary += String.fromCharCode(byte);
   return btoa(binary);
@@ -32,7 +32,7 @@ export function basicAuth(config: BasicAuthConfig): AuthProvider {
   return {
     type: 'basic',
     headers: () => Promise.resolve(headers),
-    previewHeaders: () => headers,
+    preview: () => Promise.resolve({ headers }),
     principal: { user: config.username, source: credentialSource(config.sources) },
   };
 }

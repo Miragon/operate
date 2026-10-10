@@ -206,7 +206,7 @@ const CONFIG_FLAGS: Flags = withFlags(OUTPUT_FLAGS, {
   auth: {
     takesValue: true,
     check: (value) => {
-      expect(['none', 'basic']).toContain(value);
+      expect(['none', 'basic', 'oauth']).toContain(value);
     },
   },
   'auth-user': {
@@ -222,6 +222,13 @@ const CONFIG_FLAGS: Flags = withFlags(OUTPUT_FLAGS, {
     },
   },
   'auth-password-stdin': { takesValue: false },
+  'oauth-issuer': {
+    takesValue: true,
+    check: (value) => {
+      expect(value).toMatch(/^https:\/\/[^@?#]+$/);
+    },
+  },
+  'oauth-client-id': { takesValue: true },
   timeout: { takesValue: true },
   header: {
     takesValue: true,
@@ -348,7 +355,8 @@ describe('the command line checker', () => {
     expect(ok('operate commands --effect remove')).toThrow();
     expect(ok('operate describe task nothing')).toThrow();
     expect(ok('operate config set')).toThrow();
-    expect(ok('operate config set p --auth oauth')).toThrow();
+    expect(ok('operate config set p --auth digest')).toThrow();
+    expect(ok('operate config set p --oauth-issuer http://login.example.com')).toThrow();
     expect(ok('operate config set p --auth-password-env MY-VAR')).toThrow();
     expect(ok('operate config set p --auth-user a:b')).toThrow();
     expect(ok('operate config rename a b')).toThrow();

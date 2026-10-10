@@ -9,6 +9,13 @@ import { changedAuth, settleAuthorization } from './auth-edit.js';
 import { configError } from './config-error.js';
 import { parseHeaders } from './headers.js';
 import {
+  type OAuthChanges,
+  OAUTH_UNSET_KEYS,
+  oauthUnsetKeys,
+  withoutAuthKeys,
+} from './oauth-edit.js';
+import { PROFILE_NAME } from './syntax.js';
+import {
   findProfile,
   missingProfileError,
   parseTimeout,
@@ -17,7 +24,9 @@ import {
   validateUrl,
 } from './resolve.js';
 import {
+  type AuthConfig,
   type ConfigFile,
+  type OAuthConfig,
   type OutputFormat,
   PROFILE_KEYS,
   type Profile,
@@ -26,10 +35,10 @@ import {
   type Source,
 } from './types.js';
 
-export interface ProfileChanges {
+export interface ProfileChanges extends OAuthChanges {
   readonly url?: string;
   readonly engine?: string;
-  /** Auth type: none or basic. */
+  /** Auth type: none, basic or oauth. */
   readonly auth?: string;
   /** Basic auth username. */
   readonly authUser?: string;
@@ -61,10 +70,23 @@ interface ConfigValue<T> {
   readonly source: Source;
 }
 
+/** The OAuth rows of `config show`, only for auth type oauth. */
+interface OAuthValues {
+  readonly issuer: ConfigValue<string | null>;
+  readonly authorizationEndpoint: ConfigValue<string | null>;
+  readonly tokenEndpoint: ConfigValue<string | null>;
+  readonly clientId: ConfigValue<string>;
+  readonly clientSecret: ConfigValue<string | null>;
+  readonly scopes: ConfigValue<readonly string[]>;
+  readonly audience: ConfigValue<string | null>;
+  readonly redirectPort: ConfigValue<number>;
+}
+
 /**
  * Output of `operate config show`: every effective value with its source (`auth` is the type,
- * `username` and `password` the Basic auth credentials). Header values and the password are not
- * masked here; the CLI masks them unless --show-secrets is given.
+ * `username` and `password` the Basic auth credentials, the OAuth settings only for type oauth).
+ * Header values, the password and the client secret are not masked here; the CLI masks them
+ * unless --show-secrets is given.
  */
 export interface ConfigView {
   readonly configFile: string;
@@ -75,14 +97,13 @@ export interface ConfigView {
     readonly auth: ConfigValue<string>;
     readonly username: ConfigValue<string | null>;
     readonly password: ConfigValue<string | null>;
-    readonly output: ConfigValue<OutputFormat | null>;
-    readonly timeout: ConfigValue<number>;
-    readonly headers: ConfigValue<Readonly<Record<string, string>>>;
-    readonly readOnly: ConfigValue<boolean>;
-  };
+  } & Partial<OAuthValues> & {
+      readonly output: ConfigValue<OutputFormat | null>;
+      readonly timeout: ConfigValue<number>;
+      readonly headers: ConfigValue<Readonly<Record<string, string>>>;
+      readonly readOnly: ConfigValue<boolean>;
+    };
 }
-
-const PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /** Accepted spellings for `config unset` besides the profile keys themselves. */
 const KEY_ALIASES: Readonly<Record<string, ProfileKey>> = {
@@ -171,12 +192,19 @@ function profileKey(key: string): ProfileKey {
   const wanted = KEY_ALIASES[key] ?? key;
   const known = PROFILE_KEYS.find((candidate) => candidate === wanted);
   if (known === undefined) {
-    throw configError(`Unknown profile key "${key}"`, `Valid keys: ${PROFILE_KEYS.join(', ')}.`);
+    throw configError(
+      `Unknown profile key "${key}"`,
+      `Valid keys: ${PROFILE_KEYS.join(', ')}; OAuth settings: ${OAUTH_UNSET_KEYS.join(', ')}.`,
+    );
   }
   return known;
 }
 
-/** Removes keys from a profile. Unknown key names fail; keys the profile does not set are ignored. */
+/**
+ * Removes keys from a profile: profile keys, or single OAuth settings of its auth object
+ * (`audience`, `clientSecret`, ...; `auth` removes all auth settings). Unknown key names fail;
+ * keys the profile does not set are ignored.
+ */
 export function unsetProfileKeys(
   file: ConfigFile | undefined,
   name: string,
@@ -184,9 +212,15 @@ export function unsetProfileKeys(
 ): ConfigFile {
   const current = file ?? EMPTY;
   const profile = requireProfile(current, name);
-  const removed = new Set<string>(keys.map(profileKey));
-  const kept = Object.fromEntries(Object.entries(profile).filter(([key]) => !removed.has(key)));
-  return buildFile({ ...current.profiles, [name]: kept }, current.defaultProfile);
+  const oauth = keys.flatMap((key) => oauthUnsetKeys(key) ?? []);
+  const plain = keys.filter((key) => oauthUnsetKeys(key) === undefined);
+  const removed = new Set<string>(plain.map(profileKey));
+  const { auth, ...kept }: Profile = Object.fromEntries(
+    Object.entries(profile).filter(([key]) => !removed.has(key)),
+  );
+  const rest = withoutAuthKeys(auth, oauth);
+  const edited = canonical(rest === undefined ? kept : { ...kept, auth: rest });
+  return buildFile({ ...current.profiles, [name]: edited }, current.defaultProfile);
 }
 
 /** Makes an existing profile the default profile. */
@@ -229,10 +263,42 @@ export function listProfiles(file: ConfigFile | undefined): ProfileSummary[] {
 
 const NOT_SET = { value: null, source: 'default' } as const;
 
+function optionalValue<T>(value: T | undefined, source: Source | undefined): ConfigValue<T | null> {
+  return value === undefined || source === undefined ? NOT_SET : { value, source };
+}
+
+/** The OAuth rows of `config show`; endpoints that are not set are null with source default. */
+function oauthValues(oauth: OAuthConfig): OAuthValues {
+  const { sources } = oauth;
+  return {
+    issuer: optionalValue(oauth.issuer, sources.endpoints),
+    authorizationEndpoint: optionalValue(oauth.authorizationEndpoint, sources.endpoints),
+    tokenEndpoint: optionalValue(oauth.tokenEndpoint, sources.endpoints),
+    clientId: { value: oauth.clientId, source: sources.clientId },
+    clientSecret: optionalValue(oauth.clientSecret, sources.clientSecret),
+    scopes: { value: oauth.scopes, source: sources.scopes },
+    audience: optionalValue(oauth.audience, sources.audience),
+    redirectPort: { value: oauth.redirectPort, source: sources.redirectPort },
+  };
+}
+
+function credentialValues(auth: AuthConfig) {
+  if (auth.type !== 'basic') {
+    return {
+      username: NOT_SET,
+      password: NOT_SET,
+      ...(auth.type === 'oauth' ? oauthValues(auth) : {}),
+    };
+  }
+  return {
+    username: { value: auth.username, source: auth.sources.username },
+    password: { value: auth.password, source: auth.sources.password },
+  };
+}
+
 /** The effective configuration with the source of every value. */
 export function showConfig(resolved: ResolvedConfig, configFile: string): ConfigView {
   const { sources, auth } = resolved;
-  const basic = auth.type === 'basic' ? auth : undefined;
   return {
     configFile,
     profile: resolved.profile ?? null,
@@ -240,10 +306,7 @@ export function showConfig(resolved: ResolvedConfig, configFile: string): Config
       url: { value: resolved.url, source: sources.url },
       engine: { value: resolved.engine ?? null, source: sources.engine },
       auth: { value: auth.type, source: sources.auth },
-      username:
-        basic === undefined ? NOT_SET : { value: basic.username, source: basic.sources.username },
-      password:
-        basic === undefined ? NOT_SET : { value: basic.password, source: basic.sources.password },
+      ...credentialValues(auth),
       output: { value: resolved.output ?? null, source: sources.output },
       timeout: { value: resolved.timeoutMs, source: sources.timeout },
       headers: { value: resolved.headers, source: sources.headers },

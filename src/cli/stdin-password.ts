@@ -1,6 +1,7 @@
 /**
  * `--auth-password-stdin`: the Basic auth password is the first line of stdin, so it never shows
- * up in the shell history or the process list. operate never prompts for it.
+ * up in the shell history or the process list. operate never prompts for it. `config set
+ * --oauth-client-secret-stdin` reads an OAuth client secret the same way.
  */
 
 import { usageError } from '../errors.js';
@@ -10,13 +11,27 @@ const PIPE_EXAMPLE = `printf '%s\\n' "$PASSWORD" | operate ... --auth-password-s
 
 const LINE_FEED = 0x0a;
 
+/** A secret read from stdin: the flag that reads it and what it is, for messages. */
+export interface StdinSecret {
+  readonly flag: string;
+  readonly noun: string;
+  /** A command line that pipes the secret into the command. */
+  readonly example: string;
+}
+
+const PASSWORD: StdinSecret = {
+  flag: '--auth-password-stdin',
+  noun: 'password',
+  example: PIPE_EXAMPLE,
+};
+
 /**
  * The first line of `data` without its line break (LF, CRLF or a trailing CR). Only that line is
  * decoded (a UTF-8 sequence never contains the byte of LF). Bytes that are not UTF-8, e.g. a
  * Latin-1 password file, are a usage error: replaced characters would send wrong credentials, and
  * engines lock a user after repeated failed logins. The error never quotes the bytes.
  */
-export function firstLine(data: Uint8Array): string {
+export function firstLine(data: Uint8Array, secret: StdinSecret = PASSWORD): string {
   const end = data.indexOf(LINE_FEED);
   let line: string;
   try {
@@ -24,8 +39,8 @@ export function firstLine(data: Uint8Array): string {
     line = new TextDecoder('utf-8', { fatal: true }).decode(end < 0 ? data : data.subarray(0, end));
   } catch {
     throw usageError(
-      '--auth-password-stdin read bytes that are not valid UTF-8',
-      'Re-encode the password as UTF-8, e.g. with iconv -f latin1 -t utf-8; operate sends it UTF-8 encoded.',
+      `${secret.flag} read bytes that are not valid UTF-8`,
+      `Re-encode the ${secret.noun} as UTF-8, e.g. with iconv -f latin1 -t utf-8; operate sends it UTF-8 encoded.`,
     );
   }
   return line.replace(/\r+$/, '');
@@ -41,13 +56,16 @@ export function checkStdinUse(passwordFromStdin: boolean, bodyFromStdin: boolean
   }
 }
 
-/** Reads the password; a blank first line is a usage error. */
-export async function readStdinPassword(runtime: Runtime): Promise<string> {
-  const password = firstLine(await runtime.readStdin());
+/** Reads the password (or another secret); a blank first line is a usage error. */
+export async function readStdinPassword(
+  runtime: Runtime,
+  secret: StdinSecret = PASSWORD,
+): Promise<string> {
+  const password = firstLine(await runtime.readStdin(), secret);
   if (password.trim() === '') {
     throw usageError(
-      '--auth-password-stdin read an empty password',
-      `Pipe the password into the command, e.g. ${PIPE_EXAMPLE}.`,
+      `${secret.flag} read an empty ${secret.noun}`,
+      `Pipe the ${secret.noun} into the command, e.g. ${secret.example}.`,
     );
   }
   return password;

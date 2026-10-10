@@ -8,6 +8,7 @@ import { jsonErrorPosition } from './json-position.js';
 import { profileAuthProblem } from './auth.js';
 import { configError } from './config-error.js';
 import { isHeaderName, isHeaderValue } from './headers.js';
+import { PROFILE_NAME } from './syntax.js';
 import { MAX_TIMEOUT_MS, isEngineName, isTimeout } from './resolve.js';
 import {
   type ConfigFile,
@@ -36,25 +37,70 @@ export function explicitConfigPath(env: Env, flag?: string): string | undefined 
   return given(flag) ?? given(env[ENV.config]);
 }
 
+interface Location {
+  readonly homedir: string;
+  readonly platform: string;
+}
+
+function pathModule(platform: string): typeof posix {
+  return platform === 'win32' ? win32 : posix;
+}
+
+/** The platform's operate config directory (never derived from `--config` / OPERATE_CONFIG). */
+function operateDirectory(env: Env, location: Location): string {
+  if (location.platform === 'win32') {
+    const appData =
+      absoluteDir(env.APPDATA, win32) ?? win32.join(location.homedir, 'AppData', 'Roaming');
+    return win32.join(appData, 'operate');
+  }
+  const configHome =
+    absoluteDir(env.XDG_CONFIG_HOME, posix) ?? posix.join(location.homedir, '.config');
+  return posix.join(configHome, 'operate');
+}
+
 /**
  * Config file location: `--config` > OPERATE_CONFIG > $XDG_CONFIG_HOME/operate/config.json >
  * ~/.config/operate/config.json; on Windows %APPDATA%\operate\config.json.
  */
-export function configFilePath(
-  env: Env,
-  location: { readonly homedir: string; readonly platform: string },
-  explicit?: string,
-): string {
+export function configFilePath(env: Env, location: Location, explicit?: string): string {
   const chosen = explicitConfigPath(env, explicit);
   if (chosen !== undefined) return chosen;
-  if (location.platform === 'win32') {
-    const appData =
-      absoluteDir(env.APPDATA, win32) ?? win32.join(location.homedir, 'AppData', 'Roaming');
-    return win32.join(appData, 'operate', 'config.json');
-  }
-  const configHome =
-    absoluteDir(env.XDG_CONFIG_HOME, posix) ?? posix.join(location.homedir, '.config');
-  return posix.join(configHome, 'operate', 'config.json');
+  return pathModule(location.platform).join(operateDirectory(env, location), 'config.json');
+}
+
+/**
+ * The OAuth token cache directory (design §16.5): $XDG_CONFIG_HOME/operate/tokens >
+ * ~/.config/operate/tokens; on Windows %APPDATA%\operate\tokens. Never next to a config file
+ * named by `--config` or OPERATE_CONFIG: a project-local (possibly committed) config file must not
+ * get token files beside it.
+ */
+export function tokenDirectory(env: Env, location: Location): string {
+  return pathModule(location.platform).join(operateDirectory(env, location), 'tokens');
+}
+
+/** UTF-16 code units a token cache file name does not keep. */
+const ENCODED = /[^A-Za-z0-9._-]/g;
+
+/** `%XX` for a code unit below 256, else `%uXXXX`; `%` itself included, so it is injective. */
+function encodedUnit(unit: string): string {
+  const code = unit.charCodeAt(0);
+  const hex = code.toString(16).toUpperCase();
+  return code < 0x100 ? `%${hex.padStart(2, '0')}` : `%u${hex.padStart(4, '0')}`;
+}
+
+/**
+ * The token cache file of a profile; the prefix avoids Windows device names such as `con`.
+ * Profile names are validated (`PROFILE_NAME`), and every other character is encoded as well,
+ * so the name is always one file directly inside the token directory (no `/`, `\`, `..`, `:`),
+ * whatever reaches this function.
+ */
+export function profileTokenFile(profile: string): string {
+  return `profile-${profile.replace(ENCODED, encodedUnit)}.json`;
+}
+
+/** A file of the token directory (win32 or posix join). */
+export function tokenPath(directory: string, fileName: string, platform: string): string {
+  return pathModule(platform).join(directory, fileName);
 }
 
 function fail(path: string, problem: string): never {
@@ -115,7 +161,16 @@ function valueProblem(name: string, key: ProfileKey, value: unknown): string | u
     : `profile "${name}" has an invalid ${key} (expected ${expected})`;
 }
 
+/** A profile name as JSON (control characters escaped: the file may come from anywhere). */
+function quoted(name: string): string {
+  return JSON.stringify(name);
+}
+
+const NAME_RULE =
+  'use letters, digits, ".", "_" and "-", starting with a letter or digit; rename it in the file';
+
 function validateProfile(name: string, value: unknown, path: string): Profile {
+  if (!PROFILE_NAME.test(name)) fail(path, `invalid profile name ${quoted(name)} (${NAME_RULE})`);
   if (!isRecord(value)) fail(path, `profile "${name}" must be an object`);
   checkKeys(value, PROFILE_KEYS, `profile "${name}"`, path);
   for (const key of PROFILE_KEYS) {
@@ -136,6 +191,16 @@ function syntaxProblem(text: string): string {
     : `not valid JSON (line ${position.line}, column ${position.column})`;
 }
 
+/** defaultProfile: a string; blank means none, anything else must be a valid profile name. */
+function checkDefaultProfile(value: unknown, path: string): asserts value is string | undefined {
+  if (value === undefined) return;
+  if (typeof value !== 'string') fail(path, 'defaultProfile must be a string');
+  const name = value.trim();
+  if (name !== '' && !PROFILE_NAME.test(name)) {
+    fail(path, `invalid defaultProfile ${quoted(name)} (${NAME_RULE})`);
+  }
+}
+
 export function parseConfigFile(text: string, path: string): ConfigFile {
   let parsed: unknown;
   try {
@@ -146,9 +211,7 @@ export function parseConfigFile(text: string, path: string): ConfigFile {
   if (!isRecord(parsed)) fail(path, 'expected a JSON object');
   checkKeys(parsed, ROOT_KEYS, 'the root object', path);
   const { defaultProfile, profiles = {} } = parsed;
-  if (defaultProfile !== undefined && typeof defaultProfile !== 'string') {
-    fail(path, 'defaultProfile must be a string');
-  }
+  checkDefaultProfile(defaultProfile, path);
   if (!isRecord(profiles)) fail(path, 'profiles must be an object');
   return {
     ...(defaultProfile === undefined ? {} : { defaultProfile }),

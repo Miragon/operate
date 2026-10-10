@@ -74,7 +74,9 @@ async function runOperation(
 ): Promise<void> {
   const { runtime } = context;
   const values = commandValues(command, registered);
-  const session = await openSession(context, readGlobals(command), values.flags.body === '-');
+  const session = await openSession(context, readGlobals(command), {
+    bodyFromStdin: values.flags.body === '-',
+  });
   const input = await buildInput(operation, values, {
     fs: runtime.fs,
     readStdin: () => runtime.readStdin(),

@@ -40,13 +40,7 @@ export async function executeOperation(
   const paginate = options.all && isPaginated(operation);
   if (options.dryRun) {
     const pageInput = paginate ? firstPageInput(input) : input;
-    return {
-      kind: 'dry-run',
-      request: dryRunPreview(
-        buildRequest(operation, pageInput, options.target),
-        options.client.auth,
-      ),
-    };
+    return dryRunPreview(buildRequest(operation, pageInput, options.target), options.client.auth);
   }
   if (paginate) return fetchAllPages(operation, input, options);
   return sendRequest(buildRequest(operation, input, options.target), options.client, options.ref);

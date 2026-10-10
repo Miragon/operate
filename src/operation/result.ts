@@ -15,7 +15,12 @@ export type MultipartPartPreview =
   | { readonly name: string; readonly fileName: string; readonly bytes: number };
 
 export type OperationResult =
-  | { readonly kind: 'dry-run'; readonly request: RequestPreview }
+  | {
+      readonly kind: 'dry-run';
+      readonly request: RequestPreview;
+      /** Printed to stderr as `Note: <note>`, e.g. that the OAuth login is missing. */
+      readonly note?: string;
+    }
   | {
       readonly kind: 'json';
       readonly status: number;

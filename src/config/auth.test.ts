@@ -23,20 +23,18 @@ const CONTROL_HINT =
   'Remove line breaks, tabs, NUL and other control characters; Basic auth (RFC 7617) does not allow them.';
 
 describe('validateAuthType', () => {
-  it.each(['none', 'basic'] as const)('accepts %s', (type) => {
+  it.each(['none', 'basic', 'oauth'] as const)('accepts %s', (type) => {
     expect(validateAuthType(type)).toBe(type);
   });
 
-  it.each(['oauth', 'NONE', 'Basic', '', 'constructor'])(
-    'rejects %j and links the planned OAuth issue',
+  it.each(['OAuth', 'NONE', 'Basic', '', 'constructor'])(
+    'rejects %j and names the supported types',
     (type) => {
       const error = failure(() => validateAuthType(type));
       expect(error.code).toBe('CONFIG');
       expect(error.exitCode).toBe(3);
       expect(error.message).toBe(`Unsupported auth type "${type}"`);
-      expect(error.details.hint).toBe(
-        'Supported: none, basic. OAuth authorization code (https://github.com/Miragon/operate/issues/2) is planned.',
-      );
+      expect(error.details.hint).toBe('Supported: none, basic, oauth.');
     },
   );
 });
@@ -133,8 +131,9 @@ describe('profileAuthProblem', () => {
       { type: 'none' },
       { type: 'basic', username: 'demo', passwordEnv: 'CAMUNDA_PASSWORD' },
       { username: 'demo', password: 'demo' },
-      // the type is validated during resolution, with the supported types in the hint
       { type: 'oauth' },
+      // the type is validated during resolution, with the supported types in the hint
+      { type: 'digest' },
     ]) {
       expect(profileAuthProblem('p', auth)).toBeUndefined();
     }
@@ -145,7 +144,7 @@ describe('profileAuthProblem', () => {
       'profile "prod" has an invalid auth (expected {"type": "basic", "username": "demo", "passwordEnv": "CAMUNDA_PASSWORD"})',
     );
     expect(profileAuthProblem('prod', { username: 'x', token: 'abc' })).toBe(
-      'unknown key(s) token in the auth of profile "prod" (allowed: type, username, passwordEnv, password)',
+      'unknown key(s) token in the auth of profile "prod" (allowed: type, username, passwordEnv, password, issuer, authorizationEndpoint, tokenEndpoint, clientId, clientSecretEnv, clientSecret, scopes, audience, redirectPort)',
     );
     expect(profileAuthProblem('prod', { username: 7 })).toBe(
       'profile "prod" has an invalid auth.username (expected a non-empty string)',

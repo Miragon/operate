@@ -3,7 +3,7 @@
 import type { AuthProvider } from '../auth/types.js';
 import type { HttpRequest } from '../http/types.js';
 import { mergeHeaders, parseJson } from '../util.js';
-import type { MultipartPartPreview, RequestPreview } from './result.js';
+import type { MultipartPartPreview, OperationResult, RequestPreview } from './result.js';
 
 /** The JSON body as value (large integers kept), or the text when it is not JSON. */
 function bodyValue(text: string): unknown {
@@ -28,10 +28,16 @@ export function previewRequest(request: HttpRequest): RequestPreview {
 }
 
 /**
- * The `--dry-run` preview: the request with the auth headers the provider knows without network
- * access (Basic). The output layer masks them unless --show-secrets.
+ * The `--dry-run` result: the request with the auth headers the provider knows without network
+ * access, refresh or lock (Basic, a cached OAuth token), plus the provider's note (e.g. "not
+ * logged in"). The output layer masks the headers unless --show-secrets.
  */
-export function dryRunPreview(request: HttpRequest, auth: AuthProvider): RequestPreview {
-  const headers = auth.previewHeaders?.() ?? {};
-  return previewRequest({ ...request, headers: mergeHeaders(request.headers, headers) });
+export async function dryRunPreview(
+  request: HttpRequest,
+  auth: AuthProvider,
+): Promise<Extract<OperationResult, { kind: 'dry-run' }>> {
+  const preview = (await auth.preview?.()) ?? { headers: {} };
+  const merged = { ...request, headers: mergeHeaders(request.headers, preview.headers) };
+  const result = { kind: 'dry-run', request: previewRequest(merged) } as const;
+  return preview.note === undefined ? result : { ...result, note: preview.note };
 }

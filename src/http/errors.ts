@@ -106,7 +106,7 @@ const UNKNOWN_ENGINE = /^(?:No process engine|Process engine \S+ not) available$
 
 const HINTS = {
   unauthenticated:
-    "Use Basic auth: --auth basic --auth-user <name> with the password piped into --auth-password-stdin, OPERATE_USERNAME and OPERATE_PASSWORD, or a profile: `operate config set <profile> --auth basic --auth-user <name> --auth-password-env <VAR>`. For a token, pass -H 'Authorization: Bearer <token>' or OPERATE_HEADERS.",
+    "Use Basic auth: --auth basic --auth-user <name> with the password piped into --auth-password-stdin, OPERATE_USERNAME and OPERATE_PASSWORD, or a profile: `operate config set <profile> --auth basic --auth-user <name> --auth-password-env <VAR>`. OAuth: `operate config set <profile> --auth oauth --oauth-issuer <url> --oauth-client-id <id>`, then `operate auth login --profile <profile>` in a terminal. For a token, pass -H 'Authorization: Bearer <token>' or OPERATE_HEADERS.",
   rejected:
     'The engine rejected the credentials of the Authorization header (from -H, OPERATE_HEADERS or the profile headers; `operate config show` shows which). Check user and password or the token.',
   403: 'The user is authenticated but lacks the authorization for this operation.',
@@ -129,7 +129,9 @@ const QUERY_PARAM_EXCEPTION = 'QueryParamException';
 /**
  * The request as far as the hints need it: `headers` tell whether an Authorization header was
  * sent, `principal` whose Basic auth credentials the auth provider added, `authOff` why no
- * credentials were added although some were configured (`AuthProvider.off`).
+ * credentials were added although some were configured (`AuthProvider.off`), `rejectedHint` the
+ * provider's own hint for a 401 or 403 (OAuth), `loginStatusCommand` the command that shows
+ * whether the login of the provider is usable (OAuth).
  */
 export interface FailedRequest {
   readonly method: string;
@@ -137,6 +139,8 @@ export interface FailedRequest {
   readonly headers?: Readonly<Record<string, string>>;
   readonly principal?: Principal | undefined;
   readonly authOff?: string | undefined;
+  readonly rejectedHint?: string | undefined;
+  readonly loginStatusCommand?: string | undefined;
 }
 
 function sentCredentials(request: FailedRequest): boolean {
@@ -158,8 +162,11 @@ function unauthorizedHint(request: FailedRequest): string {
   return `The engine requires authentication and operate sent no credentials${why}. ${HINTS.unauthenticated}`;
 }
 
-/** Hints that follow from the status alone. */
+/** Hints that follow from the status alone; the provider's own 401/403 hint wins. */
 function statusHint(status: number, request: FailedRequest): string | undefined {
+  if ((status === 401 || status === 403) && request.rejectedHint !== undefined) {
+    return request.rejectedHint;
+  }
   if (status === 401) return unauthorizedHint(request);
   if (status === 403) return HINTS[403];
   return status >= 500 ? HINTS.server : undefined;
@@ -232,13 +239,16 @@ function redirectTarget(response: HttpResponse, url: string): string | undefined
 export function redirectError(response: HttpResponse, request: FailedRequest): OperateError {
   const target = redirectTarget(response, request.url);
   const status = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+  const command = request.loginStatusCommand;
+  const oauth =
+    command === undefined ? '' : ` \`${command}\` shows whether the OAuth login is usable.`;
   return new OperateError(
     'HTTP_REDIRECT',
     target === undefined ? `${status}: redirect` : `${status}: redirect to ${target}`,
     {
       status: response.status,
       request: { method: request.method, url: request.url },
-      hint: 'operate does not follow redirects. Point --url (OPERATE_URL or the profile url) at the REST API root itself, e.g. https:// when the server redirects from http://. A redirect to a login page means the credentials (headers) are missing or expired.',
+      hint: `operate does not follow redirects. Point --url (OPERATE_URL or the profile url) at the REST API root itself, e.g. https:// when the server redirects from http://. A redirect to a login page means the credentials (headers) are missing or expired.${oauth}`,
     },
   );
 }

@@ -45,6 +45,12 @@ describe('formatTrace', () => {
     expect(formatTrace(response, false)).toBe('< 404 Not Found (12 ms, 99 bytes)\n');
     expect(formatTrace({ ...response, statusText: '' }, false)).toBe('< 404 (12 ms, 99 bytes)\n');
   });
+
+  it('prints a note like curl -v', () => {
+    expect(formatTrace({ type: 'note', message: 'Using the cached token.' }, false)).toBe(
+      '* Using the cached token.\n',
+    );
+  });
 });
 
 describe('traceWriter', () => {

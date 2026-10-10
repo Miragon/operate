@@ -21,7 +21,7 @@ function response(
 }
 
 const HINTS = {
-  401: "The engine requires authentication and operate sent no credentials. Use Basic auth: --auth basic --auth-user <name> with the password piped into --auth-password-stdin, OPERATE_USERNAME and OPERATE_PASSWORD, or a profile: `operate config set <profile> --auth basic --auth-user <name> --auth-password-env <VAR>`. For a token, pass -H 'Authorization: Bearer <token>' or OPERATE_HEADERS.",
+  401: "The engine requires authentication and operate sent no credentials. Use Basic auth: --auth basic --auth-user <name> with the password piped into --auth-password-stdin, OPERATE_USERNAME and OPERATE_PASSWORD, or a profile: `operate config set <profile> --auth basic --auth-user <name> --auth-password-env <VAR>`. OAuth: `operate config set <profile> --auth oauth --oauth-issuer <url> --oauth-client-id <id>`, then `operate auth login --profile <profile>` in a terminal. For a token, pass -H 'Authorization: Bearer <token>' or OPERATE_HEADERS.",
   rejected:
     'The engine rejected the credentials of the Authorization header (from -H, OPERATE_HEADERS or the profile headers; `operate config show` shows which). Check user and password or the token.',
   queryParam:
@@ -202,6 +202,20 @@ describe('httpError', () => {
     const sent = { ...off, headers: { Authorization: 'Bearer t' } };
     expect(httpError(response(401, ''), sent).details.hint).toBe(HINTS.rejected);
     expect(httpError(response(403, ''), off).details.hint).toBe(HINTS[403]);
+  });
+
+  it("lets the provider's hint win for 401 and 403, not for other statuses", () => {
+    const oauth = {
+      ...REQUEST,
+      rejectedHint: 'OAuth hint',
+      principal: { user: 'alice', source: 's' },
+    };
+    expect(httpError(response(401, ''), oauth).details.hint).toBe('OAuth hint');
+    expect(httpError(response(403, ''), oauth).details.hint).toBe('OAuth hint');
+    expect(httpError(response(500, ''), oauth).details.hint).toBe(HINTS.server);
+    expect(httpError(response(401, ''), { ...REQUEST, rejectedHint: undefined }).details.hint).toBe(
+      HINTS[401],
+    );
   });
 
   it('keeps the 403 hint with Basic auth credentials', () => {
@@ -435,6 +449,17 @@ describe('redirectError', () => {
     expect(error.message).toBe('HTTP 302 Found: redirect to http://localhost:8080/login');
     expect(error.details).toMatchObject({ status: 302, request: REQUEST });
     expect(error.details.hint).toContain('operate does not follow redirects');
+  });
+
+  it('points to operate auth status for OAuth', () => {
+    const oauth = redirectError(redirect(302, '/login'), {
+      ...REQUEST,
+      loginStatusCommand: 'operate auth status --profile p',
+    });
+    expect(oauth.details.hint).toMatch(
+      /expired\. `operate auth status --profile p` shows whether the OAuth login is usable\.$/,
+    );
+    expect(redirectError(redirect(302), REQUEST).details.hint).not.toContain('auth status');
   });
 
   it('works without or with an unusable Location', () => {

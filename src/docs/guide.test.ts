@@ -83,12 +83,21 @@ describe('GUIDE', () => {
       'OPERATE_PASSWORD',
       '--auth-password-env <VAR>',
       'OPERATE_AUTH=none',
-      'https://github.com/Miragon/operate/issues/2',
+      'OPERATE_OAUTH_*',
+      'operate auth login --profile <name>',
+      'Never run `auth login` yourself',
+      'LOGIN_REQUIRED',
+      'LOGIN_FAILED',
+      'operate auth status',
+      '`UNAUTHORIZED`/`FORBIDDEN` despite a login',
+      'do not ask for a new login',
     ]) {
       expect(GUIDE).toContain(text);
     }
-    // Basic auth is built in: no workaround header and no link to its issue
+    // Basic auth and OAuth are built in: no workaround header and no links to their issues
     expect(GUIDE).not.toContain('https://github.com/Miragon/operate/issues/1');
+    expect(GUIDE).not.toContain('https://github.com/Miragon/operate/issues/2');
+    expect(GUIDE).not.toContain('planned');
     expect(GUIDE).not.toContain('Authorization: Basic');
   });
 });

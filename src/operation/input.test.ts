@@ -26,6 +26,7 @@ function deps(files: Record<string, string> = {}): InputDeps {
     writeFile: () => Promise.resolve(),
     mkdir: () => Promise.resolve(),
     exists: () => Promise.resolve(false),
+    remove: () => Promise.resolve(false),
   };
   return { fs, readStdin: () => Promise.resolve(new Uint8Array()) };
 }

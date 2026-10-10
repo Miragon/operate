@@ -44,7 +44,9 @@ describe('authFlagFor', () => {
 describe('secretHint', () => {
   it('is given for names that ask for a secret only', () => {
     for (const name of ['--password', '--PASSWD', '--pwd', '--client-secret', '--token']) {
-      expect(secretHint(name)).toMatch(/^Secrets are never flag values: .* OPERATE_HEADERS\. $/);
+      expect(secretHint(name)).toMatch(
+        /^Secrets are never flag values: .* OPERATE_HEADERS; an OAuth token comes from `operate auth login`\. $/,
+      );
     }
     for (const name of ['--pass', '--pass-word', '--auth-pass']) {
       expect(secretHint(name)).not.toBe('');
@@ -52,6 +54,15 @@ describe('secretHint', () => {
     for (const name of ['--compass', '--passive', '--bypass-x', '--assignee', '']) {
       expect(secretHint(name)).toBe('');
     }
+  });
+
+  it('says where --show-secrets works instead of the secret hint', () => {
+    for (const name of ['--show-secrets', '--Show-Secrets']) {
+      expect(secretHint(name)).toBe(
+        '--show-secrets works where operate prints credentials: --dry-run and --verbose of API commands, api and ping, and config show. `operate auth` commands never print a token. ',
+      );
+    }
+    expect(secretHint('--show-secret')).toMatch(/^Secrets are never flag values/);
   });
 });
 

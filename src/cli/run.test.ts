@@ -159,6 +159,7 @@ describe('run: help and version', () => {
       'api',
       'ping',
       'config',
+      'auth',
       'help',
     ]);
     const groups = section('API groups:');

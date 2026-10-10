@@ -135,7 +135,10 @@ function doneLine(result: Extract<OperationResult, { kind: 'none' }>, baseUrl?: 
 export function renderResult(result: OperationResult, options: RenderOptions): Rendered {
   switch (result.kind) {
     case 'dry-run':
-      return { stdout: renderDryRun(result.request, options) };
+      return {
+        stdout: renderDryRun(result.request, options),
+        ...(result.note === undefined ? {} : { stderr: `Note: ${result.note}\n` }),
+      };
     case 'json':
       return renderJsonResult(result.value, options);
     case 'text':

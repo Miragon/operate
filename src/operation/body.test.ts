@@ -32,6 +32,7 @@ function deps(files: Record<string, string> = {}, stdin = ''): InputDeps {
     writeFile: () => Promise.resolve(),
     mkdir: () => Promise.resolve(),
     exists: (path) => Promise.resolve(path in files),
+    remove: () => Promise.resolve(false),
   };
   return { fs, readStdin: () => Promise.resolve(encoder.encode(stdin)) };
 }

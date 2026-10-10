@@ -7,6 +7,7 @@
 import type { OperateError } from '../errors.js';
 import { compact } from '../util.js';
 import { configError } from './config-error.js';
+import { redactUrl } from './redact.js';
 import { resolveHeaders } from './headers.js';
 import { type Env, nonEmpty, pick } from './pick.js';
 import { authorizationConflict, resolveAuth } from './resolve-auth.js';
@@ -81,20 +82,6 @@ export function selectProfile(
   const profile = findProfile(file, selected.name);
   if (profile === undefined) throw missingProfileError(selected.name, file, selected.origin);
   return { name: selected.name, profile };
-}
-
-/**
- * A rejected URL as error messages may show it: without query and fragment (tokens such as
- * `?access_token=`) and with everything before an `@` hidden, with or without `//` (a forgotten
- * scheme makes `user:password@host` parse as scheme `user:`).
- */
-export function redactUrl(url: string): string {
-  const [base = ''] = url.split(/[?#]/, 1);
-  const suffix = base.length < url.length ? '?…' : '';
-  const at = base.lastIndexOf('@');
-  if (at < 0) return `${base}${suffix}`;
-  const scheme = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.exec(base)?.[0] ?? '';
-  return `${scheme}***${base.slice(at)}${suffix}`;
 }
 
 function parseUrl(url: string): URL {
@@ -208,10 +195,16 @@ function pickAll(flags: ConfigFlags, env: Env, profile: Profile | undefined) {
   };
 }
 
+/** How the configuration is used: `authCommand` for `operate auth login|status|logout`. */
+export interface ResolveOptions {
+  readonly authCommand?: boolean;
+}
+
 export function resolveConfig(
   flags: ConfigFlags,
   env: Env,
   file: ConfigFile | undefined,
+  options: ResolveOptions = {},
 ): ResolvedConfig {
   const selected = selectProfile(flags, env, file);
   const { url, engine, output, timeout, readOnly, headers } = pickAll(flags, env, selected.profile);
@@ -227,7 +220,12 @@ export function resolveConfig(
     readOnly: readOnly.value ?? false,
   };
   const auth = resolveAuth(flags, env, selected);
-  const conflict = authorizationConflict(auth.auth, headers.authorization, selected.name);
+  const conflict = authorizationConflict(
+    auth.auth,
+    headers.authorization,
+    selected.name,
+    options.authCommand,
+  );
   if (conflict !== undefined) throw conflict;
   return {
     ...values,

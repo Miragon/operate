@@ -27,11 +27,11 @@ operate config use local
 ```
 
 - `operate ping` prints `{url, engine, reachable, version, engines, latencyMs, auth}`, plus
-  `user` with Basic auth.
+  `user` with Basic auth and OAuth.
 - Precedence for every setting: flag > environment variable > profile > default.
 - Environment: `OPERATE_URL`, `OPERATE_ENGINE`, `OPERATE_PROFILE`, `OPERATE_CONFIG`,
   `OPERATE_OUTPUT`, `OPERATE_TIMEOUT`, `OPERATE_READ_ONLY`, `OPERATE_AUTH`, `OPERATE_USERNAME`,
-  `OPERATE_PASSWORD`, `OPERATE_HEADERS`.
+  `OPERATE_PASSWORD`, `OPERATE_OAUTH_*`, `OPERATE_HEADERS`.
 - `--engine <name>` addresses a named process engine (`/engine/{name}/...`); `ping` checks it.
 - `operate config path` prints the config file location (`--config <path>` overrides it). A file
   named with `--config` or `OPERATE_CONFIG` must exist (`config set` creates it).
@@ -132,7 +132,7 @@ Errors are one JSON line on stderr (`-o table` prints readable text instead):
 | 1    | internal error                                                                 |
 | 2    | usage error, invalid body (`VALIDATION`), `READ_ONLY`, `CONFIRMATION_REQUIRED` |
 | 3    | configuration error, also an HTTP redirect (`HTTP_REDIRECT`, see below)        |
-| 4    | authentication or authorization failed (401, 403)                              |
+| 4    | auth failed: 401, 403, `LOGIN_REQUIRED` (a person must log in), `LOGIN_FAILED` |
 | 5    | not found (404)                                                                |
 | 6    | other 4xx: the engine rejected the request, read `engineMessage`               |
 | 7    | engine error (5xx)                                                             |
@@ -165,7 +165,6 @@ Deploy and start:
 operate deployment create invoice.bpmn invoice-approval.dmn --deployment-name invoice
 operate deployment create bpmn/invoice.bpmn forms/approve.form --base-dir . --deploy-changed-only
 operate process-definition list --key invoice --latest-version
-operate process-definition xml invoice
 operate process-definition start invoice --business-key INV-1001 --var amount=250
 ```
 
@@ -176,7 +175,6 @@ operate process-instance list --process-definition-key invoice --business-key IN
 operate process-instance get-variables $INSTANCE_ID
 operate process-instance get-activity-instance-tree $INSTANCE_ID
 operate task list --process-instance-id $INSTANCE_ID --fields id,name,assignee
-operate task list --candidate-group accounting --unassigned
 operate task claim $TASK_ID --user-id demo
 operate task complete $TASK_ID --var approved=true
 ```
@@ -187,7 +185,6 @@ Work on external tasks (the worker id must match the one that locked the task):
 operate external-task fetch-and-lock --worker-id worker-1 --max-tasks 5 --body '{"topics":[{"topicName":"send-invoice","lockDuration":60000}]}'
 operate external-task complete $EXTERNAL_TASK_ID --worker-id worker-1 --var invoiceSent=true
 operate external-task handle-failure $EXTERNAL_TASK_ID --worker-id worker-1 --error-message 'SMTP timeout' --retries 2 --retry-timeout 60000
-operate external-task handle-bpmn-error $EXTERNAL_TASK_ID --worker-id worker-1 --error-code INVALID_ADDRESS
 ```
 
 Incidents and retries. Failed job and external task incidents disappear when retries are set
@@ -199,7 +196,6 @@ operate job list --process-instance-id $INSTANCE_ID --with-exception
 operate job get-stacktrace $JOB_ID
 operate job set-retries $JOB_ID --retries 1
 operate external-task set-retries $EXTERNAL_TASK_ID --retries 1
-operate incident set-annotation $INCIDENT_ID --annotation 'Mail server fixed'
 ```
 
 Change running instances:
@@ -208,7 +204,6 @@ Change running instances:
 operate process-instance modify $INSTANCE_ID --body '{"instructions":[{"type":"startBeforeActivity","activityId":"reviewInvoice"}]}' --dry-run
 operate process-instance set-variable $INSTANCE_ID dueDate --value 2024-06-01T12:00 --type Date
 operate process-instance suspend $INSTANCE_ID
-operate process-instance activate $INSTANCE_ID
 operate process-instance delete $INSTANCE_ID --yes
 ```
 
@@ -225,7 +220,6 @@ History:
 ```sh
 operate historic-process-instance list --process-definition-key invoice --finished --started-after 2024-05-01
 operate historic-activity-instance list --process-instance-id $INSTANCE_ID --sort-by startTime --sort-order asc
-operate historic-variable-instance list --process-instance-id $INSTANCE_ID
 ```
 
 Raw requests: `operate api <METHOD> <path>` sends a request relative to the REST root with the
@@ -242,13 +236,19 @@ operate api DELETE /process-instance/$INSTANCE_ID --yes
 Basic auth: the username comes from `--auth-user`, `OPERATE_USERNAME` or the profile, the password
 from `--auth-password-stdin` (first line of stdin, never a flag), `OPERATE_PASSWORD` or the profile
 (best as a variable name: `--auth-password-env <VAR>`). A username or `--auth-password-stdin`
-selects Basic auth, `--auth none` or `OPERATE_AUTH=none` switch it off. Missing values: exit 3.
+selects Basic auth, `--auth none` or `OPERATE_AUTH=none` switch it off. Missing values: exit 3. A
+401 hint says why no credentials were sent or which user was rejected; other tokens go into a
+header (`-H`, `OPERATE_HEADERS`). Secrets and tokens are masked unless `--show-secrets`.
+
+OAuth (`OPERATE_OAUTH_*` or a profile): a person runs `operate auth login --profile <name>` once in
+a terminal, then commands refresh the token. Never run `auth login` yourself. On exit 4 with
+`LOGIN_REQUIRED`, stop and ask the user to run the command from the hint in a terminal, then retry.
+`UNAUTHORIZED`/`FORBIDDEN` despite a login is a gateway (issuer, audience, clock) or permission
+problem: do not ask for a new login, report message and hint. `operate auth status` (no network)
+tells if the login is usable. Use only `--config` files you trust: profiles share logins by name.
 
 ```sh
 printf '%s\n' "$CAMUNDA_PASSWORD" | operate ping --auth basic --auth-user demo --auth-password-stdin
 operate config set prod --auth basic --auth-user demo --auth-password-env CAMUNDA_PASSWORD
+operate config set sso --auth oauth --oauth-issuer https://login.example.com/realms/camunda --oauth-client-id operate-cli
 ```
-
-A 401 hint says why no credentials were sent or which user was rejected. Tokens go into a header
-(`-H`, `OPERATE_HEADERS`, profile headers); OAuth with PKCE is planned
-(https://github.com/Miragon/operate/issues/2). Secrets are masked unless `--show-secrets`.

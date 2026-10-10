@@ -5,10 +5,41 @@ export interface PingOutput {
   readonly reachable: boolean;
   readonly version: string;
   readonly engines: readonly string[];
-  /** Auth type: `none` or `basic`. */
+  /** Auth type: `none`, `basic` or `oauth`. */
   readonly auth: string;
-  /** The username, only with `basic`. */
-  readonly user?: string;
+  /** The username with `basic`; with `oauth` the logged-in user (null when unknown). */
+  readonly user?: string | null;
+}
+
+/** `operate auth login` (stdout) and `operate auth status`: the cached login, never a token. */
+export interface LoginOutput {
+  readonly profile: string | null;
+  readonly issuer: string | null;
+  readonly clientId: string;
+  /** `preferred_username`, else the email of the ID token. */
+  readonly user: string | null;
+  /** `sub` of the ID token. */
+  readonly subject: string | null;
+  /** Granted scopes, else the requested ones. */
+  readonly scopes: readonly string[];
+  /** ISO 8601 UTC; null when unknown. */
+  readonly accessTokenExpiresAt: string | null;
+  readonly accessTokenValid: boolean;
+  readonly refreshTokenExpiresAt: string | null;
+  readonly canRefresh: boolean;
+  readonly loggedInAt: string;
+  readonly refreshedAt: string | null;
+  /** Absolute path of the token cache file. */
+  readonly tokenCache: string;
+}
+
+/** `operate auth logout`. */
+export interface LogoutOutput {
+  readonly profile: string | null;
+  readonly tokenCache: string;
+  readonly removed: boolean;
+  /** null: nothing to revoke or no revocation endpoint. */
+  readonly revoked: boolean | null;
 }
 
 /** `operate config show`: every effective value with the source it came from. */
