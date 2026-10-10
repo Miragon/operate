@@ -25,6 +25,7 @@ export OPERATE_URL=http://localhost:8080/engine-rest
 operate ping
 operate config set prod --url https://camunda.example.com/engine-rest --read-only
 operate config set local --url http://localhost:8080/engine-rest --default
+operate config show --profile prod
 \`\`\`
 
 - \`operate ping\` prints \`{url, engine, reachable, version, engines, latencyMs, auth}\` (\`user\` too).
@@ -222,8 +223,7 @@ operate signal throw --name invoice-cancelled
 operate decision-definition evaluate-by-key invoice-approval --var amount=250 --var category=travel
 \`\`\`
 
-Raw requests: \`operate api <METHOD> <path>\` sends a request relative to the REST root with the
-same guards, output and errors (the effect is taken from the matching catalog operation):
+Raw requests relative to the REST root, with the same guards, output and errors:
 
 \`\`\`sh
 operate api GET /process-instance/count --query processDefinitionKey=invoice
