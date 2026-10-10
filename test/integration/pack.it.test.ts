@@ -141,6 +141,14 @@ describe('packed npm tarball', () => {
     expect(await readFile(join(packageDir, 'README.md'), 'utf8')).toContain('operate');
   });
 
+  it('ships the Claude Code plugin of the skill without its evals', () => {
+    const pluginDir = join(installedPackageDir(prefix), 'skills', 'operate');
+    for (const file of [join('.claude-plugin', 'plugin.json'), join('commands', 'status.md')]) {
+      expect(existsSync(join(pluginDir, file)), file).toBe(true);
+    }
+    expect(existsSync(join(pluginDir, 'evals'))).toBe(false);
+  });
+
   it('prints the package version', async () => {
     const manifest = JSON.parse(await readFile(join(REPO_ROOT, 'package.json'), 'utf8')) as {
       version: string;

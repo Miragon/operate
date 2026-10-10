@@ -21,7 +21,14 @@
   ],
   "packages": {
     ".": {
-      "package-name": "@miragon/operate"
+      "package-name": "@miragon/operate",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "skills/operate/.claude-plugin/plugin.json",
+          "jsonpath": "$.version"
+        }
+      ]
     }
   }
 }

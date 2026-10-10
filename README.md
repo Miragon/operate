@@ -868,11 +868,59 @@ operate process-definition start invoice --var amount=250 --dry-run
 operate process-definition start invoice --var amount=250
 ```
 
-### Claude Code skill
+### Claude Code plugin
+
+This repository is also a Claude Code plugin marketplace, `miragon`, with one plugin, `operate`.
+Add the marketplace once and install the plugin in a Claude Code session:
+
+```text
+/plugin marketplace add Miragon/operate
+/plugin install operate@miragon
+```
+
+From a shell, `claude plugin marketplace add Miragon/operate` and
+`claude plugin install operate@miragon` do the same. The plugin contains:
+
+- The skill `operate`, the text of `operate guide`. Claude Code loads it whenever a task needs to
+  read or change the state of a Camunda 7, Operaton or CIB seven engine; `/operate` (or
+  `/operate:operate`) loads it by hand.
+- The command `/operate:status [options]`: Claude runs `operate status` (read-only) and
+  summarizes incidents by root cause, overdue jobs, external task workers and the next commands.
+  It changes nothing. Only the bare `operate status` and `operate ping` run without a permission
+  prompt: with options Claude Code asks first, because a pre-approved `--url` would send your
+  credentials to another host.
+
+The CLI is not part of the plugin: install it with `npm install -g @miragon/operate`, otherwise
+the skill has Claude run `npx -y @miragon/operate` in its place. The plugin version is the npm
+version, and release-please bumps both. Claude Code does not update plugins from third-party
+marketplaces on its own: after a release, refresh the marketplace and then update the plugin
+(`claude plugin update` alone does not see the new version), or turn on auto-update for `miragon`
+under **Marketplaces** in `/plugin`:
+
+```sh
+claude plugin marketplace update miragon
+claude plugin update operate@miragon
+```
+
+If you copied `SKILL.md` into a skills directory before (see below), remove that copy, for
+example with `rm -r ~/.claude/skills/operate`: with both, Claude Code lists the skill twice
+(`operate` and `operate:operate`), one of them outdated, and `/operate` is the copy.
+
+The plugin lives in [`skills/operate`](skills/operate) (manifest in `.claude-plugin/plugin.json`,
+command in `commands/`, evals in `evals/`);
+[`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) at the repository root lists
+it. Adding the marketplace makes a shallow clone of the repository, and installing the plugin
+copies only the skill directory and installs no npm dependencies. The npm package ships the same
+directory without the evals, so
+`claude --plugin-dir "$(npm root -g)/@miragon/operate/skills/operate"` loads the plugin of the
+installed version for one session.
+
+### Claude Code skill without the plugin
 
 [`skills/operate/SKILL.md`](skills/operate/SKILL.md) is the guide packaged as a Claude Code
-skill (YAML frontmatter plus the text of `operate guide`); it ships with the npm package.
-Install it for all your projects or for one project:
+skill (YAML frontmatter plus the text of `operate guide`); it ships with the npm package and is
+the skill of the plugin. To use it without the plugin (not in addition to it), install it for all
+your projects or for one project:
 
 ```sh
 mkdir -p ~/.claude/skills/operate
@@ -1067,8 +1115,9 @@ no npm token exists.
    title must follow [Conventional Commits](https://www.conventionalcommits.org):
    `<type>[(<scope>)][!]: <description>`. The `PR title` workflow checks it.
 2. Every push to `main` makes the `Release` workflow open or update the release pull request
-   `chore(main): release <version>`. It bumps the version in `package.json`, `package-lock.json`
-   and `.release-please-manifest.json` and adds the new section to `CHANGELOG.md`.
+   `chore(main): release <version>`. It bumps the version in `package.json`, `package-lock.json`,
+   `skills/operate/.claude-plugin/plugin.json` (the Claude Code plugin) and
+   `.release-please-manifest.json` and adds the new section to `CHANGELOG.md`.
 3. Merging the release pull request (once its CI, including the integration tests, is green) tags
    `v<version>` and creates the GitHub release. The same workflow run checks out the tag, runs
    `npm run check`, builds and packs the package and publishes it to npm with OIDC and provenance.
@@ -1197,6 +1246,10 @@ interactive login (loopback server, browser), and the generated catalog is only 
 - **Testcontainers** integration tests against the three engines, with and without Basic auth,
   behind a Keycloak and Envoy JWT gateway for OAuth, through the workflow commands, plus a
   packed-tarball smoke test, on every pull request.
+- **`claude plugin validate --strict`** for the marketplace, the plugin manifest, its skill and its
+  command on every pull request. The plugin evals in `skills/operate/evals/` (does the skill load
+  for engine tasks and stay out of unrelated ones) call the model on your account, so they run
+  locally: `claude plugin eval skills/operate --no-publish`.
 
 ## License
 

@@ -4,5 +4,6 @@ coverage/
 reports/
 .stryker-tmp/
 *.tgz
+skills/operate/evals/results/
 .context/
 .DS_Store

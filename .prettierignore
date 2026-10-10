@@ -2,6 +2,7 @@ dist
 coverage
 reports
 .stryker-tmp
+skills/operate/evals/results
 spec
 src/generated
 package-lock.json
