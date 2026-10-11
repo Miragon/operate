@@ -1,5 +1,5 @@
 /**
- * StrykerJS configuration (`npm run test:mutation`): mutates the same files as the coverage gate.
+ * StrykerJS configuration (`npm run test:mutation`): mutates the logic layers (`MUTATE`).
  *
  * CI splits the run into `SHARDS` jobs: `STRYKER_SHARD=<shard>/<shards>` mutates only the files of
  * that shard (`shardOf`) and turns off the break threshold, which `npm run test:mutation:score`
@@ -31,14 +31,25 @@ export const SHARDS = 8;
 // ratcheted when a full run scored 97.70 %: high = floor(score), low = floor - 2, break = floor - 3
 export const thresholds = { high: 97, low: 95, break: 94 };
 
+/**
+ * The logic layers and the catalog generator. Left out: the CLI wiring and registration
+ * (`src/cli`), help and guide texts (`src/docs`), the Node.js glue (`src/bin`) and the packaging
+ * scripts (`scripts/exe`), which the command line and integration tests cover; the coverage gate
+ * still measures them.
+ */
 const MUTATE = [
-  'src/**/*.ts',
+  'src/auth/**/*.ts',
+  'src/catalog/**/*.ts',
+  'src/config/**/*.ts',
+  'src/http/**/*.ts',
+  'src/operation/**/*.ts',
+  'src/output/**/*.ts',
+  'src/workflow/**/*.ts',
+  'src/errors.ts',
+  'src/util.ts',
   'scripts/catalog/**/*.ts',
-  'scripts/exe/**/*.ts',
   '!**/*.test.ts',
-  '!**/*.d.ts',
-  '!src/bin/**',
-  '!src/**/types.ts',
+  '!**/types.ts',
   '!scripts/catalog/openapi.ts',
 ];
 
