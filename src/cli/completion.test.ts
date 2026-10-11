@@ -7,6 +7,7 @@ import {
   type FakeRuntimeOptions,
 } from '../../test/support/fake-runtime.js';
 import { COMPLETION_SCRIPTS } from '../docs/completion-scripts.js';
+import { GUIDE_TOPICS } from '../docs/guide.js';
 import { run } from './run.js';
 
 async function complete(words: readonly string[], options: FakeRuntimeOptions = {}) {
@@ -109,6 +110,20 @@ describe('operate __complete', () => {
     [
       ['completion', ''],
       ['bash', 'zsh', 'fish'],
+    ],
+    [
+      ['guide', ''],
+      ['workflow', 'input', 'output', 'config', 'auth', 'recipes'],
+    ],
+    [['guide', 'a'], ['auth']],
+    [['guide', 'auth', ''], []],
+    [
+      ['guide', '--'],
+      ['--list', '--output', '--help'],
+    ],
+    [
+      ['guide', '--list', '-o', ''],
+      ['json', 'table'],
     ],
     [['--url', 'http://x', '-o', 'json', 'insp'], ['inspect']],
     [
@@ -259,6 +274,9 @@ describe('operate completion', () => {
 describe('operate __complete output', () => {
   it('prints values without description and commands with their first line', async () => {
     expect(await complete(['completion', ''])).toBe('bash\t\nzsh\t\nfish\t\n');
+    expect(await complete(['guide', 'rec'])).toBe(
+      `recipes\t${GUIDE_TOPICS.find((topic) => topic.name === 'recipes')!.summary}\n`,
+    );
     expect(await complete(['-o', ''])).toBe('json\t\ntable\t\n');
     expect(await complete(['config', 'sh'])).toBe(
       'show\tPrint the effective configuration and where each value comes from; header values, the password, the…\n',

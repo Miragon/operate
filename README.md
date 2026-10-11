@@ -671,7 +671,7 @@ operate commands [group] [--search <text>] [--effect <effect>]
 operate describe <group> [command]  |  operate describe <operationId>
 operate api <METHOD> <path> [--query key=value]... [--body <json|@file|->]
 operate ping
-operate guide
+operate guide [topic] | --list
 operate config path | show | list | set | unset | use | delete
 ```
 
@@ -922,9 +922,12 @@ operate process-instance list --profile prod --with-incident
 `operate` is designed to be driven by coding agents. Everything an agent needs is in the CLI
 itself:
 
-- `operate guide` prints a concise Markdown usage guide (workflow, conventions, output, exit codes,
-  safety, recipes). Point your agent at it, e.g. in `AGENTS.md` or `CLAUDE.md`: "Run
-  `operate guide` before using `operate`."
+- `operate guide` prints a concise Markdown usage guide: setup, discover, describe, preview and
+  run, the workflow commands, conventions, output, exit codes, safety, and an index of topics.
+  `operate guide <topic>` prints the details of one topic when the task needs them (`workflow`,
+  `input`, `output`, `config`, `auth`, `recipes`); `operate guide --list` lists them (JSON when
+  piped). Point your agent at it, e.g. in `AGENTS.md` or `CLAUDE.md`: "Run `operate guide` before
+  using `operate`."
 - `operate commands`, `operate commands <group>` and `operate commands --search <words>` list
   commands with method, path, effect and summary.
 - `operate describe <group> <command>` returns arguments, options, the request body schema,
@@ -941,14 +944,21 @@ itself:
 - A bearer token from elsewhere (`OPERATE_TOKEN`) is never refreshed by operate: on
   `TOKEN_EXPIRED` (exit 4) the agent asks for a new token.
 
-A typical agent workflow is discover, describe, preview, run:
+A typical agent workflow is discover, describe, preview, run, with a topic of the guide when the
+task needs more:
 
 ```sh
 operate commands --search 'process instance'
 operate describe process-definition start
 operate process-definition start invoice --var amount=250 --dry-run
 operate process-definition start invoice --var amount=250
+operate guide auth
 ```
+
+The guide is split for progressive disclosure: the core stays short enough to load on every use,
+and each topic is fetched only when a task needs it. Every `operate` command line in the core and
+in every topic is checked against the catalog and run in the CLI by the unit tests, so the guide
+cannot drift from the commands.
 
 ### Claude Code plugin
 
@@ -963,7 +973,8 @@ Add the marketplace once and install the plugin in a Claude Code session:
 From a shell, `claude plugin marketplace add Miragon/operate` and
 `claude plugin install operate@miragon` do the same. The plugin contains:
 
-- The skill `operate`, the text of `operate guide`. Claude Code loads it whenever a task needs to
+- The skill `operate`, the text of `operate guide` (the core guide with its topic index; Claude
+  runs `operate guide <topic>` for the details). Claude Code loads it whenever a task needs to
   read or change the state of a Camunda 7, Operaton or CIB seven engine; `/operate` (or
   `/operate:operate`) loads it by hand.
 - The command `/operate:status [options]`: Claude runs `operate status` (read-only) and
@@ -1000,8 +1011,9 @@ installed version for one session.
 ### Claude Code skill without the plugin
 
 [`skills/operate/SKILL.md`](skills/operate/SKILL.md) is the guide packaged as a Claude Code
-skill (YAML frontmatter plus the text of `operate guide`); it ships with the npm package and is
-the skill of the plugin. To use it without the plugin (not in addition to it), install it for all
+skill (YAML frontmatter plus the text of `operate guide`, the core guide; the topics come from
+`operate guide <topic>` of the installed CLI); it ships with the npm package and is the skill of
+the plugin. To use it without the plugin (not in addition to it), install it for all
 your projects or for one project:
 
 ```sh

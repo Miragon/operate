@@ -172,9 +172,18 @@ describe('packed npm tarball', () => {
     expect(candidates.stderr).toBe('');
   });
 
-  it('prints the agent guide', async () => {
+  it('prints the agent guide, the body of the skill, and its topics', async () => {
     const result = expectSuccess(await operate(['guide']));
-    expect(result.stdout.trim()).not.toBe('');
-    expect(result.stdout).toContain('operate');
+    expect(result.stdout).toMatch(/^# operate: /);
+    const skillPath = join(installedPackageDir(prefix), 'skills', 'operate', 'SKILL.md');
+    expect((await readFile(skillPath, 'utf8')).endsWith(`\n---\n\n${result.stdout}`)).toBe(true);
+    const list = expectSuccess(await operate(['guide', '--list']));
+    const topics = (JSON.parse(list.stdout) as { topic: string }[]).map(({ topic }) => topic);
+    expect(topics).toEqual(expect.arrayContaining(['workflow', 'auth', 'recipes']));
+    for (const topic of topics) {
+      const page = expectSuccess(await operate(['guide', topic]));
+      expect(page.stdout.startsWith(`# operate guide ${topic}: `), topic).toBe(true);
+      expect(result.stdout).toContain(`\n- \`${topic}\`: `);
+    }
   });
 });

@@ -1,10 +1,53 @@
 /**
- * The usage guide for LLM agents, printed by `operate guide`. `skills/operate/SKILL.md` is a YAML
- * frontmatter followed by exactly this text, and every `operate` command line in its code blocks is
- * checked against the catalog; unit tests keep both true. Markdown, formatted with Prettier.
+ * The usage guide for LLM agents (design §19): the core printed by `operate guide` and the topic
+ * pages printed by `operate guide <topic>` (src/docs/guide-topics). `skills/operate/SKILL.md` is a
+ * YAML frontmatter followed by exactly the core, which ends with the index of the topics. Every
+ * `operate` command line in the code blocks of every page is checked against the catalog and run in
+ * the CLI; unit tests keep all of it true. Markdown, formatted with Prettier.
  */
 
-import { DEFAULT_PAGE_SIZE } from '../catalog/rules.js';
+import { closeNames } from '../util.js';
+import { AUTH_TOPIC } from './guide-topics/auth.js';
+import { CONFIG_TOPIC } from './guide-topics/config.js';
+import { INPUT_TOPIC } from './guide-topics/input.js';
+import { OUTPUT_TOPIC } from './guide-topics/output.js';
+import { RECIPES_TOPIC } from './guide-topics/recipes.js';
+import type { GuideTopic } from './guide-topics/topic.js';
+import { WORKFLOW_TOPIC } from './guide-topics/workflow.js';
+
+/** The topics of `operate guide <topic>`, in the order of the index. */
+export const GUIDE_TOPICS: readonly GuideTopic[] = [
+  WORKFLOW_TOPIC,
+  INPUT_TOPIC,
+  OUTPUT_TOPIC,
+  CONFIG_TOPIC,
+  AUTH_TOPIC,
+  RECIPES_TOPIC,
+];
+
+/** Shorter words match too many summaries to be worth a suggestion. */
+const MIN_SEARCH_LENGTH = 3;
+
+/** The topic of a name. */
+export function findGuideTopic(name: string): GuideTopic | undefined {
+  return GUIDE_TOPICS.find((topic) => topic.name === name);
+}
+
+/**
+ * Topics for an unknown topic name: close spellings (`oauth` → `auth`), else the topics whose name
+ * or summary contains the word (`bearer` → `auth`, `variables` → `input`).
+ */
+export function topicSuggestions(word: string): string[] {
+  const names = GUIDE_TOPICS.map((topic) => topic.name);
+  const close = closeNames(word, names);
+  if (close.length > 0 || word.length < MIN_SEARCH_LENGTH) return close;
+  const wanted = word.toLowerCase();
+  return GUIDE_TOPICS.filter((topic) =>
+    `${topic.name} ${topic.summary}`.toLowerCase().includes(wanted),
+  ).map((topic) => topic.name);
+}
+
+const TOPIC_INDEX = GUIDE_TOPICS.map((topic) => `- \`${topic.name}\`: ${topic.summary}`).join('\n');
 
 export const GUIDE = `# operate: the Camunda 7 REST API from the command line
 
@@ -12,32 +55,34 @@ export const GUIDE = `# operate: the Camunda 7 REST API from the command line
 Camunda 7 CE/EE. Every REST operation is a command generated from the OpenAPI spec:
 \`operate <group> <command> [path-args...] [options]\`; workflow commands such as \`operate inspect\`
 combine several requests. It never prompts, prints JSON when stdout is not a terminal, reports
-errors as one JSON line on stderr and uses stable exit codes.
+errors as one JSON line on stderr and uses stable exit codes. This core guide covers everyday use;
+\`operate guide <topic>\` prints the details of a topic (see Topics at the end).
 
 ## Setup
 
 If \`operate\` is missing, run \`npx -y @miragon/operate\` in its place or ask the user to install it
 with \`npm i -g @miragon/operate\` (Node.js 22.12+). The REST API root defaults to
-\`http://localhost:8080/engine-rest\`. Set it per shell or in a profile, then check the connection:
+\`http://localhost:8080/engine-rest\`. Set it per shell, then check the connection:
 
 \`\`\`sh
 export OPERATE_URL=http://localhost:8080/engine-rest
 operate ping
-operate config set prod --url https://camunda.example.com/engine-rest --read-only
+\`\`\`
+
+Or keep each engine in a profile and pick one with \`--profile\`. \`--url\` and \`OPERATE_URL\` override
+the URL of every profile (and its credentials go along), so unset \`OPERATE_URL\` first:
+
+\`\`\`sh
+unset OPERATE_URL
 operate config set local --url http://localhost:8080/engine-rest --default
-operate config show --profile prod
+operate config set prod --url https://camunda.example.com/engine-rest --read-only
+operate ping --profile prod
 \`\`\`
 
 - \`operate ping\` prints \`{url, engine, reachable, version, engines, latencyMs, auth}\` (\`user\` too).
 - Precedence for every setting: flag > environment variable > profile > default.
-- Environment: \`OPERATE_URL\`, \`OPERATE_ENGINE\`, \`OPERATE_PROFILE\`, \`OPERATE_CONFIG\`,
-  \`OPERATE_OUTPUT\`, \`OPERATE_TIMEOUT\`, \`OPERATE_READ_ONLY\`, \`OPERATE_AUTH\`, \`OPERATE_USERNAME\`,
-  \`OPERATE_PASSWORD\`, \`OPERATE_TOKEN\`, \`OPERATE_OAUTH_*\`, \`OPERATE_HEADERS\`.
-- \`--engine <name>\` addresses a named process engine (\`/engine/{name}/...\`); \`ping\` checks it.
-- \`operate config path\` prints the config file location (\`--config <path>\` overrides it; a file
-  named with \`--config\` or \`OPERATE_CONFIG\` must exist, \`config set\` creates it).
-- \`config set\` stores \`--output\` in the profile and prints in the \`-o\` format; \`config show\`
-  shows the values an operation command resolves (its own \`-o\` only formats the output).
+- Profiles, environment variables, named engines and headers: \`operate guide config\`. Basic auth,
+  bearer tokens and OAuth logins: \`operate guide auth\`.
 
 ## Discover, describe, preview, run
 
@@ -64,13 +109,10 @@ operate process-definition start invoice --var amount=250
 Top-level commands that combine requests, so no id passes through you. They select an instance by
 id, \`--business-key\` or \`--process-definition-key <key> --latest\`; \`next\` lists follow-ups:
 
-- \`operate inspect\`: where an instance waits and why: wait states (also in called instances), root
-  incidents with root cause, variables; finds ended instances; \`--history\` adds the timeline.
-- \`operate wait\`: until the instance is idle, or \`--until ended|incident|task[:key]|activity:<id>\`;
-  budget \`--wait-timeout\` (default 60s); \`--batch <id>\` waits for a batch.
-- \`operate advance\`: completes what it waits for: user task, external task (locked first), message,
-  signal, receive task, timer or job.
-- \`operate retry\`: sets the retries behind open incidents (root causes only); \`--now\` executes jobs.
+- \`operate inspect\`: where an instance waits and why: wait states, root incidents, variables.
+- \`operate wait\`: until the instance is idle, or \`--until ended|incident|task[:key]|activity:<id>\`.
+- \`operate advance\`: completes what it waits for: user or external task, message, timer, job.
+- \`operate retry\`: sets the retries behind open incidents; \`--now\` executes the jobs.
 - \`operate deploy\`: deploys changed files and directories, reports the versions in effect.
 - \`operate status\`: grouped incidents with root cause, overdue jobs, external task workers.
 
@@ -83,57 +125,27 @@ operate wait --business-key B-1 --until ended
 operate status
 \`\`\`
 
-- Use \`operate wait\` or \`--wait\` (advance, retry, deploy) instead of \`sleep\`; it fails on incidents.
-- \`advance\` needs \`--activity-id\` when the instance waits at several places; the error lists them.
-- With \`--dry-run\`, \`advance\` and \`retry\` still send their reads (to plan) and preview the writes.
-- Exit code 9 (\`INCIDENT\`, \`WAIT_TIMEOUT\`, \`JOB_FAILED\`, ...) still prints the view on stdout.
+Use \`operate wait\` or \`--wait\` (advance, retry, deploy) instead of \`sleep\`; it fails on incidents
+with exit code 9, which still prints the view. Options and rules: \`operate guide workflow\`.
 
 ## Invocation conventions
 
-- Path parameters are positional arguments in path order:
-  \`operate process-instance get-variable <id> <var-name>\`.
-- Query parameters and body properties are kebab-case flags: \`businessKey\` → \`--business-key\`.
-- Booleans: \`--with-incident\` sends \`true\`, \`--no-with-incident\` sends \`false\`. Filters the engine
-  only applies when true (\`--active\`, \`--unfinished\`, ...) have no \`--no-\` form.
-- Arrays: comma separated or repeated, \`--process-instance-ids a,b --process-instance-ids c\`.
-- Dates (date-time options and \`Date\` variables) accept \`2024-05-01\`, \`2024-05-01T10:00\`,
-  \`2024-05-01T10:00:00Z\`, \`2024-05-01T10:00:00.000+02:00\` and the engine format
-  \`2024-05-01T10:00:00.000+0200\`. Times without an offset are UTC.
-- Variables: \`--var name=value\`, repeatable. Auto typing: \`true\`/\`false\` → Boolean, integers →
-  Integer or Long, decimals → Double, \`null\` → Null, anything else → String. Force a type with
-  \`name:Type=value\` (String, Integer, Short, Long, Double, Boolean, Date, Json, Xml, Null), e.g.
-  \`--var zip:String=01234\`. Other variable maps have their own flags: \`--local-var\`,
-  \`--correlation-key\`, \`--local-correlation-key\`, \`--triggered-scope-var\`.
-- Single variable commands (\`task-variable set\`, ...) take \`--value <raw>\` and \`--type <Type>\`.
-- \`--body <json>\`, \`--body @file.json\` or \`--body -\` (stdin) is the base JSON body; flags are
-  merged on top (flags win, \`--var\` entries win per name). Use it for nested structures. The final
-  body is validated against the API schema before sending; \`--no-validate\` skips that.
-- List commands with \`--max-results\` also take \`--all\`: fetch every page (page size
-  \`--max-results\`, default ${DEFAULT_PAGE_SIZE}) and print one list.
-- Global options work after the command: \`--url\`, \`--engine\`, \`--profile\`, \`--config\`,
-  \`-o/--output\`, \`--fields\`, \`--pretty\`, \`--dry-run\`, \`-y/--yes\`, \`--read-only\`, \`--timeout\`,
-  \`-H/--header\`, \`--auth\`, \`--auth-user\`, \`--auth-password-stdin\`, \`--auth-token-stdin\`,
-  \`--verbose\`, \`--out-file\`, \`--show-secrets\`.
-
-\`\`\`sh
-operate process-definition start invoice --var 'order:Json={"id":42}' --var due:Date=2024-06-01
-echo '{"businessKey":"INV-1003"}' | operate process-definition start invoice --body -
-\`\`\`
+- Path parameters are positional arguments in path order; query parameters and body properties are
+  kebab-case flags (\`businessKey\` → \`--business-key\`); global options work after the command.
+- Variables: \`--var name=value\`, repeatable and auto typed; force a type with \`name:Type=value\`,
+  e.g. \`--var zip:String=01234\`.
+- \`--body <json>\`, \`--body @file.json\` or \`--body -\` (stdin) is the base JSON body for nested
+  structures; flags are merged on top, and the body is validated against the API schema.
+- List commands with \`--max-results\` also take \`--all\` to fetch every page.
+- Booleans, arrays, dates, variable types, files and the global options: \`operate guide input\`.
 
 ## Output
 
 - stdout carries exactly the engine response (workflow commands: their view): JSON, compact when
   piped, indented on a terminal or with \`--pretty\`, always ending with a newline.
-- \`--fields id,name,variables.amount\` keeps only these properties (of every element of a list); a
-  field that matches nothing gets a warning on stderr that lists the existing fields.
-- \`-o table\` prints a table (\`--fields\` picks the columns, otherwise identifying columns come
-  first); \`-o json\` forces JSON. Integers beyond 2^53 (\`Long\` variables) are kept exactly.
-- XML commands (\`process-definition xml\`, ...) print the raw XML unless \`-o json\` or \`--fields\`.
-  Text responses (\`job get-stacktrace\`, ...) print raw; binary ones need \`--out-file\` on a terminal.
-- \`--out-file <path>\` writes the response body to the file exactly as received (projected with
-  \`--fields\`) and prints \`{"outFile", "bytes", "contentType"}\`.
+- \`--fields id,name,variables.amount\` keeps only these properties; \`-o table\` prints a table.
 - No content (HTTP 204): stdout stays empty, stderr gets \`Done: <METHOD> <path> → 204 No Content\`.
-- \`--verbose\` traces request and response on stderr (secret headers masked unless \`--show-secrets\`).
+- XML, text and binary responses, \`--out-file\`, \`--dry-run\` and \`--verbose\`: \`operate guide output\`.
 
 ## Errors and exit codes
 
@@ -160,7 +172,7 @@ Read \`hint\` first: it names the fix (\`operate describe ...\`, \`--yes\`, \`--
 accepted date forms, ...); for unknown names it starts with "Did you mean ...?". Redirects are never
 followed: a 3xx answer is \`HTTP_REDIRECT\` (exit 3), fix \`--url\` (\`https\`, a login page). Camunda 7
 engines report many rule violations as HTTP 500 (exit 7), e.g. a task that is already claimed:
-read \`engineMessage\` and fix the cause instead of retrying.
+read \`engineMessage\` and fix the cause instead of retrying. On exit 4: \`operate guide auth\`.
 
 ## Safety
 
@@ -172,87 +184,17 @@ read \`engineMessage\` and fix the cause instead of retrying.
 - \`--read-only\`, \`OPERATE_READ_ONLY=1\` or a profile created with \`--read-only\` refuse every
   command whose effect is not \`read\` (exit 2, \`READ_ONLY\`). Use read-only profiles for production.
 
-## Recipes
+## Topics
 
-Deploy and start:
+\`operate guide <topic>\` prints the details of a topic; \`operate guide --list\` lists the topics:
 
-\`\`\`sh
-operate deploy src/main/resources --start-key invoice --business-key INV-1001 --var amount=250
-operate process-definition start invoice --business-key INV-1001 --var amount=250
-\`\`\`
-
-Find instances and complete user tasks:
+${TOPIC_INDEX}
 
 \`\`\`sh
-operate process-instance list --process-definition-key invoice --business-key INV-1001
-operate task list --process-instance-id $INSTANCE_ID --fields id,name,assignee
-operate task claim $TASK_ID --user-id demo
-operate task complete $TASK_ID --var approved=true
+operate guide --list
+operate guide recipes
 \`\`\`
 
-Work on external tasks (the worker id must match the one that locked the task):
-
-\`\`\`sh
-operate external-task fetch-and-lock --worker-id worker-1 --max-tasks 5 --body '{"topics":[{"topicName":"send-invoice","lockDuration":60000}]}'
-operate external-task complete $EXTERNAL_TASK_ID --worker-id worker-1 --var invoiceSent=true
-\`\`\`
-
-Incidents and retries. \`operate retry\` sets the retries of failed jobs and external tasks (root
-causes only); \`incident resolve\` only resolves custom incidents:
-
-\`\`\`sh
-operate inspect $INSTANCE_ID --stacktrace
-operate retry $INSTANCE_ID --now
-operate retry --process-definition-key invoice --activity-id send-invoice --dry-run
-operate incident list --process-instance-id $INSTANCE_ID --fields id,incidentType,activityId,incidentMessage
-operate job set-retries $JOB_ID --retries 1
-\`\`\`
-
-Change running instances:
-
-\`\`\`sh
-operate process-instance modify $INSTANCE_ID --body '{"instructions":[{"type":"startBeforeActivity","activityId":"reviewInvoice"}]}' --dry-run
-operate process-instance delete $INSTANCE_ID --yes
-\`\`\`
-
-Messages, signals, decisions and history:
-
-\`\`\`sh
-operate message correlate --message-name PaymentReceived --business-key INV-1001 --var paid=true
-operate signal throw --name invoice-cancelled
-operate decision-definition evaluate-by-key invoice-approval --var amount=250 --var category=travel
-\`\`\`
-
-Raw requests relative to the REST root, with the same guards, output and errors:
-
-\`\`\`sh
-operate api GET /process-instance/count --query processDefinitionKey=invoice
-operate api DELETE /process-instance/$INSTANCE_ID --yes
-\`\`\`
-
-## Authentication
-
-Basic auth: the username comes from \`--auth-user\`, \`OPERATE_USERNAME\` or the profile, the password
-from \`--auth-password-stdin\` (first line of stdin, never a flag), \`OPERATE_PASSWORD\` or the profile
-(best as a variable name: \`--auth-password-env <VAR>\`). A username or \`--auth-password-stdin\`
-selects Basic auth, \`--auth none\` or \`OPERATE_AUTH=none\` switch it off; missing values exit 3.
-
-Bearer tokens from elsewhere (SSO tooling, CI): \`OPERATE_TOKEN\`, \`--auth-token-stdin\` or a profile
-(\`--auth-token-env <VAR>\`) select \`--auth bearer\` (add it if \`OPERATE_AUTH\` or the profile sets
-another type); \`operate auth status\` shows its source and JWT expiry. It is never refreshed: on
-exit 4 \`TOKEN_EXPIRED\` ask the user for a new token. Secrets are masked unless \`--show-secrets\`.
-
-OAuth (\`OPERATE_OAUTH_*\` or a profile): a person runs \`operate auth login --profile <name>\` once in
-a terminal, then commands refresh the token. Never run \`auth login\` yourself. On exit 4 with
-\`LOGIN_REQUIRED\`, stop and ask the user to run the command from the hint in a terminal, then retry.
-\`UNAUTHORIZED\`/\`FORBIDDEN\` despite a login is a gateway (issuer, audience, clock) or permission
-problem: do not ask for a new login, report message and hint. \`operate auth status\` (no network)
-tells if the login is usable. Use only \`--config\` files you trust: profiles share logins by name.
-
-\`\`\`sh
-printf '%s\\n' "$CAMUNDA_PASSWORD" | operate ping --auth basic --auth-user demo --auth-password-stdin
-operate config set prod --auth basic --auth-user demo --auth-password-env CAMUNDA_PASSWORD
-operate config set sso --auth oauth --oauth-issuer https://login.example.com/realms/camunda --oauth-client-id operate-cli
-operate config set ci --auth bearer --auth-token-env CI_ENGINE_TOKEN
-\`\`\`
+An older operate without topics answers "Too many arguments for 'guide'": run
+\`npx -y @miragon/operate@latest guide <topic>\` instead, or ask the user to update operate.
 `;

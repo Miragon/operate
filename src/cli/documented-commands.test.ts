@@ -1,18 +1,19 @@
 /**
  * Drift protection between the docs and the real command line: every `operate` command of the guide
- * and of the README and every example of every operation must run in the CLI with exit code 0 (examples with
- * --dry-run, whose preview must show the method and path of the operation).
+ * (the core and every topic, each page in order on its own fake engine) and of the README and every
+ * example of every operation must run in the CLI with exit code 0 (examples with --dry-run, whose
+ * preview must show the method and path of the operation).
  * src/cli/command-lines.test.ts checks them against the catalog; this test runs them.
  */
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { execute, type FakeRuntime, fakeRuntime } from '../../test/support/fake-runtime.js';
+import { GUIDE_PAGES } from '../../test/support/guide-pages.js';
 import { WorkflowEngine } from '../../test/support/workflow-engine.js';
 import { loadCatalog } from '../catalog/catalog.js';
 import type { OperationSpec } from '../catalog/types.js';
 import { examplesFor } from '../docs/examples.js';
-import { GUIDE } from '../docs/guide.js';
 import { commandWords } from '../docs/text.js';
 import { run } from './run.js';
 
@@ -161,10 +162,10 @@ describe('documented command lines run in the CLI', () => {
     });
   });
 
-  it('runs the commands of the guide in order', async () => {
-    const guide = fencedCommands(GUIDE);
-    expect(guide.length).toBeGreaterThan(40);
-    expect(await failures(guide, documentedRuntime(guide.flat()))).toEqual([]);
+  it.each(GUIDE_PAGES)('runs the commands of the guide page %s in order', async (_, text) => {
+    const page = fencedCommands(text);
+    expect(page.length).toBeGreaterThan(0);
+    expect(await failures(page, documentedRuntime(page.flat()))).toEqual([]);
   });
 
   it('runs the commands of the README in order', async () => {

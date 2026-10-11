@@ -19,7 +19,12 @@ export interface CompletionOption {
 
 /** What positional arguments complete to. */
 export type Positional =
-  | { readonly kind: 'values'; readonly values: readonly string[] }
+  | {
+      readonly kind: 'values';
+      readonly values: readonly string[];
+      /** Descriptions of the values (`operate guide <topic>`), shown by zsh and fish. */
+      readonly descriptions?: Readonly<Record<string, string>>;
+    }
   | { readonly kind: 'path'; readonly path: PathKind }
   /** A profile name, then (`config unset`) any of `rest`, each once. */
   | { readonly kind: 'profiles'; readonly rest?: readonly string[] }
@@ -125,12 +130,24 @@ function describeCandidates(
   return group === undefined ? NONE : commandCandidates(group.commands, current);
 }
 
+/** The description of a value, from own keys only (`constructor` has none). */
+function valueDescription(
+  descriptions: Readonly<Record<string, string>> | undefined,
+  value: string,
+): string {
+  const own = descriptions !== undefined && Object.hasOwn(descriptions, value);
+  return (own ? descriptions[value] : undefined) ?? '';
+}
+
 /** Candidates of the first positional argument per kind. */
 function firstPositional(positional: Positional, context: CompletionContext, current: string) {
   switch (positional.kind) {
     case 'values':
       return candidates(
-        positional.values.map((value) => ({ value, description: '' })),
+        positional.values.map((value) => ({
+          value,
+          description: valueDescription(positional.descriptions, value),
+        })),
         current,
       );
     case 'top-level':
