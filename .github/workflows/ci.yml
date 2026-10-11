@@ -275,11 +275,11 @@ jobs:
           overwrite: true
 
   # The shards run without a break threshold; this job applies it to the score of all mutants. It
-  # also runs when a shard failed and then fails itself, instead of being skipped (a skipped job
-  # passes as a required check). On pull requests it only reports (--informational): the score of
-  # the shards that ran, the skipped ones and a score below the threshold become annotations and
-  # the job summary, never a failure, so no mutation job is a merge criterion. Pushes to main and
-  # the weekly run enforce the threshold. Superseded (cancelled) runs skip it.
+  # also runs when a shard failed and then fails itself instead of being skipped, so a run with a
+  # missing shard never passes. That holds for pushes to main, the weekly and manual runs. On pull
+  # requests it only reports (--informational): the score of the shards that ran, skipped shards
+  # and a score below the threshold become annotations and the job summary, never a failure, so no
+  # mutation job is a merge criterion. Superseded (cancelled) runs skip it.
   mutation-score:
     name: mutation score
     needs: mutation

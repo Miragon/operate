@@ -34,8 +34,10 @@ export const thresholds = { high: 97, low: 95, break: 94 };
 /**
  * The logic layers and the catalog generator. Left out: the CLI wiring and registration
  * (`src/cli`), help and guide texts (`src/docs`), the Node.js glue (`src/bin`) and the packaging
- * scripts (`scripts/exe`), which the command line and integration tests cover; the coverage gate
- * still measures them.
+ * scripts (`scripts/exe`), which the command line and integration tests cover, and the data tables
+ * of the generator (group descriptions, name overrides; the summary texts in summaries.ts are
+ * disabled inline), whose mutants only the golden catalog test detects, as `generate:check` does.
+ * The coverage gate still measures all of them.
  */
 const MUTATE = [
   'src/auth/**/*.ts',
@@ -50,7 +52,9 @@ const MUTATE = [
   'scripts/catalog/**/*.ts',
   '!**/*.test.ts',
   '!**/types.ts',
+  '!scripts/catalog/groups.ts',
   '!scripts/catalog/openapi.ts',
+  '!scripts/catalog/overrides.ts',
 ];
 
 /**
