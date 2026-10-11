@@ -1,14 +1,16 @@
 /**
  * Every example command line (curated and generic) and every `operate` command in the code blocks
- * of the guide must be valid against the catalog: known group and command, the right number of
- * positional arguments, only options the command registers (operation options from
- * `operationOptions`, `--no-x` for boolean options, the global options of GLOBAL_FLAGS) and values
- * the CLI accepts. So neither the examples nor the guide can drift from the catalog.
+ * of the guide (the core and every topic) must be valid against the catalog: known group and
+ * command, the right number of positional arguments, only options the command registers (operation
+ * options from `operationOptions`, `--no-x` for boolean options, the global options of
+ * GLOBAL_FLAGS) and values the CLI accepts. So neither the examples nor the guide can drift from
+ * the catalog.
  */
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { GLOBAL_FLAGS } from '../../scripts/catalog/flags.js';
+import { GUIDE_PAGES } from '../../test/support/guide-pages.js';
 import { findByOperationId, findGroup, findOperation, loadCatalog } from '../catalog/catalog.js';
 import { EFFECTS, type OperationSpec } from '../catalog/types.js';
 import { GLOBAL_OPTIONS } from './globals.js';
@@ -16,7 +18,7 @@ import { validateBody } from '../catalog/validate.js';
 import { normalizeDateTime } from '../operation/dates.js';
 import { parseVariable } from '../operation/variables.js';
 import { examplesFor } from '../docs/examples.js';
-import { GUIDE } from '../docs/guide.js';
+import { findGuideTopic } from '../docs/guide.js';
 import { type OptionDoc, operationArguments, operationOptions } from '../docs/options.js';
 import { commandWords } from '../docs/text.js';
 import { findWorkflow, WORKFLOW_DOCS, type WorkflowDoc } from '../docs/workflow.js';
@@ -316,6 +318,16 @@ function checkConfig(rest: readonly string[]): void {
   if (subcommand === 'set') expect(positionals[0]).toMatch(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 }
 
+/** `operate guide [topic]` or `operate guide --list`, with `-o` for the list. */
+function checkGuide(rest: readonly string[]): void {
+  const flags = withFlags(new Map([['output', GLOBALS.get('output')!]]), {
+    list: { takesValue: false },
+  });
+  const positionals = parseWords(rest, flags);
+  expect(positionals.length).toBeLessThanOrEqual(rest.includes('--list') ? 0 : 1);
+  if (positionals[0] !== undefined) expect(findGuideTopic(positionals[0])).toBeDefined();
+}
+
 const UTILITIES: Readonly<Record<string, (rest: readonly string[]) => void>> = {
   commands: checkCommands,
   describe: checkDescribe,
@@ -323,9 +335,7 @@ const UTILITIES: Readonly<Record<string, (rest: readonly string[]) => void>> = {
   ping: (rest) => {
     expect(parseWords(rest, GLOBALS)).toEqual([]);
   },
-  guide: (rest) => {
-    expect(rest).toEqual([]);
-  },
+  guide: checkGuide,
   config: checkConfig,
   completion: (rest) => {
     expect(rest).toHaveLength(1);
@@ -407,6 +417,9 @@ describe('the command line checker', () => {
     expect(ok('operate completion zsh')).not.toThrow();
     expect(ok('operate describe inspect')).not.toThrow();
     expect(ok('operate commands workflow')).not.toThrow();
+    expect(ok('operate guide')).not.toThrow();
+    expect(ok('operate guide auth')).not.toThrow();
+    expect(ok('operate guide --list -o table')).not.toThrow();
   });
 
   it('rejects drift from the catalog', () => {
@@ -441,6 +454,10 @@ describe('the command line checker', () => {
     expect(ok('operate api DELETE /process-instance/abc')).toThrow();
     expect(ok('operate ping extra')).toThrow();
     expect(ok('operate guide --pretty')).toThrow();
+    expect(ok('operate guide setup')).toThrow();
+    expect(ok('operate guide auth recipes')).toThrow();
+    expect(ok('operate guide auth --list')).toThrow();
+    expect(ok('operate guide --list -o yaml')).toThrow();
     expect(ok('operate inspect a b')).toThrow();
     expect(ok('operate inspect a --nope')).toThrow();
     expect(ok('operate wait a --until done')).toThrow();
@@ -512,14 +529,28 @@ describe('workflow examples', () => {
   });
 });
 
+/**
+ * The minimum number of command lines over all guide pages: well below their count, so that
+ * independent edits that each drop a few lines cannot break main by a narrow margin.
+ */
+const MIN_GUIDE_COMMANDS = 60;
+
 describe('guide', () => {
-  const commands = guideCommands(GUIDE);
+  const commands = GUIDE_PAGES.flatMap(([page, text]) =>
+    guideCommands(text).map((words) => [page, words] as const),
+  );
 
-  it('has plenty of command lines', () => {
-    expect(commands.length).toBeGreaterThan(40);
+  it('has plenty of command lines over all pages, and some on every page', () => {
+    expect(commands.length).toBeGreaterThanOrEqual(MIN_GUIDE_COMMANDS);
+    expect(new Set(commands.map(([page]) => page))).toEqual(
+      new Set(GUIDE_PAGES.map(([page]) => page)),
+    );
   });
 
-  it.each(commands.map((words) => [words.join(' '), words] as const))('%s is valid', (_, words) => {
-    checkCommandLine(words);
-  });
+  it.each(commands.map(([page, words]) => [page, words.join(' '), words] as const))(
+    '%s: %s is valid',
+    (_, __, words) => {
+      checkCommandLine(words);
+    },
+  );
 });

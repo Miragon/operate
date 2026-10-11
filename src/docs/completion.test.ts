@@ -213,6 +213,26 @@ describe('complete', () => {
     expect(offered('deploy', '')).toBe(':files');
     expect(offered('deploy', 'a.bpmn', '')).toBe(':files');
   });
+
+  it('describes positional values that come with descriptions', () => {
+    const guide = command('guide', 'utility', {
+      positional: {
+        kind: 'values',
+        values: ['auth', 'input', 'constructor'],
+        descriptions: { auth: 'Auth' },
+      },
+    });
+    const withGuide = { ...context, root: { ...context.root, commands: [guide] } };
+    expect(complete(withGuide, ['guide'], '')).toEqual({
+      kind: 'candidates',
+      candidates: [
+        { value: 'auth', description: 'Auth' },
+        { value: 'input', description: '' },
+        { value: 'constructor', description: '' },
+      ],
+    });
+    expect(complete(withGuide, ['guide', 'auth'], '')).toEqual(NONE);
+  });
 });
 
 describe('formatCompletion', () => {
