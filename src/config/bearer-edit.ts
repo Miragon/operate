@@ -5,9 +5,10 @@
  */
 
 import { compact } from '../util.js';
-import { normalizeToken, validateTokenEnv } from './bearer.js';
+import { normalizeToken } from './bearer.js';
 import { configError } from './config-error.js';
 import type { BEARER_AUTH_KEYS, ProfileAuth } from './types.js';
+import { TOKEN_VARIABLE, validateVariableName } from './variable.js';
 
 export interface BearerChanges {
   /** Name of the variable holding the token; replaces a stored token. */
@@ -35,7 +36,9 @@ export function changedBearerKeys(
       'Store the name of the environment variable that holds the token (recommended), or the token itself.',
     );
   }
-  if (authTokenEnv !== undefined) return { tokenEnv: validateTokenEnv(authTokenEnv) };
+  if (authTokenEnv !== undefined) {
+    return { tokenEnv: validateVariableName(authTokenEnv, TOKEN_VARIABLE) };
+  }
   if (authToken !== undefined) return { token: normalizeToken(authToken, '--auth-token-stdin') };
   return compact({ tokenEnv: existing?.tokenEnv, token: existing?.token });
 }

@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { fakeRuntime } from '../../../test/support/fake-runtime.js';
+import { fakeRuntime, fileText } from '../../../test/support/fake-runtime.js';
 import {
   cachedLogin,
   cacheText,
@@ -12,10 +12,12 @@ import {
 import { OperateError } from '../../errors.js';
 import type { FileSystem } from '../../runtime.js';
 import {
+  adoptLegacyLogins,
   cacheFileName,
   cachePath,
   clientAuthOf,
   isLockError,
+  profileCachePath,
   readCache,
   removeCache,
   serializeCache,
@@ -335,5 +337,207 @@ describe('withCacheLock', () => {
     const deps = { ...oauthDeps(fakeRuntime()), fs: failingFs('mkdir', 'EACCES') };
     const error = await rejection(withCacheLock(TOKEN_FILE, deps, () => Promise.resolve()));
     expect(error.message).toBe(`Cannot write token cache ${TOKEN_FILE} (EACCES)`);
+  });
+});
+
+describe('logins cached under the file names of operate 0.5.0', () => {
+  const at = (fileName: string) => `${TOKEN_DIR}/${fileName}`;
+  const login = (user: string) => cacheText(cachedLogin(NOW, { user }));
+  const userOf = async (path: string, runtime: ReturnType<typeof fakeRuntime>) =>
+    (await readCache(path, oauthDeps(runtime), undefined))?.user;
+
+  it('moves the login of a profile with upper-case letters to its current file', async () => {
+    const runtime = fakeRuntime({ files: { [at('profile-Prod.json')]: login('alice') } });
+    const deps = oauthDeps(runtime, { timeoutMs: 5_000 });
+    const path = await cachePath(oauthConfig({ profile: 'Prod' }), deps);
+    expect(path).toBe(at('profile-%50rod.json'));
+    expect(fileText(runtime, path)).toBe(login('alice'));
+    expect(runtime.files.get(path)?.mode).toBe(0o600);
+    expect(runtime.files.has(at('profile-Prod.json'))).toBe(false);
+    // under the lock of the old file (operate 0.5.0 writes it under that one), then the new one
+    expect(runtime.locks).toEqual([
+      { path: `${at('profile-Prod.json')}.lock`, holdMs: 15_000 },
+      { path: `${path}.lock`, holdMs: 15_000 },
+    ]);
+    await expect(userOf(path, runtime)).resolves.toBe('alice');
+    // done once: the next command finds the current file
+    await expect(cachePath(oauthConfig({ profile: 'Prod' }), deps)).resolves.toBe(path);
+    expect(runtime.locks).toHaveLength(2);
+  });
+
+  it('leaves the files of names without upper-case letters as they are', async () => {
+    const runtime = fakeRuntime({ files: { [at('profile-prod-eu.json')]: login('bob') } });
+    const path = await cachePath(oauthConfig({ profile: 'prod-eu' }), oauthDeps(runtime));
+    expect(path).toBe(at('profile-prod-eu.json'));
+    expect(fileText(runtime, path)).toBe(login('bob'));
+    expect(runtime.locks).toEqual([]);
+  });
+
+  it('keeps the logins of case variants apart where they had files of their own', async () => {
+    // a case-sensitive file system (Linux): three profiles, three files
+    const runtime = fakeRuntime({
+      files: {
+        [at('profile-prod.json')]: login('lower'),
+        [at('profile-Prod.json')]: login('capital'),
+        [at('profile-PROD.json')]: login('upper'),
+        [at('profile-other.json')]: login('other'),
+        [at('profile-Other.json')]: login('Other'),
+      },
+    });
+    const deps = oauthDeps(runtime);
+    // any of them moves all old files that a case-insensitive file system would confuse
+    await expect(profileCachePath('prod', deps)).resolves.toBe(at('profile-prod.json'));
+    expect([...runtime.files.keys()].sort()).toEqual(
+      [
+        at('profile-%50%52%4f%44.json'),
+        at('profile-%50rod.json'),
+        at('profile-Other.json'),
+        at('profile-other.json'),
+        at('profile-prod.json'),
+      ].sort(),
+    );
+    await expect(userOf(at('profile-prod.json'), runtime)).resolves.toBe('lower');
+    await expect(userOf(await profileCachePath('Prod', deps), runtime)).resolves.toBe('capital');
+    await expect(userOf(await profileCachePath('PROD', deps), runtime)).resolves.toBe('upper');
+    await expect(userOf(await profileCachePath('Other', deps), runtime)).resolves.toBe('Other');
+  });
+
+  it('never takes the file of a profile spelled in another case (case-insensitive file systems)', async () => {
+    // macOS, Windows: profile "lower" created the shared file; "LOWER" must not take it
+    const runtime = fakeRuntime({
+      caseInsensitive: true,
+      files: { [at('profile-lower.json')]: login('lower') },
+    });
+    const deps = oauthDeps(runtime);
+    const upper = await profileCachePath('LOWER', deps);
+    expect(upper).toBe(at('profile-%4c%4f%57%45%52.json'));
+    await expect(readCache(upper, deps, 'LOWER')).resolves.toBeUndefined();
+    expect(runtime.locks).toEqual([]);
+    await expect(userOf(await profileCachePath('lower', deps), runtime)).resolves.toBe('lower');
+  });
+
+  it('gives an old file to the profile spelled like it, whichever case variant runs first', async () => {
+    for (const first of ['lower', 'Lower', 'LOWER']) {
+      // "LOWER" created the shared file: on a case-insensitive file system it also opens as
+      // profile-lower.json, so "lower" would read it as its own login until it moves
+      const runtime = fakeRuntime({
+        caseInsensitive: true,
+        files: { [at('profile-LOWER.json')]: login('upper') },
+      });
+      const deps = oauthDeps(runtime);
+      await profileCachePath(first, deps);
+      expect([...runtime.files.keys()], first).toEqual([at('profile-%4c%4f%57%45%52.json')]);
+      await expect(readCache(at('profile-lower.json'), deps, 'lower')).resolves.toBeUndefined();
+      await expect(userOf(await profileCachePath('LOWER', deps), runtime)).resolves.toBe('upper');
+    }
+  });
+
+  it('keeps a current file and removes the old one', async () => {
+    const runtime = fakeRuntime({
+      files: {
+        [at('profile-Prod.json')]: login('old'),
+        [at('profile-%50rod.json')]: login('new'),
+      },
+    });
+    const path = await cachePath(oauthConfig({ profile: 'Prod' }), oauthDeps(runtime));
+    expect([...runtime.files.keys()]).toEqual([path]);
+    await expect(userOf(path, runtime)).resolves.toBe('new');
+  });
+
+  it('does nothing when another process moved the file while this one waited for the lock', async () => {
+    const runtime = fakeRuntime({ files: { [at('profile-Prod.json')]: login('alice') } });
+    const deps = oauthDeps(runtime, {
+      withLock: async (path, holdMs, action) => {
+        // the other process: moved the login, then logged out
+        runtime.files.delete(at('profile-Prod.json'));
+        return runtime.withLock(path, holdMs, action);
+      },
+    });
+    const path = await profileCachePath('Prod', deps);
+    expect(runtime.files.size).toBe(0);
+    await expect(readCache(path, deps, 'Prod')).resolves.toBeUndefined();
+  });
+
+  it('re-checks the exact spelling under the lock, never taking a file spelled in another case', async () => {
+    // case-insensitive: while this process waited, another one moved the old file of "LOWER"
+    // and "lower" logged in; profile-LOWER.json still opens, but as the login of "lower"
+    const runtime = fakeRuntime({
+      caseInsensitive: true,
+      files: { [at('profile-LOWER.json')]: login('upper') },
+    });
+    let others = true;
+    const deps = oauthDeps(runtime, {
+      withLock: async (path, holdMs, action) => {
+        if (others) {
+          others = false;
+          await runtime.fs.writeFile(at('profile-%4c%4f%57%45%52.json'), login('upper'));
+          await runtime.fs.remove(at('profile-LOWER.json'));
+          await runtime.fs.writeFile(at('profile-lower.json'), login('lower'));
+        }
+        return runtime.withLock(path, holdMs, action);
+      },
+    });
+    await expect(runtime.fs.exists(at('profile-LOWER.json'))).resolves.toBe(true);
+    await profileCachePath('lower', deps);
+    expect([...runtime.files.keys()].sort()).toEqual([
+      at('profile-%4c%4f%57%45%52.json'),
+      at('profile-lower.json'),
+    ]);
+    await expect(userOf(at('profile-lower.json'), runtime)).resolves.toBe('lower');
+    await expect(userOf(at('profile-%4c%4f%57%45%52.json'), runtime)).resolves.toBe('upper');
+  });
+
+  it('moves files only, never a directory of that name', async () => {
+    const runtime = fakeRuntime({ dirs: [at('profile-Prod.json')] });
+    await expect(profileCachePath('Prod', oauthDeps(runtime))).resolves.toBe(
+      at('profile-%50rod.json'),
+    );
+    expect(runtime.locks).toEqual([]);
+  });
+
+  it('works without a token directory', async () => {
+    const runtime = fakeRuntime();
+    await expect(profileCachePath('Prod', oauthDeps(runtime))).resolves.toBe(
+      at('profile-%50rod.json'),
+    );
+    expect(runtime.locks).toEqual([]);
+  });
+
+  it('reports a file it cannot move as CONFIG, naming both paths', async () => {
+    const runtime = fakeRuntime({ files: { [at('profile-Prod.json')]: login('alice') } });
+    const fs: FileSystem = {
+      ...runtime.fs,
+      writeFile: () => Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' })),
+    };
+    const error = await rejection(adoptLegacyLogins('Prod', { ...oauthDeps(runtime), fs }));
+    expect(error.code).toBe('CONFIG');
+    expect(error.message).toBe(
+      `Cannot move the OAuth login cached in ${at('profile-Prod.json')} to ${at('profile-%50rod.json')} (EACCES)`,
+    );
+    expect(error.details.hint).toBe('Check the permissions of the token directory and its files.');
+    expect(runtime.files.has(at('profile-Prod.json'))).toBe(true);
+  });
+
+  it('reports a lock that cannot be taken like every cache lock', async () => {
+    const runtime = fakeRuntime({
+      lockTimeout: true,
+      files: { [at('profile-Prod.json')]: login('alice') },
+    });
+    const error = await rejection(profileCachePath('Prod', oauthDeps(runtime)));
+    expect(isLockError(error)).toBe(true);
+    expect(error.message).toBe(`Cannot lock the token cache ${at('profile-Prod.json')}`);
+    expect(runtime.files.has(at('profile-Prod.json'))).toBe(true);
+  });
+
+  it('moves only old file names: never env- files, lock files or current names', async () => {
+    const files = {
+      [at('profile-%50rod.json')]: login('current'),
+      [at('profile-Prod.json.lock')]: '{}',
+      [at('env-0123456789abcdef0123456789abcdef.json')]: login('env'),
+      [at('.profile-Prod.json.1a2b3c.tmp')]: login('tmp'),
+    };
+    const runtime = fakeRuntime({ files });
+    await profileCachePath('Prod', oauthDeps(runtime));
+    expect([...runtime.files.keys()].sort()).toEqual(Object.keys(files).sort());
   });
 });

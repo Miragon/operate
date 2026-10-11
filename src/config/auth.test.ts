@@ -6,7 +6,6 @@ import {
   profileAuthProblem,
   validateAuthType,
   validatePassword,
-  validatePasswordEnv,
   validateUsername,
 } from './auth.js';
 
@@ -123,26 +122,6 @@ describe('validatePassword', () => {
       ),
     );
   });
-});
-
-describe('validatePasswordEnv', () => {
-  it.each(['CAMUNDA_PASSWORD', '_x', 'a1', ' PW '])('accepts %j', (name) => {
-    expect(validatePasswordEnv(name)).toBe(name.trim());
-  });
-
-  it.each(['', '1PW', 'MY-VAR', 'p@ss w0rd!', 'A.B'])(
-    'rejects %j without repeating it (it may be the password)',
-    (name) => {
-      const error = failure(() => validatePasswordEnv(name));
-      expect(error.code).toBe('CONFIG');
-      expect(error.message).toBe(
-        'Invalid --auth-password-env: expected the name of an environment variable',
-      );
-      expect(error.details.hint).toBe(
-        'Use letters, digits and "_", not starting with a digit, e.g. --auth-password-env CAMUNDA_PASSWORD.',
-      );
-    },
-  );
 });
 
 describe('profileAuthProblem', () => {

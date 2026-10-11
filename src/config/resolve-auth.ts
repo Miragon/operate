@@ -36,6 +36,7 @@ import {
   type Source,
   type UnusedToken,
 } from './types.js';
+import { PASSWORD_VARIABLE, unsetVariable } from './variable.js';
 
 interface Context {
   readonly flags: ConfigFlags;
@@ -80,14 +81,14 @@ function fromProfile<T>(
   return found(read(selected.profile.auth ?? {}), 'profile', label(`profile "${selected.name}"`));
 }
 
-/** The variable named by auth.passwordEnv; it must be set (never quoted in errors). */
+/**
+ * The variable named by auth.passwordEnv; it must be set. Its name is repeated only in the usual
+ * form (`unsetVariable`): a password typed in its place must not show up in the error.
+ */
 function passwordFromEnv(variable: string, name: string, env: Env): string {
   const value = present(env[variable]);
   if (value !== undefined) return value;
-  throw configError(
-    `The password variable ${variable} (auth.passwordEnv of profile "${name}") is not set or empty`,
-    `Export it, e.g. export ${variable}=<password>, or name another variable with \`operate config set ${name} --auth-password-env <VAR>\`.`,
-  );
+  throw unsetVariable(variable, name, PASSWORD_VARIABLE);
 }
 
 /** The password of the profile: from the variable it names, else stored literally. */

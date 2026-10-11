@@ -325,16 +325,53 @@ describe('config commands', () => {
   });
 
   it('warns, without naming it, when the password variable is not set here', async () => {
-    for (const env of [{}, { S3cr3tPW: ' ' }]) {
-      const result = await cli([...setBasic, '--auth-password-env', ' S3cr3tPW '], { env });
+    for (const env of [{}, { CAMUNDA_PW_2: ' ' }]) {
+      const result = await cli([...setBasic, '--auth-password-env', ' CAMUNDA_PW_2 '], { env });
       expect(result.code).toBe(0);
       expect(result.stderr).toBe(UNSET_WARNING);
-      expect(result.stderr).not.toContain('S3cr3tPW');
+      expect(result.stderr).not.toContain('CAMUNDA_PW_2');
     }
     const other = await cli(['config', 'set', 'p', '--auth-user', 'demo'], { env: {} });
     expect(other.stderr).toBe('');
     const set = await cli([...setBasic, '--auth-password-env', ' PW '], { env: { PW: 'x' } });
     expect(set).toMatchObject({ code: 0, stderr: '' });
+  });
+
+  it('refuses a password given to --auth-password-env without storing or repeating it', async () => {
+    const password = 'S3cr3tPW';
+    for (const env of [{}, { S3cr3tPW: ' ' }]) {
+      const result = await cli([...setBasic, '--auth-password-env', ` ${password} `], { env });
+      expect(result.code).toBe(3);
+      expect(errorOf(result.stderr)).toMatchObject({
+        code: 'CONFIG',
+        message:
+          '--auth-password-env names a variable that is not set and does not look like a variable name: it may be the password itself, so it is neither stored nor repeated',
+      });
+      expect(result.stdout + result.stderr).not.toContain(password);
+      expect(fileText(result.runtime, CONFIG_PATH)).toBeUndefined();
+    }
+    // a set variable in any form is stored without a warning
+    const set = await cli([...setBasic, '--auth-password-env', password], {
+      env: { [password]: 'x' },
+    });
+    expect(set).toMatchObject({ code: 0, stderr: '' });
+    // a hand-edited file: an unusual unset name is not repeated either
+    const files = {
+      [CONFIG_PATH]: profiles({ p: { auth: { username: 'demo', passwordEnv: password } } }),
+    };
+    for (const args of [
+      ['task', 'list'],
+      ['config', 'show'],
+      ['ping', '--dry-run'],
+    ]) {
+      const run = await cli(args, { files });
+      expect(errorOf(run.stderr)).toMatchObject({
+        code: 'CONFIG',
+        message:
+          'The password variable named by auth.passwordEnv of profile "p" is not set or empty',
+      });
+      expect(run.stdout + run.stderr).not.toContain(password);
+    }
   });
 
   it('replaces a stored Authorization header with Basic auth, keeping other headers', async () => {

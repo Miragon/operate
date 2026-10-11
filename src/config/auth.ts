@@ -1,8 +1,9 @@
 /**
  * Validation of the auth settings (design §15, §16, §18): the auth type, Basic auth usernames and
- * passwords (RFC 7617: no control characters, no ":" in the username), the name of a password
- * variable and the auth object of a profile in the config file (the OAuth rules live in oauth.ts,
- * the bearer token rules in bearer.ts). Messages never repeat a username, password or token.
+ * passwords (RFC 7617: no control characters, no ":" in the username) and the auth object of a
+ * profile in the config file (the OAuth rules live in oauth.ts, the bearer token rules in
+ * bearer.ts, the names of the variables that hold secrets in variable.ts). Messages never repeat
+ * a username, password or token.
  */
 
 import { isRecord } from '../util.js';
@@ -59,21 +60,6 @@ export function validatePassword(password: string, label: string): string {
     );
   }
   return password;
-}
-
-/**
- * Checks the name of the environment variable that holds the password. An invalid name is not
- * repeated: it may be the password itself, given by mistake.
- */
-export function validatePasswordEnv(name: string): string {
-  const trimmed = name.trim();
-  if (!ENV_NAME.test(trimmed)) {
-    throw configError(
-      'Invalid --auth-password-env: expected the name of an environment variable',
-      'Use letters, digits and "_", not starting with a digit, e.g. --auth-password-env CAMUNDA_PASSWORD.',
-    );
-  }
-  return trimmed;
 }
 
 type Check = readonly [check: (value: unknown) => boolean, expected: string];

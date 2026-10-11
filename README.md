@@ -435,7 +435,12 @@ request in), Operaton Run with `operaton.bpm.run.auth.enabled=true`, or a
   `passwordEnv`, the name of an environment variable that holds the password; a literal
   `password` is stored in plain text (the config file has mode `0600`, and `config set` warns).
   `config set` also warns, without repeating it, when the variable given to
-  `--auth-password-env` is not set in its environment: pass the name, never the password.
+  `--auth-password-env` is not set in its environment: pass the name, never the password. An
+  unset name that is not in the usual upper-case form (`--auth-password-env s3cret_pw` instead of
+  `CAMUNDA_PASSWORD`) is refused without being stored or repeated. Errors repeat the
+  `passwordEnv` of a profile only in that form, and the profile that `config set|unset|use`
+  print shows `***` for an unset name in another form (the same holds for
+  `--oauth-client-secret-env` / `clientSecretEnv` and `--auth-token-env` / `tokenEnv`).
 - Basic auth with a missing username or password fails with exit code 3 before any request is
   sent, naming where each value was looked up. Usernames must not contain `:` (RFC 7617), and
   neither value may contain control characters.
@@ -503,8 +508,10 @@ $ operate process-instance list --profile sso
   every other value resolves on its own (environment > profile > default). URLs must use
   `https://` (`http://` only for `localhost`, `127.0.0.1` and `[::1]`). A public client (no
   secret) with PKCE is the normal case; `--oauth-client-secret-stdin` stores a literal secret
-  (with a warning). OAuth together with an `Authorization` header, or with
-  `--auth-password-stdin`, is a configuration error, and so is a missing issuer or client id.
+  (with a warning); a client secret given to `--oauth-client-secret-env` in place of the name of
+  its variable is refused like a password (see Basic auth). OAuth together with an
+  `Authorization` header, or with `--auth-password-stdin`, is a configuration error, and so is a
+  missing issuer or client id.
 - `operate auth login [--no-browser] [--login-timeout <ms>]` uses the authorization code flow
   with PKCE (`S256`) and a random `state`, and listens on `127.0.0.1` only while it waits for
   the redirect (RFC 8252). It prints the URL before it starts the system browser (`BROWSER`, else
@@ -526,9 +533,13 @@ $ operate process-instance list --profile sso
 - Tokens are cached per profile in `$XDG_CONFIG_HOME/operate/tokens/profile-<name>.json` (default
   `~/.config/operate/tokens`, Windows `%APPDATA%\operate\tokens`; without a profile
   `env-<hash>.json`), written atomically with mode `0600` in a `0700` directory, never next to a
-  config file named by `--config`. A login is kept for the issuer, client, audience and scopes it
-  was made for; changing them needs a new login (`LOGIN_REQUIRED` names what differs and which
-  `OPERATE_OAUTH_*` variable of the environment causes it).
+  config file named by `--config`. Upper-case letters of the profile name are percent-encoded
+  (`Prod` → `profile-%50rod.json`), so profiles whose names differ only in case keep separate
+  logins on case-insensitive file systems (macOS, Windows) too; a login that operate 0.5.0 or
+  earlier cached as `profile-Prod.json` moves to the new name on first use. A login is kept for
+  the issuer, client, audience and scopes it was made for; changing them needs a new login
+  (`LOGIN_REQUIRED` names what differs and which `OPERATE_OAUTH_*` variable of the environment
+  causes it).
 - Refreshes happen 60 s before the access token expires (at most half its lifetime) and once
   after a 401; rotated refresh tokens are stored. Commands running in parallel share one refresh
   through a lock file, so a refresh token is never sent twice (Keycloak ends the session when one

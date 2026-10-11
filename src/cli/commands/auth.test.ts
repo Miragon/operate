@@ -544,6 +544,95 @@ describe('operate auth logout', () => {
   });
 });
 
+describe('profiles whose names differ only in case', () => {
+  const at = (fileName: string) => `${TOKEN_DIR}/${fileName}`;
+  /** Profiles "lower" and "LOWER" of the same issuer and client: one identity for both. */
+  const files = (tokens: Record<string, string>) => ({
+    [CONFIG_PATH]: JSON.stringify({
+      profiles: Object.fromEntries(
+        ['lower', 'LOWER'].map((name) => [
+          name,
+          { auth: { type: 'oauth', issuer: ISSUER, clientId: 'operate-cli' } },
+        ]),
+      ),
+    }),
+    ...tokens,
+  });
+  const login = (user: string) => cacheText(cachedLogin(T0, { user }));
+
+  it('log in to files of their own, also on a case-insensitive file system', async () => {
+    const { cli, runtime } = setup({ files: files({}), runtime: { caseInsensitive: true } });
+    expect((await cli(['auth', 'login', '--profile', 'lower'])).code).toBe(0);
+    const upper = await cli(['auth', 'login', '--profile', 'LOWER', '-o', 'table']);
+    expect(upper.code).toBe(0);
+    expect(upper.stdout).toContain(at('profile-%4c%4f%57%45%52.json'));
+    expect([...runtime.files.keys()].filter((path) => path.startsWith(TOKEN_DIR)).sort()).toEqual([
+      at('profile-%4c%4f%57%45%52.json'),
+      at('profile-lower.json'),
+    ]);
+  });
+
+  it('auth logout --profile LOWER never removes the login of "lower"', async () => {
+    const { cli, idp, runtime } = setup({
+      files: files({ [at('profile-lower.json')]: login('lower') }),
+      runtime: { caseInsensitive: true },
+    });
+    const result = await cli(['auth', 'logout', '--profile', 'LOWER']);
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({
+      profile: 'LOWER',
+      tokenCache: at('profile-%4c%4f%57%45%52.json'),
+      removed: false,
+      revoked: null,
+    });
+    expect(idp.requests).toEqual([]);
+    expect(fileText(runtime, at('profile-lower.json'))).toBe(login('lower'));
+    const status = await cli(['auth', 'status', '--profile', 'lower']);
+    expect(status.code).toBe(0);
+    const deleted = await cli(['config', 'delete', 'LOWER']);
+    expect(deleted.code).toBe(0);
+    expect(fileText(runtime, at('profile-lower.json'))).toBe(login('lower'));
+  });
+
+  it('keep a login cached under the file name of operate 0.5.0', async () => {
+    // "LOWER" logged in with operate 0.5.0 (profile-LOWER.json), "lower" never did
+    const { cli, idp, runtime } = setup({
+      files: files({ [at('profile-LOWER.json')]: login('upper') }),
+      runtime: { caseInsensitive: true },
+    });
+    const lower = await cli(['auth', 'status', '--profile', 'lower']);
+    expect(errorOf(lower.stderr)).toMatchObject({ code: 'LOGIN_REQUIRED' });
+    runtime.stderr.chunks.length = 0;
+    const upper = await cli(['auth', 'status', '--profile', 'LOWER']);
+    expect(upper.code).toBe(0);
+    expect(JSON.parse(upper.stdout)).toMatchObject({
+      profile: 'LOWER',
+      user: 'upper',
+      tokenCache: at('profile-%4c%4f%57%45%52.json'),
+    });
+    expect([...runtime.files.keys()]).toContain(at('profile-%4c%4f%57%45%52.json'));
+    expect([...runtime.files.keys()]).not.toContain(at('profile-LOWER.json'));
+    runtime.stdout.chunks.length = 0;
+    const logout = await cli(['auth', 'logout', '--profile', 'LOWER']);
+    expect(JSON.parse(logout.stdout)).toMatchObject({ removed: true, revoked: true });
+    expect(idp.revoked).toEqual(['cached-refresh']);
+  });
+
+  it('move an old login on auth logout and config delete too', async () => {
+    for (const args of [
+      ['auth', 'logout', '--profile', 'LOWER'],
+      ['config', 'delete', 'LOWER'],
+    ]) {
+      const { cli, runtime } = setup({
+        files: files({ [at('profile-LOWER.json')]: login('upper') }),
+      });
+      const result = await cli(args);
+      expect(result.code, args.join(' ')).toBe(0);
+      expect([...runtime.files.keys()].filter((path) => path.startsWith(TOKEN_DIR))).toEqual([]);
+    }
+  });
+});
+
 describe('parseLoginTimeout', () => {
   it('defaults to five minutes', () => {
     expect(parseLoginTimeout(undefined)).toBe(300_000);

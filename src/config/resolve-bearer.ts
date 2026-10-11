@@ -8,7 +8,7 @@
 
 import { OperateError } from '../errors.js';
 import { compact } from '../util.js';
-import { isConventionalVariable, normalizeToken } from './bearer.js';
+import { normalizeToken } from './bearer.js';
 import { configError } from './config-error.js';
 import type { Env } from './pick.js';
 import {
@@ -21,6 +21,7 @@ import {
   type Source,
   type UnusedToken,
 } from './types.js';
+import { TOKEN_VARIABLE, unsetVariable } from './variable.js';
 
 export interface BearerContext {
   readonly flags: ConfigFlags;
@@ -55,28 +56,10 @@ export function givenToken({ flags, env }: BearerContext): FoundToken | undefine
     : { value: fromEnv, source: 'env', origin: ENV.token, variable: ENV.token };
 }
 
-/**
- * The error for an unset auth.tokenEnv variable. Its name is repeated only in the usual form: a
- * name like `ghp_...` may be the token itself, stored by mistake.
- */
-function unsetVariable(variable: string, name: string) {
-  const another = `name another variable with \`operate config set ${name} --auth-token-env <VAR>\``;
-  if (isConventionalVariable(variable)) {
-    return configError(
-      `The token variable ${variable} (auth.tokenEnv of profile "${name}") is not set or empty`,
-      `Export it, e.g. export ${variable}=<token>, or ${another}.`,
-    );
-  }
-  return configError(
-    `The token variable named by auth.tokenEnv of profile "${name}" is not set or empty`,
-    `Its name is not in the usual upper-case form, so it is not repeated: it may be a token stored by mistake. Check auth.tokenEnv in the config file (\`operate config path\`), or ${another}.`,
-  );
-}
-
 /** The variable named by auth.tokenEnv; it must be set. */
 function tokenFromVariable(variable: string, name: string, env: Env): FoundToken {
   const value = present(env[variable]);
-  if (value === undefined) throw unsetVariable(variable, name);
+  if (value === undefined) throw unsetVariable(variable, name, TOKEN_VARIABLE);
   return {
     value,
     source: 'profile',

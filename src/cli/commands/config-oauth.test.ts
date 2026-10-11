@@ -146,13 +146,53 @@ describe('config set with OAuth options', () => {
     ]);
     expect(result.file?.profiles.p?.auth?.clientSecretEnv).toBe('OPERATE_SECRET_X');
     expect(result.stderr).toBe(
-      `Warning: the variable named by --oauth-client-secret-env is not set in this environment. Pass the name of a variable that holds the client secret (e.g. OPERATE_CLIENT_SECRET), never the secret itself; commands read it when they run.\n${NEXT}`,
+      `Warning: the variable named by --oauth-client-secret-env is not set in this environment. Pass the name of a variable that holds the client secret (e.g. OPERATE_CLIENT_SECRET), never the client secret itself; commands read it when they run.\n${NEXT}`,
     );
     expect(result.stderr).not.toContain('OPERATE_SECRET_X');
     const set = await cli(['config', 'set', 'p', '--oauth-client-secret-env', 'S'], {
       env: { S: 'v' },
     });
     expect(set.stderr).toBe(NEXT);
+  });
+
+  it('refuses a client secret given to --oauth-client-secret-env without storing or repeating it', async () => {
+    const secret = 'kc8Zr2mPq9TfX4vB7nL1sD6hJ3gW5yA0';
+    const set = ['config', 'set', 'p', '--oauth-issuer', ISSUER, '--oauth-client-id', 'c'];
+    const result = await cli([...set, '--oauth-client-secret-env', secret]);
+    expect(result.code).toBe(3);
+    expect(errorOf(result.stderr)).toMatchObject({
+      code: 'CONFIG',
+      message:
+        '--oauth-client-secret-env names a variable that is not set and does not look like a variable name: it may be the client secret itself, so it is neither stored nor repeated',
+    });
+    expect(result.stdout + result.stderr).not.toContain(secret);
+    expect(result.file).toBeUndefined();
+    // a hand-edited file: an unusual unset name is not repeated by any command either
+    const files = {
+      [CONFIG_PATH]: JSON.stringify({
+        defaultProfile: 'p',
+        profiles: {
+          p: { auth: { type: 'oauth', issuer: ISSUER, clientId: 'c', clientSecretEnv: secret } },
+        },
+      }),
+      [TOKEN_FILE]: cacheText(cachedLogin(T0)),
+    };
+    for (const args of [
+      ['process-definition', 'count'],
+      ['config', 'show'],
+      ['auth', 'status'],
+    ]) {
+      const run = await cli(args, { files });
+      expect(errorOf(run.stderr)).toMatchObject({
+        code: 'CONFIG',
+        message:
+          'The client secret variable named by auth.clientSecretEnv of profile "p" is not set or empty',
+      });
+      expect(run.stdout + run.stderr).not.toContain(secret);
+    }
+    const logout = await cli(['auth', 'logout'], { files });
+    expect(logout.code).toBe(0);
+    expect(logout.stdout + logout.stderr).not.toContain(secret);
   });
 
   it('replaces Basic auth settings with a notice', async () => {

@@ -149,21 +149,6 @@ export function parseRedirectPort(value: string | number, label: string): number
   return port;
 }
 
-/**
- * Checks the name of the variable that holds the client secret. An invalid name is not repeated:
- * it may be the secret itself, given by mistake.
- */
-export function validateSecretEnv(name: string, flag: string): string {
-  const trimmed = name.trim();
-  if (!ENV_NAME.test(trimmed)) {
-    throw configError(
-      `Invalid ${flag}: expected the name of an environment variable`,
-      `Use letters, digits and "_", not starting with a digit, e.g. ${flag} OPERATE_CLIENT_SECRET.`,
-    );
-  }
-  return trimmed;
-}
-
 type Check = readonly [check: (value: unknown) => boolean, expected: string];
 
 function isScopeList(value: unknown): boolean {

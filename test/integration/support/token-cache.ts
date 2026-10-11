@@ -47,8 +47,22 @@ export function tokenDirectory(configHome: string): string {
   return join(configHome, 'operate', 'tokens');
 }
 
-/** Path of the cache file of a profile. */
+/**
+ * Path of the cache file of a profile: every character outside `[a-z0-9._-]`, upper-case letters
+ * included, percent-encoded with lower-case hex (`Prod` → `profile-%50rod.json`), so profiles
+ * that differ only in case get different files also on case-insensitive file systems.
+ */
 export function profileCacheFile(configHome: string, profile: string): string {
+  const encoded = profile.replace(/[^a-z0-9._-]/g, (char) => {
+    const code = char.charCodeAt(0);
+    const hex = code.toString(16);
+    return code < 0x100 ? `%${hex.padStart(2, '0')}` : `%u${hex.padStart(4, '0')}`;
+  });
+  return join(tokenDirectory(configHome), `profile-${encoded}.json`);
+}
+
+/** Path of the cache file operate 0.5.0 and earlier used for a profile (the name as it is). */
+export function legacyProfileCacheFile(configHome: string, profile: string): string {
   return join(tokenDirectory(configHome), `profile-${profile}.json`);
 }
 
