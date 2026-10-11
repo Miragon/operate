@@ -42,6 +42,8 @@
   },
   "scripts": {
     "build": "tsdown",
+    "build:standalone": "tsdown -c tsdown.standalone.config.ts",
+    "build:exe": "tsx scripts/build-exe.ts",
     "generate": "tsx scripts/generate-catalog.ts",
     "generate:check": "tsx scripts/generate-catalog.ts --check",
     "typecheck": "tsc -p .",
@@ -72,6 +74,7 @@
     "eslint": "^10.12.0",
     "fast-check": "^4.10.2",
     "knip": "^6.40.0",
+    "postject": "^1.0.0-alpha.6",
     "prettier": "^3.9.9",
     "testcontainers": "^12.2.0",
     "tsdown": "^0.23.0",

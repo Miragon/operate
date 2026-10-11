@@ -34,6 +34,7 @@ export const thresholds = { high: 97, low: 95, break: 94 };
 const MUTATE = [
   'src/**/*.ts',
   'scripts/catalog/**/*.ts',
+  'scripts/exe/**/*.ts',
   '!**/*.test.ts',
   '!**/*.d.ts',
   '!src/bin/**',
@@ -138,7 +139,7 @@ export default {
   vitest: { configFile: 'vitest.config.ts', related: true },
   coverageAnalysis: 'perTest',
   mutate: MUTATE,
-  ignorePatterns: ['dist', 'coverage', '.context', '.claude', '.github'],
+  ignorePatterns: ['dist', 'build', 'coverage', '.context', '.claude', '.github'],
   incremental: true,
   incrementalFile: 'reports/stryker-incremental.json',
   reporters: ['clear-text', 'progress', 'html', 'json'],

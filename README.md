@@ -46,7 +46,10 @@ one JSON line on stderr and uses stable exit codes.
 
 ## Installation
 
-Requires Node.js >= 22.12.
+Three ways, the same CLI: the npm package (Node.js >= 22.12), a standalone executable for
+servers and machines without Node.js, or the container image.
+
+### npm
 
 ```sh
 npm install -g @miragon/operate
@@ -58,6 +61,93 @@ Or run it without installing:
 ```sh
 npx @miragon/operate --help
 ```
+
+### Standalone executable
+
+Every [GitHub release](https://github.com/Miragon/operate/releases) after 0.5.0 has a single file
+per platform that needs no Node.js (it embeds Node.js 24 as a
+[single executable application](https://nodejs.org/api/single-executable-applications.html)),
+plus `SHA256SUMS`:
+
+| Platform              | File                      | Requires                                                 |
+| --------------------- | ------------------------- | -------------------------------------------------------- |
+| Linux x64             | `operate-linux-x64`       | glibc >= 2.28 (Debian 10, Ubuntu 20.04, RHEL 8 or newer) |
+| Linux arm64           | `operate-linux-arm64`     | glibc >= 2.28                                            |
+| macOS (Apple silicon) | `operate-macos-arm64`     | macOS 13.5 or newer                                      |
+| macOS (Intel)         | `operate-macos-x64`       | macOS 13.5 or newer                                      |
+| Windows x64           | `operate-windows-x64.exe` | Windows 10 or Server 2016 or newer                       |
+
+Alpine and other musl based systems: use the container image or the npm package.
+
+Linux (on macOS take `operate-macos-arm64` or `operate-macos-x64`; `shasum -a 256 --check
+--ignore-missing SHA256SUMS` checks it there):
+
+```sh
+base=https://github.com/Miragon/operate/releases/latest/download
+curl -fL -O "$base/operate-linux-x64" -O "$base/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS
+sudo install -m 0755 operate-linux-x64 /usr/local/bin/operate
+operate --version
+```
+
+`latest/download` follows the newest release; `download/v<version>/<file>` pins one. The
+binaries are built and attested by the Release workflow of this repository; with the GitHub CLI,
+`gh attestation verify operate-linux-x64 --repo Miragon/operate` checks that a file came from it.
+
+- **macOS Gatekeeper.** The macOS binaries are signed ad hoc, not notarized. Files downloaded
+  with `curl` run as they are; a file downloaded with a browser is quarantined and blocked
+  ("Apple could not verify ..."). Remove the quarantine flag of that one file with
+  `xattr -d com.apple.quarantine operate-macos-arm64`, or allow it once under System Settings →
+  Privacy & Security.
+- **Windows.** Download `operate-windows-x64.exe` and compare
+  `(Get-FileHash operate-windows-x64.exe).Hash` in PowerShell with its line in `SHA256SUMS`. The
+  file is not Authenticode signed, so SmartScreen may warn on the first start of a downloaded copy.
+- **Certificates and proxies.** The embedded Node.js reads the usual variables: an internal CA
+  with `NODE_EXTRA_CA_CERTS=/path/ca.pem` or the system store with `NODE_USE_SYSTEM_CA=1`, an HTTP
+  proxy with `NODE_USE_ENV_PROXY=1` and `HTTPS_PROXY` / `NO_PROXY`. The same holds for the
+  container image.
+- `operate auth login` (OAuth) works on a server over SSH, see [OAuth](#oauth).
+
+### Container image
+
+`ghcr.io/miragon/operate` for `linux/amd64` and `linux/arm64`, from the first release after 0.5.0
+on, tagged `<version>`, `<major>.<minor>` and `latest`. It runs the CLI on
+[distroless](https://github.com/GoogleContainerTools/distroless) Node.js 24 as a non-root user
+(uid 65532), without a shell. Arguments after the image name go to `operate`; without `-t`
+stdout is no terminal, so the output is JSON.
+
+```sh
+docker run --rm ghcr.io/miragon/operate --version
+
+# An engine on the Docker host: Docker Desktop resolves host.docker.internal by itself, on Linux
+# --add-host maps it to the host
+docker run --rm --add-host=host.docker.internal:host-gateway \
+  -e OPERATE_URL=http://host.docker.internal:8080/engine-rest \
+  ghcr.io/miragon/operate ping
+
+# Credentials from the calling shell: -e NAME without a value passes the variable on, so the
+# secret appears neither in the command line nor in the shell history
+export OPERATE_URL=https://engine.example.com/engine-rest OPERATE_USERNAME=demo
+read -rs OPERATE_PASSWORD && export OPERATE_PASSWORD
+docker run --rm -e OPERATE_URL -e OPERATE_USERNAME -e OPERATE_PASSWORD \
+  ghcr.io/miragon/operate process-instance list --max-results 10
+docker run --rm -e OPERATE_URL -e OPERATE_TOKEN ghcr.io/miragon/operate task list
+
+# Files of the current directory (deployments, --out-file): mount it at /work, the working
+# directory of the image, and run as your own user so written files belong to you
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -e OPERATE_URL \
+  ghcr.io/miragon/operate deployment create invoice.bpmn
+
+# Profiles of your config file (mode 0600, hence --user), stdin with -i, tables with -t
+docker run --rm -it --user "$(id -u):$(id -g)" -v "$HOME/.config/operate:/config:ro" \
+  -e OPERATE_CONFIG=/config/config.json ghcr.io/miragon/operate --profile prod status
+```
+
+`operate auth login` listens on `127.0.0.1` inside the container, which a browser outside cannot
+reach: in containers use Basic auth or a bearer token (`OPERATE_TOKEN`). Each image carries an
+SBOM and SLSA provenance (`docker buildx imagetools inspect ghcr.io/miragon/operate:<version>
+--format '{{ json .SBOM }}'`), and `gh attestation verify oci://ghcr.io/miragon/operate:<version>
+--repo Miragon/operate` verifies where it was built.
 
 ## Quick start
 
@@ -1161,6 +1251,8 @@ npx tsx src/bin/operate.ts --help
 | Script                        | What it does                                                                       |
 | ----------------------------- | ---------------------------------------------------------------------------------- |
 | `npm run build`               | Bundle `dist/operate.js` with tsdown                                               |
+| `npm run build:standalone`    | Bundle `build/standalone/operate.cjs` with every dependency inlined                |
+| `npm run build:exe`           | Standalone executable of this platform in `build/bin` (after `build:standalone`)   |
 | `npm run generate`            | Regenerate `src/generated/catalog.json` from the spec (`generate:check` for drift) |
 | `npm run check`               | Every fast gate: typecheck, lint, format, architecture, knip, catalog, coverage    |
 | `npm test`                    | Unit and property tests (vitest)                                                   |
@@ -1177,7 +1269,35 @@ a receive task. The OAuth suite (`oauth.it.test.ts`) runs once, against the firs
 behind Keycloak and an Envoy JWT gateway.
 `OPERATE_IT_ENGINES=operaton,camunda` selects a comma separated subset (`operaton`, `cibseven`,
 `camunda`), and `OPERATE_IT_SKIP_PACK=1` skips the packed-tarball smoke test (`npm pack`,
-install, run).
+install, run). `OPERATE_IT_BINARY=<path>` runs the suites against a standalone executable instead
+of `dist/operate.js`.
+
+### Standalone executable and container image
+
+Both start from one bundle, `npm run build:standalone` (`tsdown.standalone.config.ts`): a CommonJS
+file with commander inlined, the only main script format a Node.js 24 single executable
+application runs.
+
+- `npm run build:exe` (`scripts/build-exe.ts`) writes the preparation blob with
+  `node --experimental-sea-config` (with V8 code cache), copies the running `node` binary, injects
+  the blob with [postject](https://github.com/nodejs/postject) and on macOS signs the result ad
+  hoc. It embeds the Node.js that runs it, which must be an official build (nodejs.org, nvm, fnm,
+  Volta, setup-node): the script refuses a Homebrew or distribution build, whose shared libraries
+  the copy would need on every machine. Releases use the newest Node.js 24 (Node.js 25 and later
+  need `libatomic` on Linux, which Ubuntu and Debian do not install by default). The code cache
+  only works on the platform that built it, so every target builds on its own runner.
+- `docker build -t operate .` copies the bundle onto distroless Node.js 24 (`Dockerfile`, digest
+  updated by Dependabot); the build runs nothing on the target platform, so a multi-platform
+  build (`--platform linux/amd64,linux/arm64`) needs no emulation.
+- `scripts/smoke-test.sh <command...>` checks a packaging without an engine (version, help,
+  catalog, dry-run, stdin, a network error):
+
+```sh
+npm run build:standalone && npm run build:exe
+scripts/smoke-test.sh build/bin/operate-macos-arm64
+docker build -t operate . && scripts/smoke-test.sh docker run --rm -i operate
+OPERATE_IT_BINARY="$PWD/build/bin/operate-macos-arm64" OPERATE_IT_ENGINES=operaton npm run test:integration
+```
 
 ### Catalog generation
 
@@ -1217,6 +1337,12 @@ no npm token exists.
    `v<version>` and creates the GitHub release. The same workflow run checks out the tag, runs
    `npm run check`, builds and packs the package and publishes it to npm with OIDC and provenance.
    Prerelease versions get the `next` dist-tag, all others `latest`.
+4. In the same run, the standalone bundle is built once and smoke tested; five native runners
+   (Linux x64 and arm64, macOS Intel and Apple silicon, Windows x64) turn it into executables and
+   smoke test each one. They are attached to the GitHub release with `SHA256SUMS` and a build
+   provenance attestation. After the npm publish, the container image is pushed to
+   `ghcr.io/miragon/operate` (`<version>`, `<major>.<minor>`, `latest`; prereleases only
+   `<version>`) with SBOM, provenance and an attestation.
 
 | Commit type                                         | Changelog            | Version bump                    |
 | --------------------------------------------------- | -------------------- | ------------------------------- |
@@ -1226,10 +1352,12 @@ no npm token exists.
 | `refactor`, `test`, `build`, `ci`, `style`, `chore` | hidden               | no release on their own         |
 
 Dependabot titles its pull requests `deps:` for runtime dependencies, `chore(deps-dev):` for
-development dependencies and `ci:` for actions. A `Release-As: <version>` footer in a squash
+development dependencies, `ci:` for actions and `chore(deps):` for the base image of the
+container image (shipped with the next release). A `Release-As: <version>` footer in a squash
 commit message forces the next version. If publishing fails after the release was created
-because of a setting (npm, environment, repository visibility), fix it and re-run the failed jobs
-of the Release run; a version that is already on npm is skipped. A defect in the tagged code needs
+because of a setting (npm, environment, repository visibility, package permissions), fix it and
+re-run the failed jobs of the Release run; a version that is already on npm is skipped, release
+assets are replaced and image tags pushed again. A defect in the tagged code needs
 a fix and a new release instead. The one-time settings `bootstrap-sha` and `initial-version`,
 which shaped the first release (0.1.0), are gone from `release-please-config.json`: since `v0.1.0`
 exists, release-please takes the current version from `.release-please-manifest.json` and starts
@@ -1261,7 +1389,8 @@ organization `miragon` with 2FA:
    would create it without protection), allow deployments from the branch `main` only and
    optionally add required reviewers. The publish job runs in it.
 5. **Rules** (optional): require pull requests on `main` with the check `conventional commits` and
-   the `check` and `integration` jobs of CI.
+   the `check`, `integration`, `standalone executable (linux-x64)` and `container image` jobs of
+   CI.
 6. **Create the package on npm.** A trusted publisher can only be added to an existing package, and
    OIDC cannot create one. Publish a placeholder once, from a clean checkout of `main`:
 
@@ -1296,6 +1425,22 @@ organization `miragon` with 2FA:
 9. **Lock npm down** (package Settings → Publishing access): "Require two-factor authentication and
    disallow tokens"; trusted publishing keeps working. Delete the `NPM_TOKEN` repository secret if
    it exists and revoke npm write tokens that are no longer needed.
+10. **Container image** (once, right after the first release that pushes it): the Release
+    workflow pushes `ghcr.io/miragon/operate` with `GITHUB_TOKEN` (`packages: write`). That links
+    the new package to this repository, but GHCR creates it private, so `docker pull` needs a
+    login until an organization owner makes it public: Organization → Packages → `operate` →
+    Package settings → Danger Zone → Change visibility → Public (this cannot be undone). The
+    organization settings (Packages → Package creation) must allow public packages. If the
+    organization turned off access inheritance, add `Miragon/operate` with the role Write under
+    Package settings → Manage Actions access, and re-run the failed `image` job.
+11. **Release assets and attestations** need no setting: every job declares its permissions
+    (`contents: write` for the upload, `id-token: write` and `attestations: write` for the
+    attestations), and artifact attestations are available for public repositories on every
+    plan. Keep "immutable releases" off (Settings → General → Releases): release-please publishes
+    the release before the binaries exist, and an immutable release refuses later assets. If the
+    organization or repository allows only selected actions, allow GitHub's own and
+    `docker/login-action`, `docker/setup-buildx-action`, `docker/metadata-action` and
+    `docker/build-push-action`.
 
 Without the placeholder, the npm owner can instead publish 0.1.0 by hand (`npm publish` from the
 release pull request branch) before merging the release pull request; the workflow then skips
@@ -1314,7 +1459,7 @@ src/config/     config resolution and profile editing (pure), file store
 src/auth/       auth providers (none, basic, bearer with JWT expiry, OAuth with token cache; pure)
 src/http/       fetch based HTTP client and error mapping
 src/output/     JSON, tables, field projection, errors, secret masking (pure)
-scripts/        catalog generator
+scripts/        catalog generator, standalone executable build, packaging smoke test
 test/           fakes for unit tests, Testcontainers integration tests
 ```
 
@@ -1349,6 +1494,9 @@ interactive login (loopback server, browser), and the generated catalog is only 
 - **Testcontainers** integration tests against the three engines, with and without Basic auth,
   behind a Keycloak and Envoy JWT gateway for OAuth, through the workflow commands, plus a
   packed-tarball smoke test, on every pull request.
+- **Packaging** on every pull request: the linux-x64 standalone executable (smoke test and the
+  Operaton suites against it) and the container image for both platforms (smoke test); every
+  release smoke tests each executable on its own runner.
 - **`claude plugin validate --strict`** for the marketplace, the plugin manifest, its skill and its
   command on every pull request. The plugin evals in `skills/operate/evals/` (does the skill load
   for engine tasks and stay out of unrelated ones) call the model on your account, so they run
