@@ -1,5 +1,6 @@
 # Quality gates: fast checks on Node 22/24, validation of the Claude Code plugin, Testcontainers
-# integration tests per engine, and incremental mutation testing (weekly and on demand in full).
+# integration tests per engine, the standalone executable and the container image, and incremental
+# mutation testing (weekly and on demand in full).
 name: CI
 
 on:
@@ -110,6 +111,82 @@ jobs:
           OPERATE_IT_ENGINES: ${{ matrix.engine }}
           # the packed-tarball smoke test does not depend on the engine: run it in one leg only
           OPERATE_IT_SKIP_PACK: ${{ matrix.engine == 'operaton' && '0' || '1' }}
+
+  # The standalone executable (design §20) of linux-x64, built like the release builds it on each
+  # of its five runners. Besides the smoke test, the Operaton suites run against the binary, so a
+  # bundling or SEA defect (module loading, fetch, stdin, loopback server) fails here, not after a
+  # release.
+  standalone:
+    name: standalone executable (linux-x64)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          cache: npm
+      - run: npm ci
+      - run: npm run build:standalone
+      - run: npm run build:exe
+      - name: Smoke test the binary
+        run: scripts/smoke-test.sh build/bin/operate-linux-x64
+      - name: Integration tests against the binary
+        run: npm run test:integration
+        env:
+          OPERATE_IT_BINARY: ${{ github.workspace }}/build/bin/operate-linux-x64
+          OPERATE_IT_ENGINES: operaton
+          OPERATE_IT_SKIP_PACK: '1'
+
+  # The container image (design §20) for both platforms, without pushing; the smoke test runs the
+  # image of the runner's platform.
+  image:
+    name: container image
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          cache: npm
+      - run: npm ci
+      - run: npm run build:standalone
+      - uses: docker/setup-buildx-action@v4
+      - name: Build linux/amd64 and linux/arm64
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+      - name: Build the image of this platform
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: operate:ci
+      - name: Smoke test the image
+        run: scripts/smoke-test.sh docker run --rm -i operate:ci
+      # node is PID 1 in the container: without its own handler (src/bin/operate.ts) the kernel
+      # drops SIGTERM and SIGINT, and docker stop would need SIGKILL after the timeout (137).
+      - name: docker stop ends a waiting command
+        run: |
+          docker run -d -i --name operate-signal operate:ci process-definition list --dry-run \
+            --url http://engine.example/engine-rest --auth basic --auth-user demo --auth-password-stdin
+          sleep 2
+          docker stop -t 10 operate-signal
+          code="$(docker inspect -f '{{.State.ExitCode}}' operate-signal)"
+          docker rm operate-signal
+          if [ "$code" != 143 ]; then
+            echo "::error::docker stop ended the CLI with exit code ${code}, expected 143 (SIGTERM)"
+            exit 1
+          fi
 
   # StrykerJS in shards (STRYKER_SHARD, see stryker.config.js), each with its own incremental
   # baseline in the Actions cache: a run re-tests only the mutants whose code or covering tests

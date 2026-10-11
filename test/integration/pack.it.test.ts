@@ -26,6 +26,7 @@ const NOT_COPIED = new Set([
   'node_modules',
   '.git',
   'dist',
+  'build',
   'coverage',
   'reports',
   '.stryker-tmp',

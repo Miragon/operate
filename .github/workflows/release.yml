@@ -1,6 +1,8 @@
 # Releases with release-please and publishes @miragon/operate to npm with trusted publishing (OIDC,
 # no npm token). Every push to main opens or updates the release pull request; merging it tags
-# v<version>, creates the GitHub release and publishes that tag to npm.
+# v<version>, creates the GitHub release and publishes that tag to npm, attaches the standalone
+# executables (with SHA256SUMS and provenance attestations) to the release and pushes the
+# container image ghcr.io/miragon/operate (design §20).
 # The trusted publisher on npmjs.com names this file (release.yml) and the `npm` environment:
 # renaming either breaks publishing until the configuration on npmjs.com is recreated.
 name: Release
@@ -66,6 +68,7 @@ jobs:
     env:
       TAG: ${{ needs.release-please.outputs.tag_name }}
       VERSION: ${{ needs.release-please.outputs.version }}
+      EXPECTED_VERSION: ${{ needs.release-please.outputs.version }}
     steps:
       # The CLI hints and the README link to issues of the public repository, and npm provenance
       # needs a public source repository: publish only from a public repository. Asks the API, not
@@ -105,6 +108,16 @@ jobs:
       - run: npm run build
       - name: Smoke test the bundle
         run: test "$(node dist/operate.js --version)" = "$VERSION"
+      # One standalone bundle for the executables and the container image (design §20)
+      - run: npm run build:standalone
+      - name: Smoke test the standalone bundle
+        run: scripts/smoke-test.sh node build/standalone/operate.cjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: standalone
+          path: build/standalone/operate.cjs
+          if-no-files-found: error
+          retention-days: 7
       - name: Pack
         run: |
           mkdir -p "$RUNNER_TEMP/package"
@@ -180,3 +193,184 @@ jobs:
             echo "::error::npm publish failed. E401, E404 or ENEEDAUTH mean the OIDC exchange failed: check the trusted publisher of ${name} on npmjs.com (Miragon/operate, release.yml, environment npm, npm publish allowed) and re-run with debug logging for npm's oidc log."
             exit 1
           fi
+
+  # Standalone executables (design §20): the standalone bundle of the build job injected into
+  # Node.js 24 as single executable application, each target on a native runner (the V8 code
+  # cache is only valid on the platform that built it) and smoke tested there. No write access
+  # and no id-token: dependency install scripts never run next to a token.
+  binaries:
+    name: binary ${{ matrix.target }}
+    needs: [release-please, build]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, runner: ubuntu-latest, file: operate-linux-x64 }
+          - { target: linux-arm64, runner: ubuntu-24.04-arm, file: operate-linux-arm64 }
+          - { target: macos-x64, runner: macos-26-intel, file: operate-macos-x64 }
+          - { target: macos-arm64, runner: macos-latest, file: operate-macos-arm64 }
+          - { target: windows-x64, runner: windows-latest, file: operate-windows-x64.exe }
+    defaults:
+      run:
+        shell: bash
+    env:
+      EXPECTED_VERSION: ${{ needs.release-please.outputs.version }}
+      # Git Bash on Windows must pass the smoke test's URL arguments unchanged
+      MSYS_NO_PATHCONV: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+      # The binary embeds this Node.js: take the newest 24.x release (security fixes) rather than
+      # the possibly older one in the runner's tool cache, the same on every runner.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          check-latest: true
+          package-manager-cache: false
+      # tsx and postject need no install scripts
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v8
+        with:
+          name: standalone
+          path: build/standalone
+      - run: npm run build:exe
+      - name: Smoke test the binary
+        run: bash scripts/smoke-test.sh "build/bin/${{ matrix.file }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binary-${{ matrix.target }}
+          path: build/bin/${{ matrix.file }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # Attaches the binaries and SHA256SUMS to the GitHub release and attests their build provenance
+  # (`gh attestation verify <file> --repo Miragon/operate`). Runs no repository code. A re-run
+  # replaces the assets.
+  release-assets:
+    name: attach binaries to ${{ needs.release-please.outputs.tag_name }}
+    needs: [release-please, binaries]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # upload release assets
+      id-token: write # Sigstore signing certificate of the attestation
+      attestations: write # store the attestation
+    env:
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: binary-*
+          path: ${{ runner.temp }}/binaries
+          merge-multiple: true
+      - name: Write SHA256SUMS
+        working-directory: ${{ runner.temp }}/binaries
+        run: |
+          shopt -s failglob
+          binaries=(operate-*)
+          if [ "${#binaries[@]}" -ne 5 ]; then
+            echo "::error::Expected 5 binaries, got ${#binaries[@]}: ${binaries[*]}"
+            exit 1
+          fi
+          sha256sum "${binaries[@]}" > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/attest@v4
+        with:
+          subject-checksums: ${{ runner.temp }}/binaries/SHA256SUMS
+      - name: Upload to the release
+        working-directory: ${{ runner.temp }}/binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" operate-* SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+
+  # Container image (design §20) after the npm publish: the standalone bundle of the build job on
+  # distroless Node.js 24 (non-root), linux/amd64 and linux/arm64, tagged <version>, <major.minor>
+  # and latest (prereleases only <version>), with BuildKit SBOM and provenance and a GitHub
+  # attestation (`gh attestation verify oci://ghcr.io/miragon/operate:<version> --repo
+  # Miragon/operate`). The GHCR package is private after its first push until a maintainer makes it
+  # public (README, one-time setup).
+  image:
+    name: image ghcr.io/miragon/operate:${{ needs.release-please.outputs.version }}
+    needs: [release-please, build, publish]
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read # checkout, repository metadata for the labels
+      packages: write # push to ghcr.io
+      id-token: write # Sigstore signing certificate of the attestation
+      attestations: write # store the attestation
+    env:
+      IMAGE: ghcr.io/miragon/operate
+      VERSION: ${{ needs.release-please.outputs.version }}
+      EXPECTED_VERSION: ${{ needs.release-please.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+      # The labels name the tagged commit, which differs from GITHUB_SHA when a later push or a
+      # manual run created the release.
+      - name: Find the tagged commit
+        id: tagged
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v8
+        with:
+          name: standalone
+          path: build/standalone
+      - uses: docker/setup-buildx-action@v4
+      - name: Build the image of this platform
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: operate:smoke
+      - name: Smoke test the image
+        run: scripts/smoke-test.sh docker run --rm -i operate:smoke
+      - name: Tags, labels and annotations
+        id: meta
+        uses: docker/metadata-action@v6
+        env:
+          # GHCR shows the description of a multi-platform image from the index annotations
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ env.VERSION }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ env.VERSION }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.tagged.outputs.sha }}
+          annotations: |
+            org.opencontainers.image.revision=${{ steps.tagged.outputs.sha }}
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          sbom: true
+          provenance: mode=max
+      - uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+          # a storage record needs the artifact-metadata permission and is not needed here
+          create-storage-record: false

@@ -11,7 +11,7 @@ export default defineConfig({
     testTimeout: 15_000,
     coverage: {
       provider: 'v8',
-      include: ['src/**/*.ts', 'scripts/catalog/**/*.ts'],
+      include: ['src/**/*.ts', 'scripts/catalog/**/*.ts', 'scripts/exe/**/*.ts'],
       exclude: ['**/*.test.ts', 'src/bin/**', 'src/**/types.ts', 'scripts/catalog/openapi.ts'],
       reporter: ['text-summary', 'text', 'html', 'json-summary', 'lcov'],
       thresholds: { lines: 90, statements: 90, functions: 90, branches: 85 },

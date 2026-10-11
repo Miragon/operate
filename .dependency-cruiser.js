@@ -219,7 +219,7 @@ export default {
   ],
   options: {
     doNotFollow: { path: ['node_modules'] },
-    exclude: { path: ['^(?:dist|coverage|reports|spec)/', '(?:^|/)[.]stryker-tmp/'] },
+    exclude: { path: ['^(?:dist|build|coverage|reports|spec)/', '(?:^|/)[.]stryker-tmp/'] },
     moduleSystems: ['es6', 'cjs'],
     tsPreCompilationDeps: true,
     tsConfig: { fileName: 'tsconfig.json' },

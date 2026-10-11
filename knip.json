@@ -6,7 +6,7 @@
     "config": ["vitest.config.ts", "vitest.integration.config.ts"]
   },
   "tsdown": {
-    "config": ["tsdown.config.ts"]
+    "config": ["tsdown.config.ts", "tsdown.standalone.config.ts"]
   },
   "stryker": {
     "config": ["stryker.config.js"]

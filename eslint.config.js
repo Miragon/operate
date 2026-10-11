@@ -7,6 +7,7 @@ export default defineConfig(
   {
     ignores: [
       'dist/',
+      'build/',
       'coverage/',
       'reports/',
       '.stryker-tmp/',

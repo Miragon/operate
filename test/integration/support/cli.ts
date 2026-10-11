@@ -1,9 +1,11 @@
 /**
  * Runs the built CLI (`dist/operate.js`) as a child process, the way an agent or a script calls it:
  * no TTY (so JSON is the default output), a clean environment and an isolated config file.
+ * `OPERATE_IT_BINARY` runs a standalone executable instead (design §20), started directly.
  */
 
 import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   cleanEnv,
@@ -17,8 +19,20 @@ export const REPO_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 
 /** Optional path of another CLI entry script to test instead of the built `dist/operate.js`. */
 const CLI_ENV = 'OPERATE_IT_CLI';
+/**
+ * Optional path of a standalone executable (`npm run build:exe`) to test instead of a script;
+ * absolute, so the existence check and the start agree whatever the working directory.
+ */
+const BINARY_ENV = 'OPERATE_IT_BINARY';
+const binaryEnv = process.env[BINARY_ENV];
+const BINARY = binaryEnv === undefined || binaryEnv === '' ? undefined : resolve(binaryEnv);
 const CLI_PATH =
-  process.env[CLI_ENV] ?? fileURLToPath(new URL('../../../dist/operate.js', import.meta.url));
+  BINARY ??
+  process.env[CLI_ENV] ??
+  fileURLToPath(new URL('../../../dist/operate.js', import.meta.url));
+/** Executable and leading arguments that start the CLI. */
+const CLI_COMMAND: readonly [string, ...string[]] =
+  BINARY === undefined ? [process.execPath, CLI_PATH] : [BINARY];
 
 /** The `error` object of the one-line JSON error that the CLI writes to stderr. */
 export interface CliError {
@@ -76,7 +90,9 @@ export type StartCli = (args: readonly string[], options?: CliOptions) => Runnin
 /** Fails with an actionable message when the CLI bundle has not been built. */
 export function assertCliBuilt(): void {
   if (!existsSync(CLI_PATH)) {
-    throw new Error(`${CLI_PATH} does not exist; run "npm run build" before the integration tests`);
+    const build =
+      BINARY === undefined ? 'npm run build' : 'npm run build:standalone && npm run build:exe';
+    throw new Error(`${CLI_PATH} does not exist; run "${build}" before the integration tests`);
   }
 }
 
@@ -128,7 +144,7 @@ function toCliResult(result: ProcessResult): CliResult {
   };
 }
 
-/** Starts `node dist/operate.js <args>`; stderr can be watched while it runs. */
+/** Starts `node dist/operate.js <args>` (or the binary); stderr can be watched while it runs. */
 function startCli(args: readonly string[], options: CliOptions = {}): RunningCli {
   assertCliBuilt();
   const env = cleanEnv({
@@ -136,7 +152,8 @@ function startCli(args: readonly string[], options: CliOptions = {}): RunningCli
     ...(options.configFile === undefined ? {} : { OPERATE_CONFIG: options.configFile }),
     ...options.env,
   });
-  const running = startProcess(process.execPath, [CLI_PATH, ...args], {
+  const [file, ...leading] = CLI_COMMAND;
+  const running = startProcess(file, [...leading, ...args], {
     env,
     cwd: options.cwd ?? REPO_ROOT,
     ...(options.stdin === undefined ? {} : { stdin: options.stdin }),
