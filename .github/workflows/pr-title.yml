@@ -8,9 +8,11 @@ on:
 
 permissions: {}
 
+# Not cancelled: release-please pushes and edits its pull request at the same moment, and a
+# cancelled run would show as a failed check next to the successful one.
 concurrency:
-  group: pr-title-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  group: pr-title-${{ github.event.pull_request.number }}-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   conventional-commits:
