@@ -26,7 +26,7 @@ import { strykerPlugins as vitestRunnerPlugins } from '@stryker-mutator/vitest-r
 export { strykerValidationSchema } from '@stryker-mutator/vitest-runner';
 
 /** Number of CI shards: the matrix of the `mutation` job in .github/workflows/ci.yml. */
-export const SHARDS = 8;
+export const SHARDS = 4;
 
 // ratcheted when a full run scored 97.70 %: high = floor(score), low = floor - 2, break = floor - 3
 export const thresholds = { high: 97, low: 95, break: 94 };
@@ -153,6 +153,9 @@ export default {
   testRunner: 'vitest',
   vitest: { configFile: 'vitest.config.ts', related: true },
   coverageAnalysis: 'perTest',
+  // off: it would save 41 % of a full run, but hide 53 undetected static mutants, mostly anchors
+  // and character classes of validation regexes (design §21.3)
+  ignoreStatic: false,
   mutate: MUTATE,
   ignorePatterns: ['dist', 'build', 'coverage', '.context', '.claude', '.github'],
   incremental: true,

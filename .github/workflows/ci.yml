@@ -206,7 +206,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4]
     # One run per shard at a time outside pull requests, so each starts from the previous baseline.
     concurrency:
       group: mutation-${{ github.ref }}-${{ matrix.shard }}
