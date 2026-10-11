@@ -82,8 +82,9 @@ describe('workflow command help', () => {
       Requests: the selection, for --until activity:<id> or task:<key> the BPMN of the
       tree and the processes it calls (GET /process-definition/{id}/xml, a typo fails
       at once), then per poll (after 0, 250, 500, 1000 ms, then every 2 s) GET
-      /process-instance/{id} (the history when it ended), the tree and the counts the
-      conditions need; with --execute-jobs the due jobs (GET /job, POST
+      /process-instance/{id} (the history when it ended), the tree, the counts the
+      conditions need, then the incident count (before it reports idle the instance
+      and the tree once more); with --execute-jobs the due jobs (GET /job, POST
       /job/{id}/execute); at the end the instance view; with --batch GET
       /batch/statistics and GET /history/batch/{id}.
 
@@ -143,9 +144,9 @@ describe('workflow command help', () => {
       /execution/{id}/messageSubscriptions/{name}/trigger; POST /signal; POST
       /execution/{id}/signal; or POST /job/{id}/execute; then the instance view, with
       --wait or --until the polls of operate wait (GET /process-instance/{id}, the
-      tree, then counts of incidents, executable jobs, tasks or activities); before
-      the writes, activity and task ids of --until are looked up in the BPMN (GET
-      /process-definition/{id}/xml).
+      tree, counts of executable jobs, tasks or activities, then of incidents; before
+      idle the instance and the tree once more); before the writes, activity and task
+      ids of --until are looked up in the BPMN (GET /process-definition/{id}/xml).
 
       Effect: write; --dry-run sends the reads and previews the writes
 
@@ -225,9 +226,10 @@ describe('workflow command help', () => {
       /incident?processDefinitionKeyIn=), GET /incident/{id} for root causes that were
       not loaded, PUT /job/{id}/retries or PUT /external-task/{id}/retries, with --now
       POST /job/{id}/execute, with --wait or --until the polls of operate wait (GET
-      /process-instance/{id}, the tree, then counts of incidents, executable jobs,
-      tasks or activities); before the writes, activity and task ids of --until are
-      looked up in the BPMN (GET /process-definition/{id}/xml).
+      /process-instance/{id}, the tree, counts of executable jobs, tasks or
+      activities, then of incidents; before idle the instance and the tree once more);
+      before the writes, activity and task ids of --until are looked up in the BPMN
+      (GET /process-definition/{id}/xml).
 
       Effect: write; bulk with --process-definition-key alone (requires --yes);
       --dry-run sends the reads and previews the writes
@@ -291,7 +293,8 @@ describe('workflow command help', () => {
       /decision-definition and GET /decision-requirements-definition per resource,
       with --start POST /process-definition/key/{key}/start and the instance view,
       with --wait or --until the polls of operate wait (GET /process-instance/{id},
-      the tree, then counts of incidents, executable jobs, tasks or activities).
+      the tree, counts of executable jobs, tasks or activities, then of incidents;
+      before idle the instance and the tree once more).
 
       Effect: write
 

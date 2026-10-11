@@ -55,6 +55,8 @@ export interface Probe {
   readonly ended: boolean;
   /** The active tree (empty once the instance ended). */
   readonly tree: readonly string[];
+  /** The tree was cut (design §17.2.5): instances beyond the cut are not counted. */
+  readonly truncated?: boolean;
 }
 
 export interface Measurement {
@@ -118,17 +120,24 @@ async function holds(port: EnginePort, probe: Probe, condition: Condition): Prom
   }
 }
 
-/** The counts of one poll: only what the conditions need, plus the incident check. */
+/**
+ * The counts of one poll: only what the conditions need, then the incident check. The incident
+ * count is read after the condition counts, never in parallel with them: a job that fails for good
+ * loses its last retry and gets its incident in one transaction, so a job count that no longer sees
+ * the job is followed by an incident count that sees the incident. Read in parallel, the incident
+ * count could come from before that transaction and the job count from after it, and the poll
+ * would see neither (a stuck instance reported as idle).
+ */
 export async function measure(
   port: EnginePort,
   probe: Probe,
   conditions: readonly Condition[],
   checkIncidents: boolean,
 ): Promise<Measurement> {
-  const [incidents, results] = await Promise.all([
-    checkIncidents ? countInTree(port, probe.tree, { withIncident: 'true' }) : 0,
-    Promise.all(conditions.map((condition) => holds(port, probe, condition))),
-  ]);
+  const results = await Promise.all(conditions.map((condition) => holds(port, probe, condition)));
+  const incidents = checkIncidents
+    ? await countInTree(port, probe.tree, { withIncident: 'true' })
+    : 0;
   const held = conditions.filter((_, index) => results[index] === true).map(conditionLabel);
   return { incidents, held };
 }

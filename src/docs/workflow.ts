@@ -82,7 +82,7 @@ function calls(...lists: readonly (readonly string[])[]): string[] {
 }
 
 const WAIT_REQUESTS =
-  'with --wait or --until the polls of operate wait (GET /process-instance/{id}, the tree, then counts of incidents, executable jobs, tasks or activities)';
+  'with --wait or --until the polls of operate wait (GET /process-instance/{id}, the tree, counts of executable jobs, tasks or activities, then of incidents; before idle the instance and the tree once more)';
 /** advance and retry check the ids of --until before their writes. */
 const CHECKED_WAIT_REQUESTS = `${WAIT_REQUESTS}; before the writes, activity and task ids of --until are looked up in the BPMN (GET /process-definition/{id}/xml)`;
 
@@ -117,7 +117,7 @@ export const WORKFLOW_DOCS: readonly WorkflowDoc[] = [
     description:
       'Waits until the process instance is idle (no executable job left, so it rests in wait states), or until the --until conditions; fails fast with exit code 9 (INCIDENT) when an incident appears, and with WAIT_TIMEOUT after --wait-timeout. Prints the instance view with "waited". Use it instead of sleep after every asynchronous step. With --batch it waits until the batch finished.',
     requests:
-      'the selection, for --until activity:<id> or task:<key> the BPMN of the tree and the processes it calls (GET /process-definition/{id}/xml, a typo fails at once), then per poll (after 0, 250, 500, 1000 ms, then every 2 s) GET /process-instance/{id} (the history when it ended), the tree and the counts the conditions need; with --execute-jobs the due jobs (GET /job, POST /job/{id}/execute); at the end the instance view; with --batch GET /batch/statistics and GET /history/batch/{id}',
+      'the selection, for --until activity:<id> or task:<key> the BPMN of the tree and the processes it calls (GET /process-definition/{id}/xml, a typo fails at once), then per poll (after 0, 250, 500, 1000 ms, then every 2 s) GET /process-instance/{id} (the history when it ended), the tree, the counts the conditions need, then the incident count (before it reports idle the instance and the tree once more); with --execute-jobs the due jobs (GET /job, POST /job/{id}/execute); at the end the instance view; with --batch GET /batch/statistics and GET /history/batch/{id}',
     effect: 'read',
     effectNote: 'write with --execute-jobs',
     arguments: [INSTANCE_ARGUMENT],

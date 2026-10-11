@@ -225,6 +225,14 @@ describe('waitAndInspect details', () => {
     expect(engine.requests.some((request) => request.query.get('withIncident') === 'true')).toBe(
       true,
     );
+    const either = setup('book');
+    const first = await waitAndInspect(
+      either.deps,
+      { id: 'pi-1', known: true },
+      { ...IDLE, failOnIncident: false, conditions: [{ kind: 'ended' }, { kind: 'incident' }] },
+      VIEW,
+    );
+    expect(first.view).toMatchObject({ waited: { until: 'incident', polls: 2 } });
     const quiet = setup('approve');
     await waitAndInspect(
       quiet.deps,
