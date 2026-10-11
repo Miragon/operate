@@ -1,13 +1,15 @@
 /**
- * The token cache (design §16.5): one JSON file per profile (`profile-<name>.json`) or per
- * environment identity (`env-<hash>.json`) in the token directory, written atomically with mode
- * 0600 under a lock file; readers need no lock. A cache whose identity (issuer, explicit token
- * endpoint, client, audience, scopes) differs from the configuration counts as not logged in.
- * Messages never quote the file content.
+ * The token cache (design §16.5): one JSON file per profile (`profile-<name>.json`, unique per
+ * exact profile name also on case-insensitive file systems) or per environment identity
+ * (`env-<hash>.json`) in the token directory, written atomically with mode 0600 under a lock
+ * file; readers need no lock. A cache whose identity (issuer, explicit token endpoint, client,
+ * audience, scopes) differs from the configuration counts as not logged in. Logins cached under
+ * the file names of operate 0.5.0 and earlier move to the current ones. Messages never quote the
+ * file content.
  */
 
 import { configError } from '../../config/config-error.js';
-import { profileTokenFile } from '../../config/file.js';
+import { legacyProfileOf, profileTokenFile } from '../../config/file.js';
 import type { OAuthConfig } from '../../config/types.js';
 import { OperateError } from '../../errors.js';
 import { isRecord } from '../../util.js';
@@ -40,8 +42,12 @@ export function clientAuthOf(login: CachedLogin): ClientAuthMethod {
     : 'client_secret_basic';
 }
 
-/** The absolute path of the cache file of a configuration. */
+/**
+ * The absolute path of the cache file of a configuration. A profile's login cached under the file
+ * name of operate 0.5.0 and earlier moves there first (`profileCachePath`).
+ */
 export async function cachePath(config: OAuthConfig, deps: OAuthDeps): Promise<string> {
+  if (config.profile !== undefined) return profileCachePath(config.profile, deps);
   return deps.tokenPath(await cacheFileName(config));
 }
 
@@ -238,4 +244,74 @@ export async function withCacheLock<T>(
   if (outcome === undefined) throw lockError(path, undefined);
   if ('error' in outcome) throw outcome.error;
   return outcome.value;
+}
+
+/** What moving a login of operate 0.5.0 and earlier needs. */
+type CacheDeps = Pick<OAuthDeps, 'fs' | 'withLock' | 'tokenDir' | 'timeoutMs' | 'tokenPath'>;
+
+/** The names of the files in the token directory, as spelled there; none when it is missing. */
+async function tokenFiles(deps: Pick<OAuthDeps, 'fs' | 'tokenDir'>): Promise<string[]> {
+  try {
+    const entries = await deps.fs.readdir(deps.tokenDir);
+    return entries.filter((entry) => entry.kind === 'file').map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+}
+
+function moveError(from: string, to: string, error: unknown): OperateError {
+  return configError(
+    `Cannot move the OAuth login cached in ${from} to ${to} (${reasonOf(error)})`,
+    'Check the permissions of the token directory and its files.',
+  );
+}
+
+/**
+ * Moves the login of the old file `fileName` to the current file of `profile`, holding the locks
+ * of both (the old one first, the lock of every writer of that file, also of operate 0.5.0); a
+ * current file that exists already wins and the old one is removed.
+ */
+async function adopt(fileName: string, profile: string, deps: CacheDeps): Promise<void> {
+  const legacy = deps.tokenPath(fileName);
+  const path = deps.tokenPath(profileTokenFile(profile));
+  await withCacheLock(legacy, deps, () =>
+    withCacheLock(path, deps, async () => {
+      // moved meanwhile? Only an entry spelled exactly so counts: on a case-insensitive file
+      // system the old path also opens the file of a profile spelled in another case
+      if (!(await tokenFiles(deps)).includes(fileName)) return;
+      try {
+        if (!(await deps.fs.exists(path))) {
+          await deps.fs.writeFile(path, await deps.fs.readFile(legacy), { mode: 0o600 });
+        }
+        await deps.fs.remove(legacy);
+      } catch (error) {
+        throw moveError(legacy, path, error);
+      }
+    }),
+  );
+}
+
+/**
+ * Moves logins that operate 0.5.0 and earlier cached under a file name with upper-case letters
+ * (`profile-Prod.json`) to the current file of exactly that profile name (`profile-%50rod.json`):
+ * the files whose names equal the old file name of `profile` ignoring case, which a
+ * case-insensitive file system (macOS, Windows) confuses with it. The cache does not record its
+ * profile, and profiles that differ only in case may have the same identity, so the spelling of
+ * the directory entry decides: the profile name that created the file (a rename over an existing
+ * entry keeps its spelling). Call it holding no cache lock: it takes the locks of the files.
+ */
+export async function adoptLegacyLogins(profile: string, deps: CacheDeps): Promise<void> {
+  const folded = `profile-${profile}.json`.toLowerCase();
+  for (const fileName of await tokenFiles(deps)) {
+    const owner = legacyProfileOf(fileName);
+    if (owner !== undefined && fileName.toLowerCase() === folded) {
+      await adopt(fileName, owner, deps);
+    }
+  }
+}
+
+/** The cache file of a profile; logins cached under old file names move first. */
+export async function profileCachePath(profile: string, deps: CacheDeps): Promise<string> {
+  await adoptLegacyLogins(profile, deps);
+  return deps.tokenPath(profileTokenFile(profile));
 }

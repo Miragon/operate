@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { OperateError } from '../errors.js';
 import { changedAuth, replacedFamily, settleAuthorization, usesCredentials } from './auth-edit.js';
 import { listProfiles, setProfile, showConfig } from './edit.js';
-import { profileTokenFile, tokenDirectory, tokenPath } from './file.js';
+import { legacyProfileOf, profileTokenFile, tokenDirectory, tokenPath } from './file.js';
 import { changedOAuthKeys, hasOAuthOptions } from './oauth-edit.js';
 import { resolveConfig } from './resolve.js';
 import type { ConfigFile, ProfileAuth } from './types.js';
@@ -320,26 +320,34 @@ describe('token cache paths', () => {
 
   it('joins file names per platform', () => {
     expect(profileTokenFile('prod')).toBe('profile-prod.json');
-    expect(profileTokenFile('Prod-EU_1.x')).toBe('profile-Prod-EU_1.x.json');
+    expect(profileTokenFile('prod-eu_1.x')).toBe('profile-prod-eu_1.x.json');
     expect(tokenPath('/t', 'profile-p.json', 'linux')).toBe('/t/profile-p.json');
     expect(tokenPath('C:\\t', 'profile-p.json', 'win32')).toBe('C:\\t\\profile-p.json');
   });
 
   it('percent-encodes every character a valid profile name cannot have', () => {
     expect(profileTokenFile('x/../../victim/package')).toBe(
-      'profile-x%2F..%2F..%2Fvictim%2Fpackage.json',
+      'profile-x%2f..%2f..%2fvictim%2fpackage.json',
     );
-    expect(profileTokenFile('a\\b:c%d ü€')).toBe('profile-a%5Cb%3Ac%25d%20%FC%u20AC.json');
+    expect(profileTokenFile('a\\b:c%d ü€')).toBe('profile-a%5cb%3ac%25d%20%fc%u20ac.json');
     expect(profileTokenFile('..')).toBe('profile-...json');
+    expect(profileTokenFile('\u00ff\u0100')).toBe('profile-%ff%u0100.json');
     expect(profileTokenFile('\ud800')).not.toBe(profileTokenFile('\ud801'));
     expect(profileTokenFile('a%')).not.toBe(profileTokenFile('a%25'));
+  });
+
+  it('percent-encodes upper-case letters: names that differ only in case get different files', () => {
+    expect(profileTokenFile('Prod-EU_1.x')).toBe('profile-%50rod-%45%55_1.x.json');
+    expect(profileTokenFile('LOWER')).toBe('profile-%4c%4f%57%45%52.json');
+    expect(profileTokenFile('lower')).toBe('profile-lower.json');
+    expect(profileTokenFile('Lower')).toBe('profile-%4cower.json');
   });
 
   it('keeps the file of any profile name directly inside the token directory', () => {
     fc.assert(
       fc.property(fc.string({ unit: 'binary', maxLength: 40 }), (name) => {
         const file = profileTokenFile(name);
-        expect(file).toMatch(/^profile-[A-Za-z0-9._%u-]*\.json$/);
+        expect(file).toMatch(/^profile-[a-z0-9._%-]*\.json$/);
         expect(posix.dirname(tokenPath('/t/tokens', file, 'linux'))).toBe('/t/tokens');
         expect(win32.dirname(tokenPath('C:\\t\\tokens', file, 'win32'))).toBe('C:\\t\\tokens');
       }),
@@ -352,6 +360,86 @@ describe('token cache paths', () => {
         // lone surrogates included: every UTF-16 code unit is encoded on its own
         fc.pre(a !== b);
         expect(profileTokenFile(a)).not.toBe(profileTokenFile(b));
+      }),
+    );
+  });
+
+  it('gives different profile names different files also after case folding', () => {
+    // the name has no upper-case letter (it is its own case folding) and decodes to the profile
+    fc.assert(
+      fc.property(fc.string({ unit: 'binary', maxLength: 40 }), (name) => {
+        const file = profileTokenFile(name);
+        expect(file.toLowerCase()).toBe(file);
+        expect(decodedProfile(file.toLowerCase())).toBe(name);
+      }),
+    );
+    // and directly: case variants and arbitrary pairs never collide when compared without case
+    fc.assert(
+      fc.property(fc.oneof(caseVariants, fc.tuple(fc.string(), fc.string())), ([a, b]) => {
+        fc.pre(a !== b);
+        const [fileA, fileB] = [profileTokenFile(a), profileTokenFile(b)];
+        expect(fileA.toLowerCase()).not.toBe(fileB.toLowerCase());
+        expect(fileA.toUpperCase()).not.toBe(fileB.toUpperCase());
+      }),
+    );
+  });
+});
+
+/** Decodes a current token cache file name (`profileTokenFile`) back to the profile name. */
+function decodedProfile(file: string): string {
+  const encoded = /^profile-(.*)\.json$/.exec(file)?.[1] ?? '';
+  return encoded.replace(
+    /%u([0-9a-f]{4})|%([0-9a-f]{2})/g,
+    (_match, wide?: string, narrow?: string) =>
+      String.fromCharCode(Number.parseInt(wide ?? narrow ?? '', 16)),
+  );
+}
+
+/** A profile name (ASCII) and a variant of it with some letters in the other case. */
+const caseVariants = fc
+  .tuple(fc.stringMatching(/^[A-Za-z0-9][A-Za-z0-9._-]{0,20}$/), fc.array(fc.boolean()))
+  .map(([name, flips]): [string, string] => [
+    name,
+    name.replace(/./g, (char, index: number) => {
+      if (flips[index] !== true) return char;
+      return char === char.toLowerCase() ? char.toUpperCase() : char.toLowerCase();
+    }),
+  ]);
+
+describe('legacyProfileOf', () => {
+  it('names the profile of a file name operate 0.5.0 gave a profile with upper-case letters', () => {
+    expect(legacyProfileOf('profile-Prod.json')).toBe('Prod');
+    expect(legacyProfileOf('profile-LOWER.json')).toBe('LOWER');
+    expect(legacyProfileOf('profile-Prod-EU_1.x.json')).toBe('Prod-EU_1.x');
+    for (const name of [
+      'profile-prod.json',
+      'profile-%50rod.json',
+      'profile-.json',
+      'profile-Prod.json.lock',
+      '.profile-Prod.json.0a1b.tmp',
+      'profile-a%5Cb.json',
+      'profile-.Prod.json',
+      'env-0123456789ABCDEF.json',
+      'Profile-prod.json',
+      'old-profile-Prod.json',
+    ]) {
+      expect(legacyProfileOf(name)).toBeUndefined();
+    }
+  });
+
+  it('matches every old name of a profile with upper-case letters, and no current name', () => {
+    const names = fc
+      .stringMatching(/^[A-Za-z0-9][A-Za-z0-9._-]{0,30}$/)
+      .filter((name) => /[A-Z]/.test(name));
+    fc.assert(
+      fc.property(names, (name) => {
+        expect(legacyProfileOf(`profile-${name}.json`)).toBe(name);
+        expect(legacyProfileOf(profileTokenFile(name))).toBeUndefined();
+      }),
+    );
+    fc.assert(
+      fc.property(fc.string({ unit: 'binary', maxLength: 30 }), (name) => {
+        expect(legacyProfileOf(profileTokenFile(name))).toBeUndefined();
       }),
     );
   });

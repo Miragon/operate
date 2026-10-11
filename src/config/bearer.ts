@@ -1,13 +1,12 @@
 /**
  * Validation of bearer tokens obtained outside operate (design §18): the token itself (a pasted
- * `Bearer ` prefix is dropped, the rest must be an RFC 6750 b64token), the name of the variable
- * that holds it, and the bearer rules for a profile's auth object in the config file. Messages
- * name where a value came from and never repeat a token.
+ * `Bearer ` prefix is dropped, the rest must be an RFC 6750 b64token) and the bearer rules for a
+ * profile's auth object in the config file (the name of the variable that holds the token is
+ * checked by variable.ts). Messages name where a value came from and never repeat a token.
  */
 
 import { isRecord } from '../util.js';
 import { configError } from './config-error.js';
-import type { Env } from './pick.js';
 import { CONTROL, ENV_NAME, isNonEmptyString } from './syntax.js';
 import {
   AUTH_TYPES,
@@ -45,48 +44,6 @@ export function normalizeToken(raw: string, origin: string): string {
     throw configError(`The bearer token from ${origin} ${what} (RFC 6750)`, TOKEN_HINT);
   }
   return token;
-}
-
-/**
- * Checks the name of the variable that holds the token. An invalid name is not repeated: it may
- * be the token itself, given by mistake.
- */
-export function validateTokenEnv(name: string): string {
-  const trimmed = name.trim();
-  if (!ENV_NAME.test(trimmed)) {
-    throw configError(
-      'Invalid --auth-token-env: expected the name of an environment variable',
-      'Use letters, digits and "_", not starting with a digit, e.g. --auth-token-env CI_ENGINE_TOKEN; the variable holds the token.',
-    );
-  }
-  return trimmed;
-}
-
-/** A variable name as people write them: upper case letters, digits and "_", at most 64. */
-const CONVENTIONAL_NAME = /^[A-Z_][A-Z0-9_]{0,63}$/;
-/** Longest word between "_" of a conventional name; longer runs look like a random token. */
-const MAX_WORD = 24;
-
-/**
- * True for a variable name in the usual form. Opaque tokens that are valid variable names
- * (GitHub's `ghp_...`, long alphanumeric reference tokens) are not, so messages never repeat them.
- */
-export function isConventionalVariable(name: string): boolean {
-  return CONVENTIONAL_NAME.test(name) && name.split('_').every((word) => word.length <= MAX_WORD);
-}
-
-/**
- * `config set --auth-token-env <name>`: a valid name, and one that is either set now or in the
- * usual form. An unset name in another form is most likely the token itself (`--auth-token-env
- * $CI_TOKEN`): refused before anything is stored, without repeating it.
- */
-export function checkTokenEnv(name: string, env: Env): string {
-  const variable = validateTokenEnv(name);
-  if (isConventionalVariable(variable) || (env[variable] ?? '').trim() !== '') return variable;
-  throw configError(
-    '--auth-token-env names a variable that is not set and does not look like a variable name: it may be the token itself, so it is neither stored nor repeated',
-    'Pass the name of the variable that holds the token, not its value: --auth-token-env CI_ENGINE_TOKEN, not --auth-token-env "$CI_ENGINE_TOKEN". A name in another form (lower case, very long) is accepted once the variable is set.',
-  );
 }
 
 type Check = readonly [check: (value: unknown) => boolean, expected: string];

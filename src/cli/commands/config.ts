@@ -16,9 +16,9 @@ import {
 } from '../../config/edit.js';
 import { readConfigFile, writeConfigFile } from '../../config/file.js';
 import { OAUTH_UNSET_KEYS } from '../../config/oauth-edit.js';
-import type { Env } from '../../config/pick.js';
 import { findProfile, validateOutput } from '../../config/resolve.js';
 import { AUTH_TYPES, type ConfigFile, OUTPUT_FORMATS, PROFILE_KEYS } from '../../config/types.js';
+import { checkVariableNames } from '../../config/variable.js';
 import { renderValue } from '../../output/render.js';
 import { compact } from '../../util.js';
 import { subcommand } from '../command.js';
@@ -148,12 +148,12 @@ async function editConfig(command: Command, context: CliContext, edit: Edit) {
  * The changes of `config set`; only options given on the command line. The secrets are what
  * `--auth-password-stdin`, `--oauth-client-secret-stdin` and `--auth-token-stdin` read.
  */
-function profileChanges(command: Command, secrets: SetSecrets, env: Env): ProfileChanges {
+function profileChanges(command: Command, secrets: SetSecrets): ProfileChanges {
   // --read-only is defined before --no-read-only, so neither sets a default value
   const options = command.opts<SetOptions>();
   return compact({
     ...oauthChanges(command, secrets.clientSecret),
-    ...bearerChanges(command, secrets.token, env),
+    ...bearerChanges(command, secrets.token),
     url: options.url,
     engine: options.engine,
     auth: options.auth,
@@ -171,15 +171,19 @@ function profileChanges(command: Command, secrets: SetSecrets, env: Env): Profil
 /** Applies the edit and prints the profile; resolves to the file before and after, and its path. */
 async function editProfile(name: string, command: Command, context: CliContext, edit: Edit) {
   const edited = await editConfig(command, context, edit);
-  write(context, renderValue(profileView(edited.file, name), edited.view));
+  write(context, renderValue(profileView(edited.file, name, context.runtime.env), edited.view));
   return edited;
 }
 
-/** `config set`: reads literal secrets from stdin first, and warns after storing them. */
+/**
+ * `config set`: reads literal secrets from stdin first, refuses a secret given as the name of its
+ * variable (`checkVariableNames`) before anything is stored, and warns after storing.
+ */
 async function setProfileFrom(name: string, command: Command, context: CliContext) {
   const { runtime } = context;
   const secrets = await readSetSecrets(command, context);
-  const changes = profileChanges(command, secrets, runtime.env);
+  const changes = profileChanges(command, secrets);
+  checkVariableNames(changes, runtime.env);
   const { file, previous, path } = await editProfile(name, command, context, (current) =>
     setProfile(current, name, changes),
   );

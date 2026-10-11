@@ -9,12 +9,7 @@
  */
 
 import { compact } from '../util.js';
-import {
-  validateAuthType,
-  validatePassword,
-  validatePasswordEnv,
-  validateUsername,
-} from './auth.js';
+import { validateAuthType, validatePassword, validateUsername } from './auth.js';
 import { hasBearerKeys } from './bearer.js';
 import { type BearerChanges, changedBearerKeys, hasBearerOptions } from './bearer-edit.js';
 import { configError } from './config-error.js';
@@ -28,6 +23,7 @@ import {
   type Profile,
   type ProfileAuth,
 } from './types.js';
+import { PASSWORD_VARIABLE, validateVariableName } from './variable.js';
 
 export interface AuthChanges extends OAuthChanges, BearerChanges {
   readonly auth?: string;
@@ -86,7 +82,9 @@ function secretOf(existing: ProfileAuth | undefined, changes: AuthChanges): Secr
       'Store the name of the environment variable that holds the password (recommended), or the password itself.',
     );
   }
-  if (authPasswordEnv !== undefined) return { passwordEnv: validatePasswordEnv(authPasswordEnv) };
+  if (authPasswordEnv !== undefined) {
+    return { passwordEnv: validateVariableName(authPasswordEnv, PASSWORD_VARIABLE) };
+  }
   if (authPassword !== undefined) {
     return { password: validatePassword(authPassword, 'from --auth-password-stdin') };
   }

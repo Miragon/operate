@@ -78,24 +78,38 @@ export function tokenDirectory(env: Env, location: Location): string {
   return pathModule(location.platform).join(operateDirectory(env, location), 'tokens');
 }
 
-/** UTF-16 code units a token cache file name does not keep. */
-const ENCODED = /[^A-Za-z0-9._-]/g;
+/** UTF-16 code units a token cache file name keeps as they are: no upper-case letters. */
+const ENCODED = /[^a-z0-9._-]/g;
 
-/** `%XX` for a code unit below 256, else `%uXXXX`; `%` itself included, so it is injective. */
+/** `%xx` for a code unit below 256, else `%uxxxx` (lower-case hex); `%` itself included. */
 function encodedUnit(unit: string): string {
   const code = unit.charCodeAt(0);
-  const hex = code.toString(16).toUpperCase();
+  const hex = code.toString(16);
   return code < 0x100 ? `%${hex.padStart(2, '0')}` : `%u${hex.padStart(4, '0')}`;
 }
 
 /**
- * The token cache file of a profile; the prefix avoids Windows device names such as `con`.
- * Profile names are validated (`PROFILE_NAME`), and every other character is encoded as well,
- * so the name is always one file directly inside the token directory (no `/`, `\`, `..`, `:`),
- * whatever reaches this function.
+ * The token cache file of a profile (design §16.5); the prefix avoids Windows device names such
+ * as `con`. Every UTF-16 code unit outside `[a-z0-9._-]` is percent-encoded, upper-case letters
+ * included (`Prod` → `profile-%50rod.json`), so the name has no upper-case letter at all and
+ * decodes unambiguously: profiles whose names differ only in case get different files also on
+ * case-insensitive file systems (macOS, Windows), and any name is one file directly inside the
+ * token directory (no `/`, `\`, `..`, `:`), whatever reaches this function.
  */
 export function profileTokenFile(profile: string): string {
   return `profile-${profile.replace(ENCODED, encodedUnit)}.json`;
+}
+
+/**
+ * The profile whose login operate 0.5.0 and earlier cached in the file `fileName`, when that name
+ * is one it gave a profile with upper-case letters (`profile-Prod.json`; it kept valid names as
+ * they are, so profiles that differed only in case shared the file on case-insensitive file
+ * systems). Names of profiles without upper-case letters did not change; files of the current
+ * scheme never match (they have no upper-case letter).
+ */
+export function legacyProfileOf(fileName: string): string | undefined {
+  const name = /^profile-(.+)\.json$/.exec(fileName)?.[1];
+  return name !== undefined && PROFILE_NAME.test(name) && /[A-Z]/.test(name) ? name : undefined;
 }
 
 /** A file of the token directory (win32 or posix join). */

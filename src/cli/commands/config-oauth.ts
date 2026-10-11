@@ -6,7 +6,7 @@
  */
 
 import type { Command } from 'commander';
-import { removeCache, withCacheLock } from '../../auth/oauth/cache.js';
+import { profileCachePath, removeCache, withCacheLock } from '../../auth/oauth/cache.js';
 import {
   FAMILY_NAMES,
   replacedAuthorization,
@@ -15,16 +15,16 @@ import {
   settingsFamily,
   storedFamily,
 } from '../../config/auth-edit.js';
-import type { ProfileChanges } from '../../config/edit.js';
-import { profileTokenFile, tokenDirectory, tokenPath } from '../../config/file.js';
+import { tokenDirectory, tokenPath } from '../../config/file.js';
 import type { OAuthChanges } from '../../config/oauth-edit.js';
 import type { Env } from '../../config/pick.js';
 import { DEFAULT_TIMEOUT_MS, type Profile } from '../../config/types.js';
+import { unsetVariableWarnings, type VariableNames } from '../../config/variable.js';
 import { usageError } from '../../errors.js';
 import { compact } from '../../util.js';
 import type { CliContext } from '../context.js';
 import { readStdinPassword, type StdinSecret } from '../stdin-password.js';
-import { bearerWarnings, STORED_TOKEN } from './config-bearer.js';
+import { STORED_TOKEN, storedTokenWarning } from './config-bearer.js';
 
 interface OAuthSetOptions {
   readonly oauthIssuer?: string;
@@ -139,10 +139,7 @@ export interface SetOutcome {
   /** What was read from stdin (and stored literally). */
   readonly secrets: SetSecrets;
   /** The variable names given to the `--*-env` options. */
-  readonly changes: Pick<
-    ProfileChanges,
-    'authPasswordEnv' | 'oauthClientSecretEnv' | 'authTokenEnv'
-  >;
+  readonly changes: VariableNames;
   readonly env: Env;
 }
 
@@ -165,11 +162,6 @@ function headerNotice(outcome: SetOutcome): string | undefined {
   return `Notice: removed the Authorization header of the profile; ${FAMILY_NAMES[family]} replaces it.`;
 }
 
-/** True when `variable` was given and names a variable without a non-blank value in `env`. */
-function unsetVariable(env: Env, variable: string | undefined): boolean {
-  return variable !== undefined && (env[variable.trim()] ?? '').trim() === '';
-}
-
 /**
  * Notes on stderr after `config set`. An unset variable is not named: given by mistake, the
  * "name" may be the secret itself.
@@ -182,16 +174,11 @@ export function setNotices(outcome: SetOutcome): string[] {
     secrets.password !== undefined
       ? `Warning: the password is stored in plain text in ${path} (mode 0600). Prefer --auth-password-env <VAR>, which stores only the name of an environment variable.`
       : undefined,
-    unsetVariable(env, changes.authPasswordEnv)
-      ? 'Warning: the variable named by --auth-password-env is not set in this environment. Pass the name of a variable that holds the password (e.g. CAMUNDA_PASSWORD), never the password itself; commands read it when they run.'
-      : undefined,
     secrets.clientSecret !== undefined
       ? `Warning: the client secret is stored in plain text in ${path} (mode 0600). Prefer --oauth-client-secret-env <VAR>.`
       : undefined,
-    unsetVariable(env, changes.oauthClientSecretEnv)
-      ? 'Warning: the variable named by --oauth-client-secret-env is not set in this environment. Pass the name of a variable that holds the client secret (e.g. OPERATE_CLIENT_SECRET), never the secret itself; commands read it when they run.'
-      : undefined,
-    ...bearerWarnings(path, secrets.token !== undefined, unsetVariable(env, changes.authTokenEnv)),
+    secrets.token === undefined ? undefined : storedTokenWarning(path),
+    ...unsetVariableWarnings(changes, env),
     outcome.after?.auth?.type === 'oauth'
       ? `Next: run \`operate auth login --profile ${outcome.name}\` in a terminal to log in.`
       : undefined,
@@ -199,21 +186,23 @@ export function setNotices(outcome: SetOutcome): string[] {
 }
 
 /**
- * `config delete`: removes the token cache file of the profile, if any, holding the cache lock.
- * The login is not revoked (`operate auth logout` does that).
+ * `config delete`: removes the token cache file of the profile, if any (also one cached under
+ * its old file name, `profileCachePath`), holding the cache lock. The login is not revoked
+ * (`operate auth logout` does that).
  */
 export async function removeLogin(name: string, context: CliContext): Promise<void> {
   const { runtime } = context;
   const tokenDir = tokenDirectory(runtime.env, runtime);
-  const path = tokenPath(tokenDir, profileTokenFile(name), runtime.platform);
-  if (!(await runtime.fs.exists(path))) return;
   const deps = {
     fs: runtime.fs,
     tokenDir,
+    tokenPath: (fileName: string) => tokenPath(tokenDir, fileName, runtime.platform),
     timeoutMs: DEFAULT_TIMEOUT_MS,
     withLock: <T>(lock: string, holdMs: number, action: () => Promise<T>) =>
       runtime.withLock(lock, holdMs, action),
   };
+  const path = await profileCachePath(name, deps);
+  if (!(await runtime.fs.exists(path))) return;
   if (await withCacheLock(path, deps, () => removeCache(path, deps))) {
     runtime.stderr.write(
       `Removed the OAuth login of profile "${name}" (${path}); it was not revoked.\n`,

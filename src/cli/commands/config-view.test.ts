@@ -24,15 +24,15 @@ describe('profileView', () => {
       defaultProfile: 'a',
       profiles: { a: { url: 'http://a', headers: { Authorization: 'Bearer t' } }, b: {} },
     };
-    expect(profileView(file, 'a')).toEqual({
+    expect(profileView(file, 'a', {})).toEqual({
       name: 'a',
       default: true,
       url: 'http://a',
       headers: { Authorization: 'Bearer ***' },
     });
-    expect(profileView(file, 'b')).toEqual({ name: 'b', default: false });
-    expect(JSON.stringify(profileView(file, 'a'))).not.toContain('Bearer t');
-    expect(profileView(file, 'missing')).toEqual({ name: 'missing', default: false });
+    expect(profileView(file, 'b', {})).toEqual({ name: 'b', default: false });
+    expect(JSON.stringify(profileView(file, 'a', {}))).not.toContain('Bearer t');
+    expect(profileView(file, 'missing', {})).toEqual({ name: 'missing', default: false });
   });
 });
 
@@ -44,17 +44,34 @@ describe('profileView auth', () => {
         env: { auth: { username: 'demo', passwordEnv: 'PW' } },
       },
     };
-    expect(profileView(file, 'literal')).toEqual({
+    expect(profileView(file, 'literal', {})).toEqual({
       name: 'literal',
       default: false,
       auth: { type: 'basic', username: 'demo', password: '***' },
     });
-    expect(profileView(file, 'env')).toEqual({
+    expect(profileView(file, 'env', {})).toEqual({
       name: 'env',
       default: false,
       auth: { username: 'demo', passwordEnv: 'PW' },
     });
     expect(file.profiles.literal.auth.password).toBe('s3cret');
+  });
+
+  it('masks a variable name that may be the secret itself: unusual and not set', () => {
+    const auth = (key: string, name: string) => ({ profiles: { p: { auth: { [key]: name } } } });
+    for (const key of ['passwordEnv', 'clientSecretEnv', 'tokenEnv']) {
+      expect(profileView(auth(key, 'hunter2_pw'), 'p', {}).auth).toEqual({ [key]: '***' });
+      expect(profileView(auth(key, 'hunter2_pw'), 'p', { hunter2_pw: ' ' }).auth).toEqual({
+        [key]: '***',
+      });
+      // set now, or in the usual form: a variable name, shown
+      expect(profileView(auth(key, 'ci_pw'), 'p', { ci_pw: 'x' }).auth).toEqual({ [key]: 'ci_pw' });
+      expect(profileView(auth(key, 'CI_PW'), 'p', {}).auth).toEqual({ [key]: 'CI_PW' });
+    }
+    const mixed = { type: 'basic' as const, username: 'u', passwordEnv: 'ghp_x1y2z3' };
+    expect(
+      Object.keys(profileView({ profiles: { p: { auth: mixed } } }, 'p', {}).auth as object),
+    ).toEqual(['type', 'username', 'passwordEnv']);
   });
 });
 

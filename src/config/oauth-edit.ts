@@ -16,9 +16,9 @@ import {
   validateClientSecret,
   validateOAuthUrl,
   validateScopes,
-  validateSecretEnv,
 } from './oauth.js';
 import { type OAUTH_AUTH_KEYS, type ProfileAuth } from './types.js';
+import { CLIENT_SECRET_VARIABLE, validateVariableName } from './variable.js';
 
 export interface OAuthChanges {
   readonly oauthIssuer?: string;
@@ -103,7 +103,7 @@ function secretOf(existing: ProfileAuth | undefined, changes: OAuthChanges): Sec
     );
   }
   if (variable !== undefined) {
-    return { clientSecretEnv: validateSecretEnv(variable, '--oauth-client-secret-env') };
+    return { clientSecretEnv: validateVariableName(variable, CLIENT_SECRET_VARIABLE) };
   }
   if (secret !== undefined) {
     return { clientSecret: validateClientSecret(secret, 'from --oauth-client-secret-stdin') };

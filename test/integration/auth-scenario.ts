@@ -267,6 +267,41 @@ export function registerAuthScenario(engineName: EngineName): void {
       expect(result.stderr).not.toMatch(SENT_REQUEST);
     });
 
+    it('refuses a password given as the name of its variable, never storing or repeating it', async () => {
+      // a password that happens to be a valid variable name, typed instead of the name
+      const typed = 'Pw_never_printed_4';
+      const set = await profileCli([
+        'config',
+        'set',
+        'it-misnamed',
+        globalFlag('url'),
+        engineUrl(),
+        globalFlag('auth'),
+        'basic',
+        globalFlag('auth-user'),
+        PROFILE_USER.username,
+        '--auth-password-env',
+        typed,
+      ]);
+      expect(explanation(expectError(set, 'CONFIG', 3))).toContain('--auth-password-env');
+      expectHidden(set, [typed]);
+      expect((await readProfiles())['it-misnamed']).toBeUndefined();
+
+      // a hand-edited profile with the same mistake: not repeated, nothing sent
+      const handEdited = join(required(workdir, 'the work directory'), 'misnamed.json');
+      const auth = { type: 'basic', username: PROFILE_USER.username, passwordEnv: typed };
+      await writeFile(handEdited, JSON.stringify({ profiles: { x: { url: engineUrl(), auth } } }));
+      const ping = await cli(['ping', globalFlag('profile'), 'x', globalFlag('verbose')], {
+        configFile: handEdited,
+        env: { OPERATE_URL: undefined },
+      });
+      expect(expectError(ping, 'CONFIG', 3).message).toBe(
+        'The password variable named by auth.passwordEnv of profile "x" is not set or empty',
+      );
+      expect(ping.stderr).not.toMatch(SENT_REQUEST);
+      expectHidden(ping, [typed]);
+    });
+
     it('stores a literal password from stdin with a warning', async () => {
       const set = await profileCli(
         [

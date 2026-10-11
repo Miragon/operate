@@ -1,29 +1,43 @@
 /** What the `operate config` commands print: profiles and the effective configuration. Pure. */
 
 import type { ConfigView } from '../../config/edit.js';
+import type { Env } from '../../config/pick.js';
 import { findProfile } from '../../config/resolve.js';
 import type { ConfigFile, ProfileAuth, Source } from '../../config/types.js';
+import { mayBeSecret } from '../../config/variable.js';
 import { MASK, maskHeaders } from '../../output/secrets.js';
 
-/** The stored auth object with the password, the client secret and the token masked. */
-function maskedAuth(auth: ProfileAuth): ProfileAuth {
+/** The keys that name the variable of a secret. */
+const VARIABLE_KEYS = ['passwordEnv', 'clientSecretEnv', 'tokenEnv'] as const;
+
+/**
+ * The stored auth object with the password, the client secret and the token masked, and the name
+ * of a secret's variable when it may be the secret itself (`mayBeSecret`: a hand-edited file).
+ */
+function maskedAuth(auth: ProfileAuth, env: Env): ProfileAuth {
+  const secretNames = VARIABLE_KEYS.filter((key) => {
+    const name = auth[key];
+    return name !== undefined && mayBeSecret(name, env);
+  });
   return {
     ...auth,
     ...(auth.password === undefined ? {} : { password: MASK }),
     ...(auth.clientSecret === undefined ? {} : { clientSecret: MASK }),
     ...(auth.token === undefined ? {} : { token: MASK }),
+    ...Object.fromEntries(secretNames.map((key) => [key, MASK])),
   };
 }
 
 /**
  * A stored profile with its name and default flag; header values, the password, the client
- * secret and the bearer token masked.
+ * secret and the bearer token masked, as well as a variable name that may be a secret (`env` is
+ * the environment of the command).
  */
-export function profileView(file: ConfigFile, name: string): Record<string, unknown> {
+export function profileView(file: ConfigFile, name: string, env: Env): Record<string, unknown> {
   const profile = findProfile(file, name) ?? {};
   const headers =
     profile.headers === undefined ? {} : { headers: maskHeaders(profile.headers, false) };
-  const auth = profile.auth === undefined ? {} : { auth: maskedAuth(profile.auth) };
+  const auth = profile.auth === undefined ? {} : { auth: maskedAuth(profile.auth, env) };
   return { name, default: file.defaultProfile === name, ...profile, ...headers, ...auth };
 }
 

@@ -12,7 +12,6 @@ import {
   validateClientSecret,
   validateOAuthUrl,
   validateScopes,
-  validateSecretEnv,
 } from './oauth.js';
 
 function failure(action: () => unknown): OperateError {
@@ -113,15 +112,6 @@ describe('client values', () => {
       'The OAuth client secret (from OPERATE_OAUTH_CLIENT_SECRET) must not contain control characters (line breaks, NUL, tab, ...)',
     );
     expect(JSON.stringify(error.details)).not.toContain('top');
-  });
-
-  it('checks the name of the secret variable without repeating it', () => {
-    expect(validateSecretEnv(' MY_SECRET ', '--oauth-client-secret-env')).toBe('MY_SECRET');
-    const error = failure(() => validateSecretEnv('s3cr3t-value!', '--oauth-client-secret-env'));
-    expect(error.message).toBe(
-      'Invalid --oauth-client-secret-env: expected the name of an environment variable',
-    );
-    expect(JSON.stringify(error.details)).not.toContain('s3cr3t');
   });
 
   it('trims a printable ASCII audience', () => {

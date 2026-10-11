@@ -67,6 +67,12 @@ export interface FakeRuntimeOptions {
   readonly lockTimeout?: boolean;
   /** `deadline` resolves at once (default: never). */
   readonly deadlineResolves?: boolean;
+  /**
+   * File and lock names compare without case, like on macOS (APFS) and Windows (NTFS) by default:
+   * a path opens an entry whose name differs only in case, and writing over an entry keeps its
+   * spelling (an atomic rename over it does, observed on APFS). `files` keeps the spelling.
+   */
+  readonly caseInsensitive?: boolean;
 }
 
 /** The in-memory loopback server: tests drive its handler with requests. */
@@ -219,6 +225,35 @@ function fakeFileSystem(tree: FakeTree): FileSystem {
   };
 }
 
+/** The directory and the name of a path. */
+function splitPath(path: string): readonly [string, string] {
+  const index = path.lastIndexOf('/');
+  return [path.slice(0, index), path.slice(index + 1)];
+}
+
+/** `fs` with case-insensitive, case-preserving names (`FakeRuntimeOptions.caseInsensitive`). */
+function caseInsensitiveFs(fs: FileSystem): FileSystem {
+  const resolve = async (path: string): Promise<string> => {
+    const [directory, name] = splitPath(path);
+    const entries = await fs.readdir(directory).catch(() => []);
+    const entry = entries.find((candidate) => candidate.name.toLowerCase() === name.toLowerCase());
+    return entry === undefined ? path : `${directory}/${entry.name}`;
+  };
+  return {
+    readFile: async (path) => fs.readFile(await resolve(path)),
+    writeFile: async (path, data, options) => {
+      await fs.writeFile(await resolve(path), data, options);
+    },
+    mkdir: async (path, options) => {
+      await fs.mkdir(await resolve(path), options);
+    },
+    exists: async (path) => fs.exists(await resolve(path)),
+    remove: async (path) => fs.remove(await resolve(path)),
+    readdir: (path) => fs.readdir(path),
+    kind: async (path) => fs.kind(await resolve(path)),
+  };
+}
+
 /** Deterministic random bytes: each call gets bytes derived from a fresh counter value. */
 function counterBytes() {
   let counter = 0;
@@ -273,9 +308,10 @@ function fakeLocks(options: FakeRuntimeOptions, locks: FakeRuntime['locks']) {
         new Error(`Timed out after ${2 * holdMs} ms waiting for the lock ${path}`),
       );
     }
-    const result = (queues.get(path) ?? Promise.resolve()).then(action);
+    const key = options.caseInsensitive === true ? path.toLowerCase() : path;
+    const result = (queues.get(key) ?? Promise.resolve()).then(action);
     queues.set(
-      path,
+      key,
       result.catch(() => undefined),
     );
     return result;
@@ -334,11 +370,12 @@ export function fakeRuntime(options: FakeRuntimeOptions = {}): FakeRuntime {
   const deadlines: number[] = [];
   const randomRequests: number[] = [];
   const random = options.randomBytes ?? counterBytes();
+  const fs = fakeFileSystem({ files, dirs, others, dirModes });
   const runtime: FakeRuntime = {
     ...streams(options),
     readStdin: fakeStdin(options.stdin),
     fetch: options.fetch ?? rejectFetch,
-    fs: fakeFileSystem({ files, dirs, others, dirModes }),
+    fs: options.caseInsensitive === true ? caseInsensitiveFs(fs) : fs,
     files,
     dirs,
     dirModes,

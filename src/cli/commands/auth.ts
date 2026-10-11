@@ -7,13 +7,13 @@
  */
 
 import type { Command } from 'commander';
-import { cachePath, readCache } from '../../auth/oauth/cache.js';
+import { cachePath, profileCachePath, readCache } from '../../auth/oauth/cache.js';
 import { checkUsable, iso, notLoggedIn, otherIdentity } from '../../auth/oauth/errors.js';
 import { identityOf, sameIdentity } from '../../auth/oauth/identity.js';
 import { login } from '../../auth/oauth/login.js';
 import { logout, type LogoutTarget } from '../../auth/oauth/logout.js';
 import type { LoginDeps } from '../../auth/oauth/types.js';
-import { profileTokenFile, readConfigFile } from '../../config/file.js';
+import { readConfigFile } from '../../config/file.js';
 import type { Env } from '../../config/pick.js';
 import { selectedAuth } from '../../config/resolve-auth.js';
 import { endpointSource } from '../../config/resolve-oauth.js';
@@ -210,7 +210,7 @@ async function logoutTarget(globals: GlobalOptions, context: CliContext) {
   const target = targetOf(selected, resolution);
   const bearer = bearerSelection(globals, runtime.env, selected);
   if (selected.name !== undefined) {
-    const tokenCache = deps.tokenPath(profileTokenFile(selected.name));
+    const tokenCache = await profileCachePath(selected.name, deps);
     // a bearer profile may still have the OAuth login it used before (config set says so)
     if (bearer !== undefined && !(await runtime.fs.exists(tokenCache))) {
       throw bearerNotManaged('logout', bearer);

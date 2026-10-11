@@ -3,13 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { b64tokens } from '../../test/support/bearer.js';
 import { OperateError } from '../errors.js';
 import { profileAuthProblem } from './auth.js';
-import {
-  checkTokenEnv,
-  hasBearerKeys,
-  isConventionalVariable,
-  normalizeToken,
-  validateTokenEnv,
-} from './bearer.js';
+import { hasBearerKeys, normalizeToken } from './bearer.js';
 
 function failure(action: () => unknown): OperateError {
   try {
@@ -94,77 +88,6 @@ describe('normalizeToken', () => {
         'The bearer token from --auth-token-stdin contains line breaks or control characters (RFC 6750)',
       );
     }
-  });
-});
-
-describe('validateTokenEnv', () => {
-  it('accepts and trims variable names', () => {
-    expect(validateTokenEnv(' CI_ENGINE_TOKEN ')).toBe('CI_ENGINE_TOKEN');
-    expect(validateTokenEnv('_x1')).toBe('_x1');
-  });
-
-  it.each(['', '1ABC', 'MY-VAR', 'eyJhbGciOi.payload.sig', 'a b'])(
-    'refuses %j without repeating it',
-    (name) => {
-      const error = failure(() => validateTokenEnv(name));
-      expect(error.code).toBe('CONFIG');
-      expect(error.message).toBe(
-        'Invalid --auth-token-env: expected the name of an environment variable',
-      );
-      expect(error.details.hint).toBe(
-        'Use letters, digits and "_", not starting with a digit, e.g. --auth-token-env CI_ENGINE_TOKEN; the variable holds the token.',
-      );
-      if (name !== '') expect(`${error.message}${error.details.hint ?? ''}`).not.toContain(name);
-    },
-  );
-});
-
-describe('isConventionalVariable', () => {
-  it('accepts upper-case names of words up to 24 characters, at most 64 in all', () => {
-    for (const name of ['CI_ENGINE_TOKEN', '_X', 'A', 'OPERATE_ENGINE_PRODUCTION_BEARER_TOKEN']) {
-      expect(isConventionalVariable(name)).toBe(true);
-    }
-    expect(isConventionalVariable(`${'A'.repeat(24)}_B`)).toBe(true);
-  });
-
-  it('refuses lower case, long words and long names: opaque tokens look like that', () => {
-    for (const name of [
-      'tok_SECRETabcdefghijklmnopqrstuvwxyz0123',
-      'ci_token',
-      'A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6',
-      'A'.repeat(25),
-      Array.from({ length: 14 }, () => 'ABCD').join('_'),
-      '1ABC',
-      '',
-    ]) {
-      expect(isConventionalVariable(name)).toBe(false);
-    }
-  });
-});
-
-describe('checkTokenEnv', () => {
-  it('accepts a set variable in any form and an unset one in the usual form', () => {
-    expect(checkTokenEnv(' CI_ENGINE_TOKEN ', {})).toBe('CI_ENGINE_TOKEN');
-    expect(checkTokenEnv('ci_token', { ci_token: 'v' })).toBe('ci_token');
-  });
-
-  it('refuses an unset name in another form without repeating it: it may be the token', () => {
-    fc.assert(
-      fc.property(fc.stringMatching(/^[a-z][A-Za-z0-9_]{8,40}$/), (name) => {
-        fc.pre(!isConventionalVariable(name));
-        for (const env of [{}, { [name]: ' ' }]) {
-          const error = failure(() => checkTokenEnv(name, env));
-          expect(error.code).toBe('CONFIG');
-          expect(error.message).toBe(
-            '--auth-token-env names a variable that is not set and does not look like a variable name: it may be the token itself, so it is neither stored nor repeated',
-          );
-          expect(`${error.message}${error.details.hint ?? ''}`).not.toContain(name);
-        }
-      }),
-    );
-    expect(failure(() => checkTokenEnv('a.b.c', {})).message).toBe(
-      'Invalid --auth-token-env: expected the name of an environment variable',
-    );
   });
 });
 
