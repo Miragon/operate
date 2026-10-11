@@ -60,6 +60,26 @@ describe('measure', () => {
     ]);
   });
 
+  it('asks for incidents only once the condition counts are answered, never in parallel', async () => {
+    // a job that fails for good loses its last retry and gets its incident in one transaction:
+    // only an incident count read after the job count is sure to see what the job count missed
+    const answers: ((response: Response) => void)[] = [];
+    const server = countingEngine({ incidents: 1 }).on(
+      'GET',
+      '/job/count',
+      () => new Promise<Response>((resolve) => answers.push(resolve)),
+    );
+    const measured = measure(portOf(server.fetch), ACTIVE, [{ kind: 'idle' }], true);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(server.requests.map((request) => request.path)).toEqual(['/job/count']);
+    answers[0]?.(json({ count: 0 }));
+    expect(await measured).toEqual({ incidents: 1, held: ['idle'] });
+    expect(server.requests.map((request) => request.path)).toEqual([
+      '/job/count',
+      '/process-instance/count',
+    ]);
+  });
+
   it('looks for an activity in the active tree and in the history of every instance', async () => {
     const server = countingEngine({ active: 0, history: 1 });
     const result = await measure(

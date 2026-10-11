@@ -14,6 +14,7 @@ import {
   EXECUTABLE,
   measure,
   type Probe,
+  type Verdict,
 } from './conditions.js';
 import { type EnginePort, listByIds } from './engine.js';
 import { type InspectOptions, instanceMissing, loadView } from './inspect.js';
@@ -80,7 +81,8 @@ async function look(port: EnginePort, id: string, first: boolean): Promise<Seen>
   const runtime = records([await port.find('getProcessInstance', idInput(id))])[0];
   if (runtime !== undefined) {
     const tree = await activeTree(port, runtime);
-    const probe = { id, ended: false, tree: tree.nodes.map((node) => node.id) };
+    const nodes = tree.nodes.map((node) => node.id);
+    const probe = { id, ended: false, tree: nodes, truncated: tree.truncated };
     return { probe, historyMissing: false };
   }
   const history = records([await port.find('getHistoricProcessInstance', idInput(id))])[0];
@@ -125,17 +127,49 @@ export interface WaitTarget {
   readonly known: boolean;
 }
 
+/** The same instances, in any order. */
+function sameTree(left: readonly string[], right: readonly string[]): boolean {
+  const ids = new Set(left);
+  return left.length === right.length && right.every((id) => ids.has(id));
+}
+
+/**
+ * `idle` speaks about the whole tree at one moment, but the tree and the job count are read one
+ * after the other: a job that starts a called instance whose first job is due can commit between
+ * them, and the count sees neither job. So the tree of an idle verdict is read again after the
+ * counts; on a changed tree (also the empty tree of an instance that ended meanwhile) `idle` does
+ * not hold for this poll. A cut tree is taken as it is (instances beyond it are never counted).
+ */
+async function treeKept(port: EnginePort, probe: Probe): Promise<boolean> {
+  if (probe.ended || probe.truncated === true) return true;
+  const again = await look(port, probe.id, false);
+  return sameTree(again.probe.tree, probe.tree);
+}
+
+/**
+ * The verdict of one poll (design §17.2.6). `idle` holds only on a tree that held still; without
+ * it the other conditions decide (what they found exists, whatever the tree did meanwhile).
+ */
+async function judge(port: EnginePort, probe: Probe, settings: WaitSettings): Promise<Verdict> {
+  const { conditions, failOnIncident } = settings;
+  const checkIncidents =
+    failOnIncident || conditions.some((condition) => condition.kind === 'incident');
+  const measurement = await measure(port, probe, conditions, checkIncidents);
+  const verdict = decide(conditions, failOnIncident, probe, measurement);
+  if (verdict.kind !== 'held' || verdict.until !== 'idle' || (await treeKept(port, probe))) {
+    return verdict;
+  }
+  const held = measurement.held.filter((label) => label !== 'idle');
+  return decide(conditions, failOnIncident, probe, { ...measurement, held });
+}
+
 async function run(deps: WaitDeps, target: WaitTarget, settings: WaitSettings): Promise<WaitRun> {
   const { id } = target;
-  const checkIncidents =
-    settings.failOnIncident ||
-    settings.conditions.some((condition) => condition.kind === 'incident');
   let seen: Seen = { probe: { id, ended: false, tree: [] }, historyMissing: false };
   const result = await poll<Ending>(
     async (polls) => {
       seen = await look(deps.port, id, polls === 1 && !target.known);
-      const measurement = await measure(deps.port, seen.probe, settings.conditions, checkIncidents);
-      const verdict = decide(settings.conditions, settings.failOnIncident, seen.probe, measurement);
+      const verdict = await judge(deps.port, seen.probe, settings);
       if (verdict.kind !== 'pending') return verdict;
       const failure = settings.executeJobs ? await runDueJobs(deps, seen.probe.tree) : undefined;
       return failure === undefined ? undefined : { kind: 'job-failed', failure };
