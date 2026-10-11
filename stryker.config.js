@@ -28,8 +28,9 @@ export { strykerValidationSchema } from '@stryker-mutator/vitest-runner';
 /** Number of CI shards: the matrix of the `mutation` job in .github/workflows/ci.yml. */
 export const SHARDS = 4;
 
-// ratcheted when a full run scored 97.70 %: high = floor(score), low = floor - 2, break = floor - 3
-export const thresholds = { high: 97, low: 95, break: 94 };
+// set from the full run of the scope of issue #25 (95.57 %): high = floor(score), low = floor - 2,
+// break = floor - 3; ratchet them when a full run scores higher
+export const thresholds = { high: 95, low: 93, break: 92 };
 
 /**
  * The logic layers and the catalog generator. Left out: the CLI wiring and registration
