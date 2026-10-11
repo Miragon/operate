@@ -54,6 +54,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:mutation": "stryker run",
+    "test:mutation:score": "tsx scripts/mutation-score.ts",
     "test:integration": "npm run build && vitest run --config vitest.integration.config.ts",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run arch && npm run knip && npm run generate:check && npm run test:coverage",
     "prepack": "npm run build"

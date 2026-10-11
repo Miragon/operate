@@ -1158,15 +1158,16 @@ npm ci
 npx tsx src/bin/operate.ts --help
 ```
 
-| Script                     | What it does                                                                       |
-| -------------------------- | ---------------------------------------------------------------------------------- |
-| `npm run build`            | Bundle `dist/operate.js` with tsdown                                               |
-| `npm run generate`         | Regenerate `src/generated/catalog.json` from the spec (`generate:check` for drift) |
-| `npm run check`            | Every fast gate: typecheck, lint, format, architecture, knip, catalog, coverage    |
-| `npm test`                 | Unit and property tests (vitest)                                                   |
-| `npm run test:coverage`    | Unit tests with v8 coverage thresholds                                             |
-| `npm run test:mutation`    | Mutation testing with StrykerJS                                                    |
-| `npm run test:integration` | Build, then run the Testcontainers tests against real engines                      |
+| Script                        | What it does                                                                       |
+| ----------------------------- | ---------------------------------------------------------------------------------- |
+| `npm run build`               | Bundle `dist/operate.js` with tsdown                                               |
+| `npm run generate`            | Regenerate `src/generated/catalog.json` from the spec (`generate:check` for drift) |
+| `npm run check`               | Every fast gate: typecheck, lint, format, architecture, knip, catalog, coverage    |
+| `npm test`                    | Unit and property tests (vitest)                                                   |
+| `npm run test:coverage`       | Unit tests with v8 coverage thresholds                                             |
+| `npm run test:mutation`       | Incremental mutation testing with StrykerJS (`-- --force` re-tests every mutant)   |
+| `npm run test:mutation:score` | Break threshold over the reports of the CI mutation shards                         |
+| `npm run test:integration`    | Build, then run the Testcontainers tests against real engines                      |
 
 `test:integration` runs all engines, each three times: the scenario suite without authentication,
 the Basic auth suite (`*-auth.it.test.ts`) against a second container with authentication enabled,
@@ -1336,7 +1337,15 @@ interactive login (loopback server, browser), and the generated catalog is only 
 - **fast-check** property tests for naming, patches, variable parsing, dates, query building,
   projection, table width, config and auth precedence, the Basic auth header, PKCE, token expiry,
   the token cache, body validation and secret masking (also of every OAuth token and secret).
-- **StrykerJS** mutation testing (break threshold 65 %) on `main`, weekly and on demand.
+- **StrykerJS** mutation testing on every pull request and push to `main`, in eight parallel
+  shards whose combined score must reach 94 % (the `mutation score` check). Runs are incremental:
+  each shard restores its last result from the Actions cache and re-tests only the mutants whose
+  code or covering tests changed. Pull requests read the result of `main` and never write it. The
+  weekly run and a manual run with `full-mutation` re-test every mutant and refresh the result.
+  So does a change to what every test depends on but Stryker's diff does not track: the Stryker,
+  vitest or TypeScript configuration, the installed dependencies or the Node major. Changes to
+  other files that are neither mutated nor tests (such as `test/support`) are caught by the weekly
+  run.
 - **Testcontainers** integration tests against the three engines, with and without Basic auth,
   behind a Keycloak and Envoy JWT gateway for OAuth, through the workflow commands, plus a
   packed-tarball smoke test, on every pull request.
