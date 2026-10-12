@@ -14,6 +14,7 @@ const SKILL_URL = new URL('../../skills/operate/SKILL.md', import.meta.url);
 const SKILL = readFileSync(SKILL_URL, 'utf8');
 const FRONTMATTER = /^---\n([\s\S]*?)\n---\n\n([\s\S]*)$/;
 const README = readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
+const AGENTS_PAGE = readFileSync(new URL('../../docs/agents.md', import.meta.url), 'utf8');
 
 /**
  * Size budgets per page, with headroom: an edit that adds a few lines to a page must not break
@@ -357,16 +358,21 @@ describe('topicSuggestions', () => {
   });
 });
 
-describe('README', () => {
+describe('docs/agents.md', () => {
   it('points agents to the core guide, its topics and --list', () => {
-    const start = README.indexOf('## Using operate from AI agents');
-    const section = README.slice(start, README.indexOf('\n## ', start + 1));
-    expectAll(section, [
+    expect(AGENTS_PAGE.startsWith('# Using operate from AI agents\n')).toBe(true);
+    expectAll(AGENTS_PAGE, [
       '`operate guide`',
       '`operate guide <topic>`',
       '`operate guide --list`',
       ...GUIDE_TOPICS.map((topic) => `\`${topic.name}\``),
     ]);
+  });
+});
+
+describe('README', () => {
+  it('points agents to the guide and to docs/agents.md', () => {
+    expectAll(README, ['`operate guide`', '(docs/agents.md)']);
   });
 });
 

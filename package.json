@@ -59,6 +59,7 @@
     "test:mutation:score": "tsx scripts/mutation-score.ts",
     "test:integration": "npm run build && vitest run --config vitest.integration.config.ts",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run arch && npm run knip && npm run generate:check && npm run test:coverage",
+    "demo": "npm run build && tsx scripts/make-demo.ts",
     "prepack": "npm run build"
   },
   "dependencies": {
@@ -66,6 +67,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@resvg/resvg-wasm": "^2.6.2",
     "@stryker-mutator/core": "^10.0.0",
     "@stryker-mutator/vitest-runner": "^10.0.0",
     "@types/node": "^22.20.5",

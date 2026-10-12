@@ -1,14 +1,19 @@
 /**
  * Drift protection between the docs and the real command line: every `operate` command of the guide
- * (the core and every topic, each page in order on its own fake engine) and of the README and every
- * example of every operation must run in the CLI with exit code 0 (examples with --dry-run, whose
- * preview must show the method and path of the operation).
+ * (the core and every topic), of the README and of every page of docs/ (each page in order on its
+ * own fake engine) and every example of every operation must run in the CLI with exit code 0
+ * (examples with --dry-run, whose preview must show the method and path of the operation).
  * src/cli/command-lines.test.ts checks them against the catalog; this test runs them.
  */
 
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { execute, type FakeRuntime, fakeRuntime } from '../../test/support/fake-runtime.js';
+import { DOC_PAGES } from '../../test/support/doc-pages.js';
+import {
+  CONFIG_PATH,
+  execute,
+  type FakeRuntime,
+  fakeRuntime,
+} from '../../test/support/fake-runtime.js';
 import { GUIDE_PAGES } from '../../test/support/guide-pages.js';
 import { WorkflowEngine } from '../../test/support/workflow-engine.js';
 import { loadCatalog } from '../catalog/catalog.js';
@@ -18,7 +23,6 @@ import { commandWords } from '../docs/text.js';
 import { run } from './run.js';
 
 const catalog = loadCatalog();
-const README = readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
 
 const SHELL_OPERATORS = new Set(['|', '||', '&&', ';', '>', '>>', '<', '2>']);
 
@@ -84,11 +88,25 @@ const EXIT_9: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The config file a docs page starts with: its reader already has a default profile, so a profile
+ * the page creates (`config set staging ...`) does not become the default of its later commands.
+ */
+const READER_CONFIG = {
+  [CONFIG_PATH]: JSON.stringify({
+    defaultProfile: 'local',
+    profiles: { local: { url: 'http://localhost:8080/engine-rest' } },
+  }),
+};
+
+/**
  * A runtime with the scripted fake engine of the workflow commands (lenient: every other request
  * gets `{}`, paged ones `[]`), whose job executor runs while the CLI sleeps, and the referenced
  * files.
  */
-function documentedRuntime(words: readonly string[]): FakeRuntime {
+function documentedRuntime(
+  words: readonly string[],
+  files: Readonly<Record<string, string>> = {},
+): FakeRuntime {
   const engine = new WorkflowEngine('approve', true);
   return fakeRuntime({
     fetch: engine.fetch,
@@ -96,7 +114,7 @@ function documentedRuntime(words: readonly string[]): FakeRuntime {
       engine.tick();
     },
     stdin: '{}',
-    files: { ...DEPLOYED_DIRECTORIES, ...referencedFiles(words) },
+    files: { ...DEPLOYED_DIRECTORIES, ...referencedFiles(words), ...files },
   });
 }
 
@@ -168,10 +186,14 @@ describe('documented command lines run in the CLI', () => {
     expect(await failures(page, documentedRuntime(page.flat()))).toEqual([]);
   });
 
-  it('runs the commands of the README in order', async () => {
-    const readme = fencedCommands(README);
-    expect(readme.length).toBeGreaterThan(40);
-    expect(await failures(readme, documentedRuntime(readme.flat()))).toEqual([]);
+  it.each(DOC_PAGES)('runs the commands of %s in order', async (_, text) => {
+    const page = fencedCommands(text);
+    expect(await failures(page, documentedRuntime(page.flat(), READER_CONFIG))).toEqual([]);
+  });
+
+  it('finds the commands of the README and the docs pages', () => {
+    const documented = DOC_PAGES.flatMap(([, text]) => fencedCommands(text));
+    expect(documented.length).toBeGreaterThan(40);
   });
 
   it('runs every example of every operation with --dry-run, previewing its request', async () => {
