@@ -4,21 +4,24 @@
 [![CI](https://github.com/Miragon/operate/actions/workflows/ci.yml/badge.svg)](https://github.com/Miragon/operate/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A command line tool that lets an AI agent (or a human at a shell) run and repair processes on a
-Camunda 7 engine: [Operaton](https://operaton.org), [CIB seven](https://cibseven.org) and
-Camunda 7. It says **what should happen** to a process, and the CLI talks to the REST API.
+A command line tool that lets an AI agent (or a human at a shell) **operate a Camunda 7 process
+engine**: [Operaton](https://operaton.org), [CIB seven](https://cibseven.org) and Camunda 7. Deploy
+processes and decisions, start and follow instances, work on tasks, fix incidents, migrate running
+instances, look into the history and administer users and permissions. The agent says what should
+happen, and the CLI talks to the REST API.
 
 ![One operate advance command completes the task an order process waits at](docs/assets/demo.gif)
 
 ## Why
 
 A language model writes its answer token by token, so the time and the cost of a task grow with
-the text it has to produce. Driving a process engine through its REST API is a lot of text: one
-request to find the instance, one to see where it waits, one to act, one to check the result, and
-each answer has to be read to build the next request. An agent that works this way is slow, and
-every id it copies is a chance to hit the wrong instance.
+the text it has to produce. Working with a process engine through its REST API is a lot of text.
+Completing a single task takes one request to find the instance, one to see where it waits, one to
+act and one to check the result, and each answer has to be read to build the next request. A
+deployment, a migration or a search through the history is no different. An agent that works this
+way is slow, and every id it copies is a chance to hit the wrong instance.
 
-operate turns this around: the agent names the process and what should happen to it, in one short
+operate turns this around: the agent names what it means and what should happen, in one short
 command, and the CLI sends the requests. What you get:
 
 - **Fast, because the agent writes little.** One short command replaces a chain of requests.
@@ -27,8 +30,8 @@ command, and the CLI sends the requests. What you get:
   up instead of inventing them.
 - **Safe on real engines.** Every change can be previewed, deleting needs an explicit yes, and an
   engine can be marked as look-only.
-- **The whole engine.** Everything the REST API offers is available, for the cases the short
-  commands do not cover.
+- **The whole engine.** Deployments, instances, tasks, incidents, migrations, history, decisions,
+  users and permissions: everything the REST API offers is a command.
 - **Made for scripts too.** It never asks questions, and both its answers and its errors are
   easy for a program to read.
 
@@ -73,15 +76,21 @@ On a terminal the answer is a table, as above; an agent or a script gets JSON.
 
 ## Commands
 
-| Task                        | Commands                                                      |
-| --------------------------- | ------------------------------------------------------------- |
-| See where an instance waits | `inspect`, `wait`                                             |
-| Move an instance on         | `advance`, `retry`                                            |
-| Deploy and start            | `deploy`                                                      |
-| Check the engine            | `status`, `ping`                                              |
-| Call any REST operation     | `<group> <command>`, e.g. `task list`; `api` for raw requests |
-| Ask the CLI itself          | `guide`, `commands`, `describe`, `--help`                     |
-| Set up engines and logins   | `config`, `auth`, `completion`                                |
+| Task                           | Commands                                                                 |
+| ------------------------------ | ------------------------------------------------------------------------ |
+| Deploy processes and decisions | `deploy`, `deployment`, `process-definition`, `decision-definition`      |
+| Start and follow instances     | `inspect`, `wait`, `process-instance`, `message`, `signal`               |
+| Work on tasks                  | `advance`, `task`, `external-task`                                       |
+| Find and fix what failed       | `status`, `retry`, `incident`, `job`                                     |
+| Change running instances       | `migration`, `modification`, `batch`                                     |
+| Look into the history          | `historic-process-instance`, `historic-task-instance`, 13 more groups    |
+| Administer the engine          | `user`, `group`, `tenant`, `authorization`, `metrics`, `history-cleanup` |
+| Call any other REST operation  | `<group> <command>`, e.g. `filter list`; `api` for raw requests          |
+| Ask the CLI itself             | `guide`, `commands`, `describe`, `--help`                                |
+| Set up engines and logins      | `config`, `auth`, `completion`, `ping`                                   |
+
+The six top-level commands (`inspect`, `wait`, `advance`, `retry`, `deploy`, `status`) combine
+several requests; every other command is one operation of the REST API.
 
 Details: [workflow commands](docs/workflow-commands.md),
 [command structure](docs/commands.md), [recipes](docs/recipes.md).
