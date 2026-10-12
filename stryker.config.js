@@ -1,5 +1,5 @@
 /**
- * StrykerJS configuration (`npm run test:mutation`): mutates the same files as the coverage gate.
+ * StrykerJS configuration (`npm run test:mutation`): mutates the logic layers (`MUTATE`).
  *
  * CI splits the run into `SHARDS` jobs: `STRYKER_SHARD=<shard>/<shards>` mutates only the files of
  * that shard (`shardOf`) and turns off the break threshold, which `npm run test:mutation:score`
@@ -26,20 +26,36 @@ import { strykerPlugins as vitestRunnerPlugins } from '@stryker-mutator/vitest-r
 export { strykerValidationSchema } from '@stryker-mutator/vitest-runner';
 
 /** Number of CI shards: the matrix of the `mutation` job in .github/workflows/ci.yml. */
-export const SHARDS = 8;
+export const SHARDS = 4;
 
-// ratcheted when a full run scored 97.70 %: high = floor(score), low = floor - 2, break = floor - 3
-export const thresholds = { high: 97, low: 95, break: 94 };
+// set from the full run of the scope of issue #25 (95.57 %): high = floor(score), low = floor - 2,
+// break = floor - 3; ratchet them when a full run scores higher
+export const thresholds = { high: 95, low: 93, break: 92 };
 
+/**
+ * The logic layers and the catalog generator. Left out: the CLI wiring and registration
+ * (`src/cli`), help and guide texts (`src/docs`), the Node.js glue (`src/bin`) and the packaging
+ * scripts (`scripts/exe`), which the command line and integration tests cover, and the data tables
+ * of the generator (group descriptions, name overrides; the summary texts in summaries.ts are
+ * disabled inline), whose mutants only the golden catalog test detects, as `generate:check` does.
+ * The coverage gate still measures all of them.
+ */
 const MUTATE = [
-  'src/**/*.ts',
+  'src/auth/**/*.ts',
+  'src/catalog/**/*.ts',
+  'src/config/**/*.ts',
+  'src/http/**/*.ts',
+  'src/operation/**/*.ts',
+  'src/output/**/*.ts',
+  'src/workflow/**/*.ts',
+  'src/errors.ts',
+  'src/util.ts',
   'scripts/catalog/**/*.ts',
-  'scripts/exe/**/*.ts',
   '!**/*.test.ts',
-  '!**/*.d.ts',
-  '!src/bin/**',
-  '!src/**/types.ts',
+  '!**/types.ts',
+  '!scripts/catalog/groups.ts',
   '!scripts/catalog/openapi.ts',
+  '!scripts/catalog/overrides.ts',
 ];
 
 /**
@@ -138,6 +154,9 @@ export default {
   testRunner: 'vitest',
   vitest: { configFile: 'vitest.config.ts', related: true },
   coverageAnalysis: 'perTest',
+  // off: it would save 41 % of a full run, but hide 53 undetected static mutants, mostly anchors
+  // and character classes of validation regexes (design §21.3)
+  ignoreStatic: false,
   mutate: MUTATE,
   ignorePatterns: ['dist', 'build', 'coverage', '.context', '.claude', '.github'],
   incremental: true,

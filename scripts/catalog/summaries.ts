@@ -24,6 +24,7 @@ interface Noun {
   readonly article: string;
 }
 
+// Stryker disable all: help texts; only the golden catalog test detects a change (stryker.config.js)
 /** Explicit summaries keyed by operationId: wrong, generic or misleading upstream texts. */
 export const SUMMARY_OVERRIDES: Readonly<Record<string, string>> = {
   getBatchStatistics: 'Get batch statistics',
@@ -185,6 +186,7 @@ export const SUMMARY_OVERRIDES: Readonly<Record<string, string>> = {
   unlockUser: 'Unlock a user',
   getRestAPIVersion: 'Get the REST API version',
 };
+// Stryker restore all
 
 function nounOf(group: string): Noun {
   const words = group.split('-');

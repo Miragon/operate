@@ -1,6 +1,6 @@
 # Quality gates: fast checks on Node 22/24, validation of the Claude Code plugin, Testcontainers
 # integration tests per engine, the standalone executable and the container image, and incremental
-# mutation testing (weekly and on demand in full).
+# mutation testing (informational on pull requests; in full weekly and on demand).
 name: CI
 
 on:
@@ -190,13 +190,15 @@ jobs:
 
   # StrykerJS in shards (STRYKER_SHARD, see stryker.config.js), each with its own incremental
   # baseline in the Actions cache: a run re-tests only the mutants whose code or covering tests
-  # changed since that baseline. Pull requests restore the baseline of main and never save one;
-  # pushes to main restore and save it. The weekly run and a manual run with full-mutation start
-  # without a baseline (as --force would) and save their result as the new one. Stryker's diff
-  # sees mutated and test files only, so the key carries a fingerprint of what every test depends
-  # on: the Stryker, vitest and TypeScript configuration, the installed dependencies and the Node
-  # major. Any change there finds no baseline and re-tests every mutant. Options that change
-  # results therefore belong in stryker.config.js, not on the command line below.
+  # changed since that baseline. Pushes to main restore and save it. The weekly run and a manual
+  # run with full-mutation start without a baseline (as --force would) and save their result as
+  # the new one. Stryker's diff sees mutated and test files only, so the key carries a fingerprint
+  # of what every test depends on: the Stryker, vitest and TypeScript configuration, the installed
+  # dependencies and the Node major. Any change there finds no baseline and re-tests every mutant.
+  # Options that change results therefore belong in stryker.config.js, not on the command line
+  # below. Pull requests never run in full: they restore the baseline of main and never save one,
+  # and a shard without a baseline for its fingerprint skips Stryker (dependency, configuration or
+  # Node changes; the push to main and the weekly run test those).
   mutation:
     name: mutation (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
@@ -204,7 +206,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4]
     # One run per shard at a time outside pull requests, so each starts from the previous baseline.
     concurrency:
       group: mutation-${{ github.ref }}-${{ matrix.shard }}
@@ -220,7 +222,6 @@ jobs:
         with:
           node-version: 24.x
           cache: npm
-      - run: npm ci
       - name: Fingerprint the mutation testing setup
         id: baseline
         run: |
@@ -231,15 +232,27 @@ jobs:
           echo "key=stryker-node$node-$config-$deps-shard${{ matrix.shard }}" >> "$GITHUB_OUTPUT"
       # Caches are immutable: the run id in the key lets every run save, the newest one is restored.
       - name: Restore the incremental baseline
+        id: restore
         if: env.FULL_RUN != 'true'
         uses: actions/cache/restore@v6
         with:
           path: reports/stryker-incremental.json
           key: ${{ steps.baseline.outputs.key }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ${{ steps.baseline.outputs.key }}-
+      # The mutation score job reports skipped shards (no report) on the pull request.
+      - name: Skip without a baseline of main
+        if: github.event_name == 'pull_request' && steps.restore.outputs.cache-matched-key == ''
+        env:
+          KEY: ${{ steps.baseline.outputs.key }}
+        run: |
+          echo "main has no baseline $KEY-*, and a pull request never runs in full: skipped."
+          echo "SKIP_MUTATION=true" >> "$GITHUB_ENV"
+      - run: npm ci
+        if: env.SKIP_MUTATION != 'true'
       # exec: Stryker itself gets the interrupt of a timeout or cancellation, saves the results so
       # far to the incremental file and the next run continues from there.
       - name: Mutation testing
+        if: env.SKIP_MUTATION != 'true'
         timeout-minutes: 150
         run: exec node_modules/.bin/stryker run --concurrency 4
       - name: Save the incremental baseline
@@ -251,7 +264,7 @@ jobs:
           path: reports/stryker-incremental.json
           key: ${{ steps.baseline.outputs.key }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload the mutation report
-        if: always()
+        if: always() && env.SKIP_MUTATION != 'true'
         uses: actions/upload-artifact@v7
         with:
           name: mutation-report-${{ matrix.shard }}
@@ -262,23 +275,32 @@ jobs:
           overwrite: true
 
   # The shards run without a break threshold; this job applies it to the score of all mutants. It
-  # also runs when a shard failed and then fails itself, instead of being skipped (a skipped job
-  # passes as a required check), so it is the one check to require. Superseded (cancelled) runs
-  # skip it.
+  # also runs when a shard failed and then fails itself instead of being skipped, so a run with a
+  # missing shard never passes. That holds for pushes to main, the weekly and manual runs. On pull
+  # requests it only reports (--informational): the score of the shards that ran, skipped shards
+  # and a score below the threshold become annotations and the job summary, never a failure, so no
+  # mutation job is a merge criterion. Superseded (cancelled) runs skip it.
   mutation-score:
     name: mutation score
     needs: mutation
     if: ${{ !cancelled() && needs.mutation.result != 'cancelled' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      INFORMATIONAL: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Require every shard
         if: needs.mutation.result != 'success'
         env:
           RESULT: ${{ needs.mutation.result }}
         run: |
-          echo "::error::A mutation shard did not finish (result: $RESULT), see the mutation jobs."
-          exit 1
+          message="A mutation shard did not finish (result: $RESULT), see the mutation jobs."
+          if [ "$INFORMATIONAL" = true ]; then
+            echo "::warning::$message"
+          else
+            echo "::error::$message"
+            exit 1
+          fi
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -291,4 +313,9 @@ jobs:
         with:
           pattern: mutation-report-*
           path: reports/shards
-      - run: npm run test:mutation:score -- reports/shards/*/mutation.json
+      - name: Mutation score
+        run: |
+          shopt -s nullglob
+          args=(reports/shards/*/mutation.json)
+          if [ "$INFORMATIONAL" = true ]; then args=(--informational "${args[@]}"); fi
+          npm run test:mutation:score -- "${args[@]}"

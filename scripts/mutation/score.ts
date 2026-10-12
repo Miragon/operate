@@ -30,9 +30,34 @@ export interface ReportTally {
   readonly tally: Tally;
 }
 
-/** Summary text (Markdown) and whether the combined score meets the break threshold. */
+/** Summary text (Markdown), its last line and whether the combined score meets the threshold. */
 export interface Summary {
   readonly text: string;
+  readonly verdict: string;
+  readonly passed: boolean;
+}
+
+/** How the score job judges the shard reports. */
+export interface Mode {
+  /** `SHARDS` of stryker.config.js */
+  readonly shards: number;
+  /**
+   * Pull requests: a shard without a baseline of main skips Stryker and has no report, and the
+   * job reports the score without ever failing.
+   */
+  readonly informational: boolean;
+}
+
+/** An annotation of the GitHub Actions job. */
+export interface Annotation {
+  readonly level: 'notice' | 'warning';
+  readonly message: string;
+}
+
+/** The summary of the score job, the annotations it adds and whether it passes. */
+export interface Judgement {
+  readonly text: string;
+  readonly annotations: readonly Annotation[];
   readonly passed: boolean;
 }
 
@@ -115,7 +140,12 @@ function row(name: string, tally: Tally): string {
   return `| ${name} | ${counts} | ${formatScore(mutationScore(tally))} |`;
 }
 
-function verdict(score: number, limit: number | null): Summary {
+interface Verdict {
+  readonly text: string;
+  readonly passed: boolean;
+}
+
+function verdict(score: number, limit: number | null): Verdict {
   const text = formatScore(score);
   // like Stryker: no break threshold or no valid mutants never break the build
   if (limit === null) return { text: `Mutation score ${text}, no break threshold.`, passed: true };
@@ -159,5 +189,67 @@ export function summarize(reports: readonly ReportTally[], thresholds: Threshold
     '',
     result.text,
   ];
-  return { text: lines.join('\n'), passed: result.passed };
+  return { text: lines.join('\n'), verdict: result.text, passed: result.passed };
+}
+
+const NO_SHARD =
+  'No mutation shard ran: main has no baseline for this setup (a change of the Stryker, vitest ' +
+  'or TypeScript configuration, the dependencies or the Node major), and a pull request never ' +
+  'runs in full. The push to main and the weekly run test it.';
+
+const INFORMATIONAL =
+  'Informational on pull requests: pushes to main and the weekly run enforce the break threshold.';
+
+/** Pull requests: the score of the shards that ran, as information. */
+function inform(
+  reports: readonly ReportTally[],
+  thresholds: Thresholds,
+  shards: number,
+): Judgement {
+  if (reports.length === 0) {
+    return { text: NO_SHARD, annotations: [{ level: 'notice', message: NO_SHARD }], passed: true };
+  }
+  const summary = summarize(reports, thresholds);
+  const partial =
+    reports.length < shards
+      ? [
+          `${reports.length} of ${shards} mutation shards ran; the others had no baseline of ` +
+            'main (or failed), and their mutants are not in the score.',
+        ]
+      : [];
+  const annotations: Annotation[] = partial.map((message) => ({ level: 'notice', message }));
+  if (!summary.passed) annotations.push({ level: 'warning', message: summary.verdict });
+  return {
+    text: [summary.text, ...partial, INFORMATIONAL].join('\n\n'),
+    annotations,
+    passed: true,
+  };
+}
+
+/**
+ * Judges the reports of the CI shards: the summary of all of them, which must be one per shard and
+ * meet the break threshold, or on pull requests (`informational`) the score of those that ran,
+ * with annotations instead of a failure.
+ */
+export function judgeShards(
+  reports: readonly ReportTally[],
+  thresholds: Thresholds,
+  mode: Mode,
+): Judgement {
+  const { shards, informational } = mode;
+  if (informational && reports.length <= shards) return inform(reports, thresholds, shards);
+  if (!informational && reports.length === shards) {
+    const { text, passed } = summarize(reports, thresholds);
+    return { text, annotations: [], passed };
+  }
+  const expected = informational
+    ? `at most ${shards} reports`
+    : `the reports of all ${shards} shards`;
+  return { text: `Expected ${expected}, got ${reports.length}.`, annotations: [], passed: false };
+}
+
+/** A workflow command that adds the annotation to the GitHub Actions job. */
+export function workflowCommand({ level, message }: Annotation): string {
+  const escaped = message.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+  return `::${level}::${escaped}`;
 }

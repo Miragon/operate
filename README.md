@@ -1257,8 +1257,8 @@ npx tsx src/bin/operate.ts --help
 | `npm run check`               | Every fast gate: typecheck, lint, format, architecture, knip, catalog, coverage    |
 | `npm test`                    | Unit and property tests (vitest)                                                   |
 | `npm run test:coverage`       | Unit tests with v8 coverage thresholds                                             |
-| `npm run test:mutation`       | Incremental mutation testing with StrykerJS (`-- --force` re-tests every mutant)   |
-| `npm run test:mutation:score` | Break threshold over the reports of the CI mutation shards                         |
+| `npm run test:mutation`       | Incremental StrykerJS run on the logic layers (`-- --force` re-tests every mutant) |
+| `npm run test:mutation:score` | Break threshold over the CI mutation shards (`--informational`: report only)       |
 | `npm run test:integration`    | Build, then run the Testcontainers tests against real engines                      |
 
 `test:integration` runs all engines, each three times: the scenario suite without authentication,
@@ -1390,7 +1390,8 @@ organization `miragon` with 2FA:
    optionally add required reviewers. The publish job runs in it.
 5. **Rules** (optional): require pull requests on `main` with the check `conventional commits` and
    the `check`, `integration`, `standalone executable (linux-x64)` and `container image` jobs of
-   CI.
+   CI. Not the `mutation` and `mutation score` jobs: on pull requests they only inform, and pull
+   requests without a mutation baseline of `main` skip them.
 6. **Create the package on npm.** A trusted publisher can only be added to an existing package, and
    OIDC cannot create one. Publish a placeholder once, from a clean checkout of `main`:
 
@@ -1482,15 +1483,24 @@ interactive login (loopback server, browser), and the generated catalog is only 
 - **fast-check** property tests for naming, patches, variable parsing, dates, query building,
   projection, table width, config and auth precedence, the Basic auth header, PKCE, token expiry,
   the token cache, body validation and secret masking (also of every OAuth token and secret).
-- **StrykerJS** mutation testing on every pull request and push to `main`, in eight parallel
-  shards whose combined score must reach 94 % (the `mutation score` check). Runs are incremental:
-  each shard restores its last result from the Actions cache and re-tests only the mutants whose
-  code or covering tests changed. Pull requests read the result of `main` and never write it. The
-  weekly run and a manual run with `full-mutation` re-test every mutant and refresh the result.
-  So does a change to what every test depends on but Stryker's diff does not track: the Stryker,
-  vitest or TypeScript configuration, the installed dependencies or the Node major. Changes to
-  other files that are neither mutated nor tests (such as `test/support`) are caught by the weekly
-  run.
+- **StrykerJS** mutation testing of the logic layers (`src/auth`, `catalog`, `config`, `http`,
+  `operation`, `output`, `workflow`, `errors.ts`, `util.ts`) and the catalog generator
+  (`scripts/catalog` without its data tables); the CLI wiring (`src/cli`), help and guide texts
+  (`src/docs`) and the packaging scripts are left to the command line and integration tests. It
+  runs in four parallel shards; on every push to `main` and in the weekly run their combined score
+  must reach 92 % (the `mutation score` job). Runs are incremental: each shard restores its
+  last result from the Actions cache and re-tests only the mutants whose code or covering tests
+  changed. The weekly run and a manual run with `full-mutation` re-test every mutant and refresh
+  the result. So does a change to what every test depends on but Stryker's diff does not track:
+  the Stryker, vitest or TypeScript configuration, the installed dependencies or the Node major.
+  Changes to other files that are neither mutated nor tests (such as `test/support`) are caught by
+  the weekly run. On pull requests mutation testing only informs and is no merge criterion: it
+  runs incrementally from the result of `main` (which it never writes) and reports the score, with
+  a warning below the threshold. A pull request for which `main` has no result, because it changes
+  the dependencies (every Dependabot pull request), that configuration or the Node major, skips it
+  with a notice; the push to `main` tests the change in full. Static mutants (module-level
+  constants such as regular expressions) stay in: `ignoreStatic` would save about 40 % of a full
+  run, but hide undetected ones.
 - **Testcontainers** integration tests against the three engines, with and without Basic auth,
   behind a Keycloak and Envoy JWT gateway for OAuth, through the workflow commands, plus a
   packed-tarball smoke test, on every pull request.
