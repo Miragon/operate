@@ -1,20 +1,21 @@
 version: 2
 updates:
+  # npm: minor+patch grouped, each major its own PR.
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
+    labels:
+      - dependencies
     open-pull-requests-limit: 10
-    # Conventional commit messages for release-please: runtime dependencies are user facing
-    # ("deps:", Dependencies section, patch release), development dependencies are not
-    # ("chore(deps-dev):", no release)
     commit-message:
-      prefix: deps
-      prefix-development: chore(deps-dev)
-    groups:
-      dev-dependencies:
-        dependency-type: development
-        update-types: [minor, patch]
+      prefix: chore
+      include: scope
+    cooldown:
+      default-days: 5
+      semver-major-days: 14
+      semver-minor-days: 5
+      semver-patch-days: 3
     ignore:
       # typescript-eslint does not support TypeScript 7 yet
       - dependency-name: typescript
@@ -23,16 +24,33 @@ updates:
       # Node APIs can not slip in unnoticed
       - dependency-name: '@types/node'
         update-types: ['version-update:semver-major']
+    groups:
+      npm-minor-patch:
+        applies-to: version-updates
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+      npm-security:
+        applies-to: security-updates
+        patterns: ['*']
 
+  # GitHub Actions: CI-gated, so group everything (incl. majors).
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-    # "ci:" is hidden in the changelog and starts no release
+      interval: monthly
+    labels:
+      - dependencies
     commit-message:
-      prefix: ci
+      prefix: chore
+      include: scope
+    cooldown:
+      default-days: 5
     groups:
       github-actions:
+        applies-to: version-updates
+        patterns: ['*']
+      github-actions-security:
+        applies-to: security-updates
         patterns: ['*']
 
   # The distroless base image of the container image (Dockerfile, pinned by digest). Not user
@@ -41,5 +59,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    labels:
+      - dependencies
     commit-message:
-      prefix: chore(deps)
+      prefix: chore
+      include: scope

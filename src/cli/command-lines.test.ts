@@ -7,9 +7,9 @@
  * the catalog.
  */
 
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { GLOBAL_FLAGS } from '../../scripts/catalog/flags.js';
+import { DOC_PAGES } from '../../test/support/doc-pages.js';
 import { GUIDE_PAGES } from '../../test/support/guide-pages.js';
 import { findByOperationId, findGroup, findOperation, loadCatalog } from '../catalog/catalog.js';
 import { EFFECTS, type OperationSpec } from '../catalog/types.js';
@@ -502,11 +502,12 @@ describe('examples', () => {
   });
 });
 
-const README = readFileSync(new URL('../../README.md', import.meta.url), 'utf8');
 const TOP_LEVEL = new Set([...WORKFLOW_DOCS.map((doc) => doc.name), 'completion']);
 
-describe('README workflow command lines', () => {
-  const lines = guideCommands(README).filter((words) => TOP_LEVEL.has(words[1] ?? ''));
+describe('workflow command lines of the README and the docs pages', () => {
+  const lines = DOC_PAGES.flatMap(([, text]) => guideCommands(text)).filter((words) =>
+    TOP_LEVEL.has(words[1] ?? ''),
+  );
 
   it('has the workflow commands and the completion commands', () => {
     expect(new Set(lines.map((words) => words[1]))).toEqual(TOP_LEVEL);

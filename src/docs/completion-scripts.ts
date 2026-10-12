@@ -117,7 +117,7 @@ export const COMPLETION_SCRIPTS: Readonly<Record<Shell, string>> = {
   fish: FISH,
 };
 
-/** How to install the script of each shell, for the help and the README. */
+/** How to install the script of each shell, for the help and docs/installation.md. */
 export const INSTALL_LINES: readonly string[] = [
   'bash: eval "$(operate completion bash)"  in ~/.bashrc (also bash 3.2)',
   'zsh:  mkdir -p ~/.zfunc && operate completion zsh > ~/.zfunc/_operate',

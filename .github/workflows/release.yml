@@ -296,7 +296,7 @@ jobs:
   # and latest (prereleases only <version>), with BuildKit SBOM and provenance and a GitHub
   # attestation (`gh attestation verify oci://ghcr.io/miragon/operate:<version> --repo
   # Miragon/operate`). The GHCR package is private after its first push until a maintainer makes it
-  # public (README, one-time setup).
+  # public (docs/releasing.md, one-time setup).
   image:
     name: image ghcr.io/miragon/operate:${{ needs.release-please.outputs.version }}
     needs: [release-please, build, publish]
