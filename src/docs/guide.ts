@@ -69,6 +69,9 @@ export OPERATE_URL=http://localhost:8080/engine-rest
 operate ping
 \`\`\`
 
+A repository may ship its engines as profiles in a project file (\`.operate.json\`): check
+\`operate config list\` first (scope \`project\`), a bare \`operate ping\` then uses its default.
+
 Or keep each engine in a profile and pick one with \`--profile\`. \`--url\` and \`OPERATE_URL\` override
 the URL of every profile (and its credentials go along), so unset \`OPERATE_URL\` first:
 
@@ -81,8 +84,9 @@ operate ping --profile prod
 
 - \`operate ping\` prints \`{url, engine, reachable, version, engines, latencyMs, auth}\` (\`user\` too).
 - Precedence for every setting: flag > environment variable > profile > default.
-- Profiles, environment variables, named engines and headers: \`operate guide config\`. Basic auth,
-  bearer tokens and OAuth logins: \`operate guide auth\`.
+- Profiles, project files, environment variables, named engines and headers:
+  \`operate guide config\`. Basic auth, bearer tokens, token commands and OAuth logins:
+  \`operate guide auth\`.
 
 ## Discover, describe, preview, run
 

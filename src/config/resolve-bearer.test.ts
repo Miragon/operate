@@ -133,11 +133,11 @@ describe('resolveAuth with a bearer token', () => {
     expect(error.exitCode).toBe(3);
     expect(error.message).toBe('Bearer auth is selected but the token is missing');
     expect(error.details.hint).toBe(
-      'Bearer auth was selected by --auth bearer. Looked up the token in --auth-token-stdin, OPERATE_TOKEN and a profile (none is selected). Fetch a token with the tool that issues it (e.g. az account get-access-token, gcloud auth print-access-token) and export OPERATE_TOKEN=<token>, pipe it into --auth-token-stdin, or store the name of its variable with `operate config set <profile> --auth bearer --auth-token-env <VAR>`; --auth none switches bearer auth off.',
+      'Bearer auth was selected by --auth bearer. Looked up the token in --auth-token-stdin, --auth-token-command, OPERATE_TOKEN, OPERATE_TOKEN_COMMAND and a profile (none is selected). Fetch a token with the tool that issues it (e.g. az account get-access-token, gcloud auth print-access-token) and export OPERATE_TOKEN=<token>, pipe it into --auth-token-stdin, store the name of its variable with `operate config set <profile> --auth bearer --auth-token-env <VAR>`, or let operate run the command that prints it: `operate config set <profile> --auth bearer --auth-token-command <command>`; --auth none switches bearer auth off.',
     );
     const stored = failure(() => resolveAuth({}, {}, profile({ type: 'bearer' })));
     expect(stored.details.hint).toContain(
-      'Bearer auth was selected by the auth.type of profile "prod". Looked up the token in --auth-token-stdin, OPERATE_TOKEN and the auth.tokenEnv and auth.token of profile "prod".',
+      'Bearer auth was selected by the auth.type of profile "prod". Looked up the token in --auth-token-stdin, --auth-token-command, OPERATE_TOKEN, OPERATE_TOKEN_COMMAND and the auth.tokenEnv, auth.tokenCommand and auth.token of profile "prod".',
     );
     expect(stored.details.hint).toContain(
       '`operate config set prod --auth bearer --auth-token-env <VAR>`',
@@ -459,11 +459,13 @@ describe('selectedAuth with bearer tokens', () => {
       type: 'bearer',
       source: 'env',
       label: 'a bearer token (from OPERATE_TOKEN) without an auth type',
+      token: { origin: 'OPERATE_TOKEN', command: false },
     });
     expect(selectedAuth({}, {}, profile({ type: 'bearer', tokenEnv: 'UNSET' }))).toEqual({
       type: 'bearer',
       source: 'profile',
       label: 'the auth.type of profile "prod"',
+      token: { origin: 'auth.tokenEnv of profile "prod"', command: false },
     });
     expect(selectedAuth({}, { OPERATE_AUTH: 'bearer' }, NO_PROFILE)).toEqual({
       type: 'bearer',

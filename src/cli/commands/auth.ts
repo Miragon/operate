@@ -7,13 +7,13 @@
  */
 
 import type { Command } from 'commander';
+import { commandToken } from '../../auth/command-provider.js';
 import { cachePath, profileCachePath, readCache } from '../../auth/oauth/cache.js';
 import { checkUsable, iso, notLoggedIn, otherIdentity } from '../../auth/oauth/errors.js';
 import { identityOf, sameIdentity } from '../../auth/oauth/identity.js';
 import { login } from '../../auth/oauth/login.js';
 import { logout, type LogoutTarget } from '../../auth/oauth/logout.js';
 import type { LoginDeps } from '../../auth/oauth/types.js';
-import { readConfigFile } from '../../config/file.js';
 import type { Env } from '../../config/pick.js';
 import { selectedAuth } from '../../config/resolve-auth.js';
 import { endpointSource } from '../../config/resolve-oauth.js';
@@ -25,6 +25,7 @@ import {
 } from '../../config/resolve.js';
 import {
   type BearerAuthConfig,
+  type CommandBearerConfig,
   DEFAULT_TIMEOUT_MS,
   type ResolvedConfig,
   type SelectedProfile,
@@ -38,20 +39,25 @@ import type { CliContext } from '../context.js';
 import { type Display, displayOf } from '../display.js';
 import { addGlobalOptions, configFlags, type GlobalOptions, readGlobals } from '../globals.js';
 import { maxWidthOf } from '../output-format.js';
-import { configPath, isExplicit, oauthDeps, type Session, sessionOAuthDeps } from '../session.js';
+import { loadConfig } from '../config-files.js';
+import { oauthDeps, type Session, sessionAuthDeps, sessionOAuthDeps } from '../session.js';
 import {
   bearerNotManaged,
   type BearerStatusView,
   bearerStatusView,
   expiredError,
+  logoutCommand,
 } from './auth-bearer.js';
 import { authSession, notOAuth, notOAuthOf, oauthOf } from './auth-session.js';
 import { type LoginView, loginView, type LogoutView, viewRows } from './auth-view.js';
 import type { UtilityCommand } from './types.js';
 
 const LOGIN_OPTIONS = ['profile', 'config', 'output', 'timeout', 'verbose'];
-/** `--auth-token-stdin` lets `auth status` show a piped bearer token (design §18). */
-const STATUS_OPTIONS = ['profile', 'config', 'output', 'auth-token-stdin'];
+/**
+ * `--auth-token-stdin` lets `auth status` show a piped bearer token (design §18),
+ * `--auth-token-command` the token of a command (design §23).
+ */
+const STATUS_OPTIONS = ['profile', 'config', 'output', 'auth-token-stdin', 'auth-token-command'];
 const OPTIONS_GROUP = 'Options:';
 const DEFAULT_LOGIN_TIMEOUT_MS = 300_000;
 
@@ -116,10 +122,19 @@ async function runLogin(command: Command, context: CliContext): Promise<void> {
   printView(view, { ...session, maxWidth: maxWidthOf(runtime) }, runtime);
 }
 
-/** `auth status` of a bearer token: the view, then TOKEN_EXPIRED for an expired JWT. */
-function bearerStatus(auth: BearerAuthConfig, session: Session, runtime: Runtime): void {
+/**
+ * `auth status` of a bearer token: the view, then TOKEN_EXPIRED for an expired JWT. A token
+ * command runs (unless its token is cached); it fails before the view.
+ */
+async function bearerStatus(auth: BearerAuthConfig, session: Session, runtime: Runtime) {
+  const display = { ...session, maxWidth: maxWidthOf(runtime) };
+  if (auth.command !== undefined) {
+    const { entry, cached } = await commandToken(auth, sessionAuthDeps(session, runtime));
+    printView(bearerStatusView(auth, entry.token, runtime.now(), cached), display, runtime);
+    return;
+  }
   const now = runtime.now();
-  printView(bearerStatusView(auth, now), { ...session, maxWidth: maxWidthOf(runtime) }, runtime);
+  printView(bearerStatusView(auth, auth.token, now), display, runtime);
   const expired = expiredError(auth, now);
   if (expired !== undefined) throw expired;
 }
@@ -129,7 +144,7 @@ async function runStatus(command: Command, context: CliContext): Promise<void> {
   const session = await authSession(command, context, 'status');
   const { auth } = session.config;
   if (auth.type === 'bearer') {
-    bearerStatus(auth, session, runtime);
+    await bearerStatus(auth, session, runtime);
     return;
   }
   const config = oauthOf(session, 'status', runtime.env);
@@ -192,21 +207,30 @@ function targetOf(
   };
 }
 
+/** The token command of a resolved configuration, if its bearer token comes from one. */
+function commandOf(resolved: ResolvedConfig | undefined): CommandBearerConfig | undefined {
+  const auth = resolved?.auth;
+  return auth?.type === 'bearer' && auth.command !== undefined ? auth : undefined;
+}
+
 /** What selected bearer auth for logout, or undefined when another type is selected. */
 function bearerSelection(globals: GlobalOptions, env: Env, selected: SelectedProfile) {
   const auth = selectedAuth(configFlags(globals), env, selected);
-  return auth?.type === 'bearer' ? { profile: selected.name, source: auth.source, env } : undefined;
+  return auth?.type === 'bearer'
+    ? { profile: selected.name, source: auth.source, env, token: auth.token }
+    : undefined;
 }
 
 /** What logout works on: the selected profile and, if they resolve, the OAuth settings. */
 async function logoutTarget(globals: GlobalOptions, context: CliContext) {
   const { runtime } = context;
-  const path = configPath(runtime, globals.config);
-  const file = await readConfigFile(runtime.fs, path, isExplicit(runtime, globals.config));
+  const { config: file } = await loadConfig(runtime, globals.config);
   const selected = selectProfile(configFlags(globals), runtime.env, file);
   const resolution = tryResolve(globals, runtime, file);
   const resolved = 'config' in resolution ? resolution.config : undefined;
   const deps = oauthDeps(runtime, { ...globals, timeoutMs: logoutTimeout(globals, resolved) });
+  const command = commandOf(resolved);
+  if (command !== undefined) return { command, deps };
   const target = targetOf(selected, resolution);
   const bearer = bearerSelection(globals, runtime.env, selected);
   if (selected.name !== undefined) {
@@ -230,7 +254,13 @@ async function runLogout(command: Command, context: CliContext): Promise<void> {
   const { runtime } = context;
   const globals = readGlobals(command);
   const display = await displayOf(context, globals);
-  const { target, deps, tokenCache } = await logoutTarget(globals, context);
+  const found = await logoutTarget(globals, context);
+  if ('command' in found) {
+    const deps = { ...found.deps, cwd: runtime.cwd };
+    printView(await logoutCommand(found.command, deps), display, runtime);
+    return;
+  }
+  const { target, deps, tokenCache } = found;
   const result = await logout(tokenCache, target, deps);
   const stderr = safeStderr(runtime);
   for (const warning of result.warnings) stderr.write(`${warning}\n`);

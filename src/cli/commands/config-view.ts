@@ -65,9 +65,19 @@ export function maskedView(view: ConfigView, showSecrets: boolean): ConfigView {
   };
 }
 
-/** A VALUE cell: lists (scopes) space-joined; an unused token says why it is not used. */
-function cell(entry: { readonly value: unknown; readonly unused?: string }): unknown {
+/**
+ * A VALUE cell: lists (scopes) space-joined; an unused token says why it is not used, a token
+ * command of a project file that it is not trusted.
+ */
+function cell(entry: {
+  readonly value: unknown;
+  readonly unused?: string;
+  readonly trusted?: boolean;
+}): unknown {
   if (entry.unused !== undefined) return `${String(entry.value)} (unused: ${entry.unused})`;
+  if (entry.trusted === false) {
+    return `${String(entry.value)} (not trusted: review the project file, then operate config trust)`;
+  }
   return Array.isArray(entry.value) ? entry.value.join(' ') : entry.value;
 }
 
@@ -80,7 +90,15 @@ export function showRows(view: ConfigView): Record<string, unknown>[] {
   }));
 }
 
-/** Lines in front of the `config show` table. */
+/**
+ * Lines in front of the `config show` table: the config file, the project file in effect and
+ * the profile with the file it comes from, when that is the project file.
+ */
 export function showHeader(view: ConfigView): string {
-  return `Config file: ${view.configFile}\nProfile: ${view.profile ?? '(none)'}\n\n`;
+  const project = view.projectFile === null ? '' : `Project file: ${view.projectFile}\n`;
+  const from =
+    view.profileFile !== null && view.profileFile === view.projectFile
+      ? ` (from the project file)`
+      : '';
+  return `Config file: ${view.configFile}\n${project}Profile: ${view.profile ?? '(none)'}${from}\n\n`;
 }

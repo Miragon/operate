@@ -98,10 +98,13 @@ const READER_CONFIG = {
   }),
 };
 
+/** The repository the documented commands run in (project files go to its root). */
+const REPOSITORY = '/home/tester/repo';
+
 /**
  * A runtime with the scripted fake engine of the workflow commands (lenient: every other request
  * gets `{}`, paged ones `[]`), whose job executor runs while the CLI sleeps, and the referenced
- * files.
+ * files, in a repository whose token commands print a token.
  */
 function documentedRuntime(
   words: readonly string[],
@@ -114,6 +117,9 @@ function documentedRuntime(
       engine.tick();
     },
     stdin: '{}',
+    cwd: REPOSITORY,
+    dirs: [`${REPOSITORY}/.git`],
+    commands: { stdout: 'documented-token\n' },
     files: { ...DEPLOYED_DIRECTORIES, ...referencedFiles(words), ...files },
   });
 }

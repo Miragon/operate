@@ -23,6 +23,9 @@ export OPERATE_URL=http://localhost:8080/engine-rest
 operate ping
 ```
 
+A repository may ship its engines as profiles in a project file (`.operate.json`): check
+`operate config list` first (scope `project`), a bare `operate ping` then uses its default.
+
 Or keep each engine in a profile and pick one with `--profile`. `--url` and `OPERATE_URL` override
 the URL of every profile (and its credentials go along), so unset `OPERATE_URL` first:
 
@@ -35,8 +38,9 @@ operate ping --profile prod
 
 - `operate ping` prints `{url, engine, reachable, version, engines, latencyMs, auth}` (`user` too).
 - Precedence for every setting: flag > environment variable > profile > default.
-- Profiles, environment variables, named engines and headers: `operate guide config`. Basic auth,
-  bearer tokens and OAuth logins: `operate guide auth`.
+- Profiles, project files, environment variables, named engines and headers:
+  `operate guide config`. Basic auth, bearer tokens, token commands and OAuth logins:
+  `operate guide auth`.
 
 ## Discover, describe, preview, run
 
@@ -145,8 +149,8 @@ read `engineMessage` and fix the cause instead of retrying. On exit 4: `operate 
 - `workflow`: Workflow commands in detail: selection, inspect, wait, advance, retry, deploy, status
 - `input`: Arguments, flags, booleans, arrays, dates, variables, request bodies, files, paging
 - `output`: JSON and tables, --fields, XML, text and binary responses, --out-file, previews
-- `config`: Profiles, config file, environment variables, named engines, headers, timeouts
-- `auth`: Basic auth, bearer tokens from elsewhere, OAuth logins, what to do on exit 4
+- `config`: Profiles, config and project files, environment variables, engines, headers, timeouts
+- `auth`: Basic auth, bearer tokens and token commands, OAuth logins, what to do on exit 4
 - `recipes`: Command lines for everyday tasks: deploy, tasks, incidents, messages, history, api
 
 ```sh

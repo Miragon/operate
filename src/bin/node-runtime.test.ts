@@ -362,3 +362,55 @@ describe('createNodeRuntime().sleep', () => {
     expect(runtime.now() - started).toBeGreaterThanOrEqual(15);
   });
 });
+
+describe('createNodeRuntime().runCommand', () => {
+  const runtime = createNodeRuntime();
+  const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+
+  it('runs a command line in the shell and captures stdout, stderr and the exit code', async () => {
+    const result = await runtime.runCommand('echo "tok-$(echo abc)"; echo oops >&2; exit 3', {
+      timeoutMs: 10_000,
+    });
+    expect(result.exitCode).toBe(3);
+    expect(result.timedOut).toBe(false);
+    expect(text(result.stdout)).toBe('tok-abc\n');
+    expect(text(result.stderr)).toBe('oops\n');
+  });
+
+  it('runs in the given directory with stdin closed', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'operate-cmd-'));
+    try {
+      const result = await runtime.runCommand('pwd; cat; echo done', {
+        cwd: directory,
+        timeoutMs: 10_000,
+      });
+      expect(result.exitCode).toBe(0);
+      const [cwd, done] = text(result.stdout).trim().split('\n');
+      expect(await stat(cwd ?? '')).toBeDefined();
+      expect(cwd?.endsWith(directory.split('/').at(-1) ?? '')).toBe(true);
+      expect(done).toBe('done');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('stops a command that runs too long', async () => {
+    const started = Date.now();
+    const result = await runtime.runCommand('echo started; sleep 5', { timeoutMs: 200 });
+    expect(result.timedOut).toBe(true);
+    expect(result.exitCode).toBeNull();
+    expect(Date.now() - started).toBeLessThan(4_000);
+  });
+
+  it('keeps at most 1 MiB of output', async () => {
+    const result = await runtime.runCommand('head -c 1100000 /dev/zero', { timeoutMs: 10_000 });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.length).toBe(1_048_576);
+  });
+
+  it('rejects when the command cannot be started', async () => {
+    await expect(
+      runtime.runCommand('echo x', { cwd: '/does/not/exist', timeoutMs: 1_000 }),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+});

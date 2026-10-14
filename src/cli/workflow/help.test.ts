@@ -299,37 +299,38 @@ describe('workflow command help', () => {
       Effect: write
 
       Arguments:
-        paths                      BPMN, DMN and form files and directories to deploy
+        paths                       BPMN, DMN and form files and directories to deploy
 
       Options:
-        --name <deployment-name>   Deployment name (default operate); unchanged files
-                                   are skipped per name
-        --base-dir <dir>           Name every resource by its path relative to this
-                                   directory
-        --tenant-id <id>           Tenant of the deployment (and of the started
-                                   instance)
-        --start                    Start an instance of the only process of the
-                                   deployed files
-        --start-key <key>          Start an instance of this process definition key
-                                   (implies --start)
-        --business-key <key>       Business key of the started instance
-        --var <name=value>         Variable of the started instance: name=value (auto
-                                   typed: true/false, integers, decimals, null, else
-                                   string) or name:Type=value (String, Integer, Short,
-                                   Long, Double, Boolean, Date, Json, Xml, Null; Date
-                                   accepts the date-time forms, e.g. 2024-05-01 or
-                                   2024-05-01T10:00:00+02:00); repeatable
-        --wait                     After the writes, wait until the instance is idle
-                                   before printing it
-        --until <condition>        Wait until idle, ended, incident, task,
-                                   task:<taskDefinitionKey> or activity:<activityId>;
-                                   repeatable, any one ends the wait (implies --wait)
-        --wait-timeout <duration>  Total wait budget like 500ms, 30s, 2m or 1h
-                                   (default 60s; --timeout is per request)
-        --no-fail-on-incident      Keep waiting when an incident appears (default:
-                                   fail fast with INCIDENT)
-        --no-variables             Leave out the variables of the instance view (and
-                                   their request)
+        --name <deployment-name>    Deployment name (default operate); unchanged files
+                                    are skipped per name
+        --base-dir <dir>            Name every resource by its path relative to this
+                                    directory
+        --tenant-id <id>            Tenant of the deployment (and of the started
+                                    instance)
+        --start                     Start an instance of the only process of the
+                                    deployed files
+        --start-key <key>           Start an instance of this process definition key
+                                    (implies --start)
+        --business-key <key>        Business key of the started instance
+        --var <name=value>          Variable of the started instance: name=value (auto
+                                    typed: true/false, integers, decimals, null, else
+                                    string) or name:Type=value (String, Integer,
+                                    Short, Long, Double, Boolean, Date, Json, Xml,
+                                    Null; Date accepts the date-time forms, e.g.
+                                    2024-05-01 or 2024-05-01T10:00:00+02:00);
+                                    repeatable
+        --wait                      After the writes, wait until the instance is idle
+                                    before printing it
+        --until <condition>         Wait until idle, ended, incident, task,
+                                    task:<taskDefinitionKey> or activity:<activityId>;
+                                    repeatable, any one ends the wait (implies --wait)
+        --wait-timeout <duration>   Total wait budget like 500ms, 30s, 2m or 1h
+                                    (default 60s; --timeout is per request)
+        --no-fail-on-incident       Keep waiting when an incident appears (default:
+                                    fail fast with INCIDENT)
+        --no-variables              Leave out the variables of the instance view (and
+                                    their request)
 
       Global Options: (see help-texts.test.ts)
 

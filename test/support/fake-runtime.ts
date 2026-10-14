@@ -2,10 +2,13 @@
  * In-memory Runtime for in-process CLI tests: environment, files, stdin, terminal flags per stream,
  * captured stdout/stderr (text and bytes), a fake clock that `sleep` advances at once (so tests of
  * waiting commands run instantly), deterministic random bytes, an in-memory loopback server, a
- * recording browser, in-memory locks and a controllable deadline. Nothing touches the real system.
+ * recording browser, in-memory locks, a controllable deadline and a scripted shell for token
+ * commands. Nothing touches the real system.
  */
 
 import type {
+  CommandOptions,
+  CommandResult,
   DirectoryEntry,
   FileSystem,
   LoopbackRequest,
@@ -73,6 +76,29 @@ export interface FakeRuntimeOptions {
    * spelling (an atomic rename over it does, observed on APFS). `files` keeps the spelling.
    */
   readonly caseInsensitive?: boolean;
+  /** The working directory; default the home directory (no project file is looked up there). */
+  readonly cwd?: string;
+  /**
+   * What `runCommand` answers (default: exit code 127, `sh: not found` on stderr); a function
+   * gets the command line and the options, a result may leave out what it does not need.
+   */
+  readonly commands?: FakeCommand;
+}
+
+/** The answer of the fake shell to a command line. */
+type FakeCommand =
+  | Partial<FakeCommandResult>
+  | ((
+      command: string,
+      options: CommandOptions,
+    ) => Partial<FakeCommandResult> | Promise<Partial<FakeCommandResult>>);
+
+/** A command result with text output. */
+interface FakeCommandResult {
+  readonly exitCode: number | null;
+  readonly timedOut: boolean;
+  readonly stdout: string | Uint8Array;
+  readonly stderr: string | Uint8Array;
 }
 
 /** The in-memory loopback server: tests drive its handler with requests. */
@@ -107,6 +133,8 @@ export interface FakeRuntime extends Runtime {
   /** Lengths passed to `randomBytes`. */
   readonly randomRequests: number[];
   readonly loopback: FakeLoopback;
+  /** Every `runCommand` call: the command line and its options. */
+  readonly commandRuns: { readonly command: string; readonly options: CommandOptions }[];
 }
 
 const FIXED_NOW = 1_700_000_000_000;
@@ -318,6 +346,27 @@ function fakeLocks(options: FakeRuntimeOptions, locks: FakeRuntime['locks']) {
   };
 }
 
+const NOT_FOUND: FakeCommandResult = {
+  exitCode: 127,
+  timedOut: false,
+  stdout: '',
+  stderr: 'sh: not found\n',
+};
+
+/** `runCommand` of the fake runtime: answers with `commands` and records every call. */
+function fakeShell(options: FakeRuntimeOptions, runs: FakeRuntime['commandRuns']) {
+  return async (command: string, commandOptions: CommandOptions): Promise<CommandResult> => {
+    runs.push({ command, options: commandOptions });
+    const { commands } = options;
+    const answer =
+      typeof commands === 'function'
+        ? await commands(command, commandOptions)
+        : (commands ?? NOT_FOUND);
+    const result = { exitCode: 0, timedOut: false, stdout: '', stderr: '', ...answer };
+    return { ...result, stdout: toBytes(result.stdout), stderr: toBytes(result.stderr) };
+  };
+}
+
 function rejectFetch(): Promise<Response> {
   return Promise.reject(new Error('the fake runtime has no fetch; pass one in the options'));
 }
@@ -360,6 +409,7 @@ function fakeClock(options: FakeRuntimeOptions) {
 }
 
 export function fakeRuntime(options: FakeRuntimeOptions = {}): FakeRuntime {
+  const homedir = options.homedir ?? HOME;
   const files = initialFiles(options);
   const dirs = new Set<string>(options.dirs ?? []);
   const others = new Set<string>(options.others ?? []);
@@ -369,6 +419,7 @@ export function fakeRuntime(options: FakeRuntimeOptions = {}): FakeRuntime {
   const locks: FakeRuntime['locks'] = [];
   const deadlines: number[] = [];
   const randomRequests: number[] = [];
+  const commandRuns: FakeRuntime['commandRuns'] = [];
   const random = options.randomBytes ?? counterBytes();
   const fs = fakeFileSystem({ files, dirs, others, dirModes });
   const runtime: FakeRuntime = {
@@ -384,7 +435,10 @@ export function fakeRuntime(options: FakeRuntimeOptions = {}): FakeRuntime {
     deadlines,
     randomRequests,
     loopback,
-    homedir: options.homedir ?? HOME,
+    commandRuns,
+    cwd: options.cwd ?? homedir,
+    runCommand: fakeShell(options, commandRuns),
+    homedir,
     platform: options.platform ?? 'linux',
     ...fakeClock(options),
     randomBytes: (length) => {

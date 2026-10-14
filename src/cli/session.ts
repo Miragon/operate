@@ -3,16 +3,10 @@
  * format, HTTP client and target. Shared by operation commands, `api` and `ping`.
  */
 
-import { createAuthProvider } from '../auth/index.js';
+import { type AuthDeps, createAuthProvider } from '../auth/index.js';
 import { withAuthNote } from '../auth/note.js';
 import type { OAuthDeps } from '../auth/oauth/types.js';
-import {
-  configFilePath,
-  explicitConfigPath,
-  readConfigFile,
-  tokenDirectory,
-  tokenPath,
-} from '../config/file.js';
+import { tokenDirectory, tokenPath } from '../config/file.js';
 import { plainHttpHost } from '../config/oauth.js';
 import { resolveConfig } from '../config/resolve.js';
 import { unusedTokenNote } from '../config/resolve-bearer.js';
@@ -23,6 +17,7 @@ import type { Target } from '../operation/request.js';
 import type { RenderOptions } from '../output/render.js';
 import { parseFieldList } from '../output/fields.js';
 import type { Runtime } from '../runtime.js';
+import { loadConfig } from './config-files.js';
 import type { CliContext } from './context.js';
 import { configFlags, type GlobalOptions } from './globals.js';
 import { maxWidthOf, terminalFormat } from './output-format.js';
@@ -32,20 +27,13 @@ import { traceWriter } from './trace.js';
 export interface Session {
   readonly globals: GlobalOptions;
   readonly config: ResolvedConfig;
+  /** The user's config file, or the one named by `--config` / OPERATE_CONFIG. */
   readonly configPath: string;
+  /** The project file in effect, if any (design §22). */
+  readonly projectPath: string | undefined;
   readonly format: OutputFormat;
   readonly pretty: boolean;
   readonly fields: readonly string[] | undefined;
-}
-
-/** Path of the config file for `--config`, OPERATE_CONFIG or the platform default. */
-export function configPath(runtime: Runtime, explicit: string | undefined): string {
-  return configFilePath(runtime.env, runtime, explicit);
-}
-
-/** True when the config file was named by `--config` or OPERATE_CONFIG: then it must exist. */
-export function isExplicit(runtime: Runtime, flag: string | undefined): boolean {
-  return explicitConfigPath(runtime.env, flag) !== undefined;
 }
 
 export interface SessionOptions {
@@ -71,20 +59,26 @@ export async function openSession(
     password: authPasswordStdin,
     token: authTokenStdin,
     body: options.bodyFromStdin === true,
+    tokenCommand: globals.authTokenCommand !== undefined,
   });
-  const path = configPath(runtime, globals.config);
-  const file = await readConfigFile(runtime.fs, path, isExplicit(runtime, globals.config));
+  const files = await loadConfig(runtime, globals.config);
   const password = authPasswordStdin ? await readStdinPassword(runtime) : undefined;
   const token = authTokenStdin ? await readStdinPassword(runtime, TOKEN) : undefined;
-  const config = resolveConfig(configFlags(globals, { password, token }), runtime.env, file, {
-    authCommand: options.authCommand === true,
-  });
+  const config = resolveConfig(
+    configFlags(globals, { password, token }),
+    runtime.env,
+    files.config,
+    {
+      authCommand: options.authCommand === true,
+    },
+  );
   const format = config.output ?? terminalFormat(runtime);
   context.state.format = format;
   return {
     globals,
     config,
-    configPath: path,
+    configPath: files.path,
+    projectPath: files.project?.path,
     format,
     pretty: globals.pretty || runtime.stdout.isTTY,
     fields: parseFieldList(globals.fields),
@@ -125,6 +119,15 @@ export function sessionOAuthDeps(session: Session, runtime: Runtime): OAuthDeps 
   return oauthDeps(runtime, { timeoutMs: session.config.timeoutMs, verbose, showSecrets });
 }
 
+/** What every auth provider of a session needs: `sessionOAuthDeps`, the shell and its directory. */
+export function sessionAuthDeps(session: Session, runtime: Runtime): AuthDeps {
+  return {
+    ...sessionOAuthDeps(session, runtime),
+    runCommand: (command, options) => runtime.runCommand(command, options),
+    cwd: runtime.cwd,
+  };
+}
+
 /** What a Bearer token of an auth type is called in the plain http warning. */
 const BEARER_TOKENS: Readonly<Record<string, string>> = {
   oauth: 'the OAuth access token',
@@ -162,7 +165,7 @@ export function clientOf(session: Session, runtime: Runtime): ClientOptions {
   const { config, globals } = session;
   const warning = plainHttpWarning(session);
   if (warning !== undefined) runtime.stderr.write(`${warning}\n`);
-  const provider = createAuthProvider(config.auth, sessionOAuthDeps(session, runtime));
+  const provider = createAuthProvider(config.auth, sessionAuthDeps(session, runtime));
   const client: ClientOptions = {
     fetch: runtime.fetch,
     auth: withAuthNote(provider, unusedNote(config)),

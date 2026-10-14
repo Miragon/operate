@@ -1,7 +1,7 @@
 /**
  * The Runtime on Node.js: process streams (a closed pipe such as `| head` ends output quietly),
- * stdin, the file system, fetch, the environment, timers, and for OAuth random bytes, the
- * loopback server, the browser and the lock file.
+ * stdin, the file system, fetch, the environment and working directory, timers, for OAuth random
+ * bytes, the loopback server, the browser and the lock file, and the shell for token commands.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -23,6 +23,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { usageError } from '../errors.js';
 import type { DirectoryEntry, FileSystem, OutputStream, PathKind, Runtime } from '../runtime.js';
 import { openBrowser } from './browser.js';
+import { runCommand } from './command.js';
 import { withLock } from './lock.js';
 import { listenLoopback } from './loopback.js';
 
@@ -211,6 +212,7 @@ function deadline(ms: number): Promise<void> {
 export function createNodeRuntime(): Runtime {
   return {
     env: process.env,
+    cwd: process.cwd(),
     stdout: outputStream(process.stdout),
     stderr: outputStream(process.stderr),
     readStdin: () => readStdin(),
@@ -225,5 +227,6 @@ export function createNodeRuntime(): Runtime {
     withLock,
     deadline,
     sleep: (ms) => delay(ms),
+    runCommand,
   };
 }

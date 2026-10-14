@@ -17,10 +17,13 @@ import { configError } from './config-error.js';
 import { hasOAuthKeys } from './oauth.js';
 import { type Env, nonEmpty, pick } from './pick.js';
 import {
+  type BearerSource,
+  bearerSource,
   givenToken,
   inferenceConflict,
   mentioningUnused,
   resolveBearer,
+  tokenNoun,
   unusedToken,
   unusedTokenNote,
 } from './resolve-bearer.js';
@@ -36,7 +39,7 @@ import {
   type Source,
   type UnusedToken,
 } from './types.js';
-import { PASSWORD_VARIABLE, unsetVariable } from './variable.js';
+import { checkTrustedVariable, PASSWORD_VARIABLE, unsetVariable } from './variable.js';
 
 interface Context {
   readonly flags: ConfigFlags;
@@ -91,7 +94,10 @@ function passwordFromEnv(variable: string, name: string, env: Env): string {
   throw unsetVariable(variable, name, PASSWORD_VARIABLE);
 }
 
-/** The password of the profile: from the variable it names, else stored literally. */
+/**
+ * The password of the profile: from the variable it names (of a project file only while it is
+ * trusted), else stored literally.
+ */
 function storedPassword({ env, selected }: Context): Found<string> | undefined {
   if (selected.profile === undefined) return undefined;
   const { name, profile } = selected;
@@ -99,6 +105,7 @@ function storedPassword({ env, selected }: Context): Found<string> | undefined {
   if (variable === undefined) {
     return found(present(profile.auth?.password), 'profile', `auth.password of profile "${name}"`);
   }
+  checkTrustedVariable(variable, selected, PASSWORD_VARIABLE);
   const label = `from ${variable}, auth.passwordEnv of profile "${name}"`;
   return { value: passwordFromEnv(variable, name, env), source: 'profile', label };
 }
@@ -211,7 +218,7 @@ function impliedType(
     const by = username === undefined ? '--auth-password-stdin' : `A username (${username.label})`;
     throw inferenceConflict(by, token);
   }
-  const label = `a bearer token (from ${token.origin}) without an auth type`;
+  const label = `${tokenNoun(token)} (from ${token.origin}) without an auth type`;
   return { value: 'bearer', source: token.source, label };
 }
 
@@ -329,18 +336,22 @@ export function authorizationConflict(
   );
 }
 
-/** The auth type of `selectedAuth`; `label` says what selected it (`OPERATE_AUTH=basic`). */
+/**
+ * The auth type of `selectedAuth`; `label` says what selected it (`OPERATE_AUTH=basic`), `token`
+ * where the token of bearer auth would come from.
+ */
 export interface SelectedAuth {
   readonly type: AuthType;
   readonly source: Source;
   readonly label: string;
+  readonly token?: BearerSource;
 }
 
 /**
  * The auth type a command would use and where it came from, without resolving credentials (no
- * password or token variable is read): the explicit type, else basic for a username or
- * `--auth-password-stdin`, bearer for a token of `--auth-token-stdin` or OPERATE_TOKEN, else none
- * (source default). Undefined for an unknown type or an inference conflict (resolution reports
+ * password or token variable is read, no command is run): the explicit type, else basic for a
+ * username or `--auth-password-stdin`, bearer for a token (or token command) of a flag or the
+ * environment, else none (source default). Undefined for an unknown type or an inference conflict (resolution reports
  * them).
  */
 export function selectedAuth(
@@ -351,9 +362,9 @@ export function selectedAuth(
   const context: Context = { flags, env, selected };
   try {
     const type = pickType(context) ?? impliedType(pickUsername(context), context);
-    return type === undefined
-      ? { type: 'none', source: 'default', label: 'no auth settings' }
-      : { type: type.value, source: type.source, label: type.label };
+    if (type === undefined) return { type: 'none', source: 'default', label: 'no auth settings' };
+    const token = type.value === 'bearer' ? bearerSource(context) : undefined;
+    return { type: type.value, source: type.source, label: type.label, ...compact({ token }) };
   } catch {
     return undefined;
   }

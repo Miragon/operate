@@ -12,14 +12,15 @@ import { resolveHeaders } from './headers.js';
 import { type Env, nonEmpty, pick } from './pick.js';
 import { authorizationConflict, resolveAuth } from './resolve-auth.js';
 import {
-  type ConfigFile,
   type ConfigFlags,
   DEFAULT_TIMEOUT_MS,
   DEFAULT_URL,
   ENV,
+  type LoadedConfig,
   OUTPUT_FORMATS,
   type OutputFormat,
   type Profile,
+  type ProjectSource,
   type ResolvedConfig,
   type SelectedProfile,
 } from './types.js';
@@ -33,36 +34,39 @@ const FALSE_VALUES: readonly string[] = ['0', 'false', 'no', 'off'];
 /** Where the name of the selected profile came from. */
 export type ProfileOrigin = 'flag' | 'env' | 'default';
 
-const ORIGIN_NOTES: Readonly<Record<ProfileOrigin, string>> = {
-  flag: '',
-  env: `It is selected by ${ENV.profile}. `,
-  default:
-    'It is the defaultProfile of the config file; choose another one with `operate config use <profile>`. ',
-};
+/** Why the selected profile was chosen; a default names the file whose defaultProfile it is. */
+function originNote(origin: ProfileOrigin, file: LoadedConfig | undefined): string {
+  if (origin === 'flag') return '';
+  if (origin === 'env') return `It is selected by ${ENV.profile}. `;
+  const project = file?.project;
+  return project?.defaultProfile === true
+    ? `It is the defaultProfile of the project file ${project.source.path}; choose another one with \`operate config use <profile> --project\`. `
+    : 'It is the defaultProfile of the config file; choose another one with `operate config use <profile>`. ';
+}
 
 /** Error for a profile name that is not in the config file, with the known profiles as hint. */
 export function missingProfileError(
   name: string,
-  file: ConfigFile | undefined,
+  file: LoadedConfig | undefined,
   origin: ProfileOrigin = 'flag',
 ): OperateError {
   const known = Object.keys(file?.profiles ?? {});
   const listed = known.length > 0 ? `Known profiles: ${known.join(', ')}. ` : '';
   return configError(
     `Profile "${name}" does not exist`,
-    `${ORIGIN_NOTES[origin]}${listed}Create it with \`operate config set ${name} --url <url>\`.`,
+    `${originNote(origin, file)}${listed}Create it with \`operate config set ${name} --url <url>\`.`,
   );
 }
 
 /** The profile stored under `name`; inherited object properties never count as profiles. */
-export function findProfile(file: ConfigFile | undefined, name: string): Profile | undefined {
+export function findProfile(file: LoadedConfig | undefined, name: string): Profile | undefined {
   return file !== undefined && Object.hasOwn(file.profiles, name) ? file.profiles[name] : undefined;
 }
 
 function profileName(
   flags: ConfigFlags,
   env: Env,
-  file: ConfigFile | undefined,
+  file: LoadedConfig | undefined,
 ): { name: string; origin: ProfileOrigin } | undefined {
   const flag = nonEmpty(flags.profile);
   if (flag !== undefined) return { name: flag, origin: 'flag' };
@@ -72,16 +76,23 @@ function profileName(
   return fallback === undefined ? undefined : { name: fallback, origin: 'default' };
 }
 
+/** The project file a profile of the loaded configuration comes from, if any. */
+function projectOf(file: LoadedConfig | undefined, name: string): ProjectSource | undefined {
+  return file?.project?.profiles.includes(name) === true ? file.project.source : undefined;
+}
+
+/** The selected profile and, when it comes from there, the project file (design §22). */
 export function selectProfile(
   flags: ConfigFlags,
   env: Env,
-  file: ConfigFile | undefined,
+  file: LoadedConfig | undefined,
 ): SelectedProfile {
   const selected = profileName(flags, env, file);
   if (selected === undefined) return {};
   const profile = findProfile(file, selected.name);
   if (profile === undefined) throw missingProfileError(selected.name, file, selected.origin);
-  return { name: selected.name, profile };
+  const project = projectOf(file, selected.name);
+  return { name: selected.name, profile, ...compact({ project }) };
 }
 
 function parseUrl(url: string): URL {
@@ -203,7 +214,7 @@ export interface ResolveOptions {
 export function resolveConfig(
   flags: ConfigFlags,
   env: Env,
-  file: ConfigFile | undefined,
+  file: LoadedConfig | undefined,
   options: ResolveOptions = {},
 ): ResolvedConfig {
   const selected = selectProfile(flags, env, file);
@@ -230,7 +241,7 @@ export function resolveConfig(
   return {
     ...values,
     auth: auth.auth,
-    ...compact({ unusedToken: auth.unusedToken }),
+    ...compact({ unusedToken: auth.unusedToken, project: selected.project }),
     sources: {
       url: url.source,
       engine: engine.source,

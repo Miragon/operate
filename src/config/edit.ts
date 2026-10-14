@@ -27,6 +27,7 @@ import {
 import {
   type AuthConfig,
   type ConfigFile,
+  type LoadedConfig,
   type OAuthConfig,
   type OutputFormat,
   PROFILE_KEYS,
@@ -57,7 +58,10 @@ export interface ProfileChanges extends OAuthChanges, BearerChanges {
   readonly makeDefault?: boolean;
 }
 
-/** One row of `operate config list`. Values the profile does not set are null. */
+/**
+ * One row of `operate config list`. Values the profile does not set are null; `scope` says
+ * whether it comes from the project file or the user's (or the named) config file.
+ */
 export interface ProfileSummary {
   readonly name: string;
   readonly default: boolean;
@@ -65,6 +69,7 @@ export interface ProfileSummary {
   readonly engine: string | null;
   readonly auth: string | null;
   readonly readOnly: boolean;
+  readonly scope: 'user' | 'project';
 }
 
 interface ConfigValue<T> {
@@ -86,21 +91,28 @@ interface OAuthValues {
 
 /**
  * The `token` row of `config show`: the bearer token of type bearer, or a token that is set but
- * not used by the resolved type (`unused` says why).
+ * not used by the resolved type (`unused` says why). The `tokenCommand` row: the command that
+ * prints the token (`config show` never runs it); `trusted` for one of a project file.
  */
 interface TokenValue extends ConfigValue<string> {
   readonly unused?: string;
+  readonly trusted?: boolean;
 }
 
 /**
  * Output of `operate config show`: every effective value with its source (`auth` is the type,
  * `username` and `password` the Basic auth credentials, the OAuth settings only for type oauth,
- * `token` for type bearer or an unused token). Header values, the password, the client secret
- * and the token are not masked here; the CLI masks them unless --show-secrets is given.
+ * `token` or `tokenCommand` for type bearer or an unused one). Header values, the password, the
+ * client secret and the token are not masked here; the CLI masks them unless --show-secrets is
+ * given. A token command is no secret: it is shown as it is.
  */
 export interface ConfigView {
   readonly configFile: string;
+  /** The project file in effect (design §22), null without one. */
+  readonly projectFile: string | null;
   readonly profile: string | null;
+  /** The file the selected profile comes from: the project file or the config file. */
+  readonly profileFile: string | null;
   readonly values: {
     readonly url: ConfigValue<string>;
     readonly engine: ConfigValue<string | null>;
@@ -109,6 +121,7 @@ export interface ConfigView {
     readonly password: ConfigValue<string | null>;
   } & Partial<OAuthValues> & {
       readonly token?: TokenValue;
+      readonly tokenCommand?: TokenValue;
       readonly output: ConfigValue<OutputFormat | null>;
       readonly timeout: ConfigValue<number>;
       readonly headers: ConfigValue<Readonly<Record<string, string>>>;
@@ -262,9 +275,10 @@ function byName(a: ProfileSummary, b: ProfileSummary): number {
   return a.name < b.name ? -1 : 1;
 }
 
-/** Profiles sorted by name. */
-export function listProfiles(file: ConfigFile | undefined): ProfileSummary[] {
+/** Profiles sorted by name, with the file each comes from. */
+export function listProfiles(file: LoadedConfig | undefined): ProfileSummary[] {
   const current = file ?? EMPTY;
+  const fromProject = file?.project?.profiles ?? [];
   return Object.entries(current.profiles)
     .map(([name, profile]) => ({
       name,
@@ -273,6 +287,7 @@ export function listProfiles(file: ConfigFile | undefined): ProfileSummary[] {
       engine: profile.engine ?? null,
       auth: profile.auth?.type ?? (profile.auth?.username === undefined ? null : 'basic'),
       readOnly: profile.readOnly === true,
+      scope: fromProject.includes(name) ? ('project' as const) : ('user' as const),
     }))
     .sort(byName);
 }
@@ -298,13 +313,22 @@ function oauthValues(oauth: OAuthConfig): OAuthValues {
   };
 }
 
-/** The `token` row: the bearer token, or a token the resolved type leaves unused. */
-function tokenValue(resolved: ResolvedConfig): { token?: TokenValue } {
+/**
+ * The `token` (or `tokenCommand`) row: the bearer token or its command, or one the resolved type
+ * leaves unused.
+ */
+function tokenValue(resolved: ResolvedConfig): { token?: TokenValue; tokenCommand?: TokenValue } {
   const { auth, unusedToken } = resolved;
-  if (auth.type === 'bearer') return { token: { value: auth.token, source: auth.source } };
+  if (auth.type === 'bearer') {
+    const { source, command } = auth;
+    if (command === undefined) return { token: { value: auth.token, source } };
+    const trusted = command.projectFile === undefined ? {} : { trusted: command.trusted };
+    return { tokenCommand: { value: command.line, source, ...trusted } };
+  }
   if (unusedToken === undefined) return {};
   const { value, source, reason } = unusedToken;
-  return { token: { value, source, unused: reason } };
+  const row = { value, source, unused: reason };
+  return unusedToken.command === true ? { tokenCommand: row } : { token: row };
 }
 
 function credentialValues(auth: AuthConfig) {
@@ -321,12 +345,23 @@ function credentialValues(auth: AuthConfig) {
   };
 }
 
-/** The effective configuration with the source of every value. */
-export function showConfig(resolved: ResolvedConfig, configFile: string): ConfigView {
+/**
+ * The effective configuration with the source of every value; `projectFile` is the project file
+ * in effect, if any. Values of source `profile` come from the file of the profile (`profileFile`).
+ */
+export function showConfig(
+  resolved: ResolvedConfig,
+  configFile: string,
+  projectFile?: string,
+): ConfigView {
   const { sources, auth } = resolved;
+  const profileFile =
+    resolved.project?.path ?? (resolved.profile === undefined ? null : configFile);
   return {
     configFile,
+    projectFile: projectFile ?? null,
     profile: resolved.profile ?? null,
+    profileFile,
     values: {
       url: { value: resolved.url, source: sources.url },
       engine: { value: resolved.engine ?? null, source: sources.engine },

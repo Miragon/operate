@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { jwtWith, NOW_S, VALID_CLAIMS } from '../../test/support/bearer.js';
 import { fakeRuntime } from '../../test/support/fake-runtime.js';
-import { oauthDeps } from '../../test/support/oauth.js';
-import type { BearerAuthConfig } from '../config/types.js';
+import { authDeps } from '../../test/support/oauth.js';
+import type { StaticBearerConfig } from '../config/types.js';
 import { OperateError } from '../errors.js';
 import { compact } from '../util.js';
 import { bearerAuth, claimText, renewal, tokenExpired } from './bearer.js';
@@ -10,9 +10,9 @@ import { createAuthProvider } from './index.js';
 
 const NOW = NOW_S * 1000;
 
-type Overrides = { readonly [K in keyof BearerAuthConfig]?: BearerAuthConfig[K] | undefined };
+type Overrides = { readonly [K in keyof StaticBearerConfig]?: StaticBearerConfig[K] | undefined };
 
-function config(token: string, overrides: Overrides = {}): BearerAuthConfig {
+function config(token: string, overrides: Overrides = {}): StaticBearerConfig {
   const merged = {
     type: 'bearer',
     token,
@@ -21,7 +21,7 @@ function config(token: string, overrides: Overrides = {}): BearerAuthConfig {
     variable: 'OPERATE_TOKEN',
     ...overrides,
   };
-  return compact(merged) as BearerAuthConfig;
+  return compact(merged) as StaticBearerConfig;
 }
 
 const EXPIRED = jwtWith({ ...VALID_CLAIMS, exp: NOW_S - 31 });
@@ -158,7 +158,7 @@ describe('claimText and tokenExpired', () => {
 describe('createAuthProvider for bearer tokens', () => {
   it('uses the clock of the dependencies for the expiry check', async () => {
     const runtime = fakeRuntime();
-    const provider = createAuthProvider(config(EXPIRED), oauthDeps(runtime));
+    const provider = createAuthProvider(config(EXPIRED), authDeps(runtime));
     expect(provider.type).toBe('bearer');
     await expect(provider.headers()).rejects.toMatchObject({ code: 'TOKEN_EXPIRED' });
   });

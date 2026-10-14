@@ -278,6 +278,13 @@ const CONFIG_FLAGS: Flags = withFlags(OUTPUT_FLAGS, {
     },
   },
   'auth-token-stdin': { takesValue: false },
+  'auth-token-command': {
+    takesValue: true,
+    check: (value) => {
+      expect(value).toMatch(/^\S[^\n]*$/);
+    },
+  },
+  project: { takesValue: false },
   'oauth-issuer': {
     takesValue: true,
     check: (value) => {
@@ -307,6 +314,8 @@ const CONFIG_SUBCOMMANDS: Readonly<Record<string, readonly [number, number]>> = 
   unset: [2, Infinity],
   use: [1, 1],
   delete: [1, 1],
+  trust: [0, 0],
+  untrust: [0, 0],
 };
 
 function checkConfig(rest: readonly string[]): void {
@@ -316,6 +325,19 @@ function checkConfig(rest: readonly string[]): void {
   expect(positionals.length).toBeGreaterThanOrEqual(range![0]);
   expect(positionals.length).toBeLessThanOrEqual(range![1]);
   if (subcommand === 'set') expect(positionals[0]).toMatch(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
+}
+
+/** `operate auth status|logout` (`auth login` is for a person, never in the guide). */
+function checkAuth(rest: readonly string[]): void {
+  const flags = withFlags(new Map([['output', GLOBALS.get('output')!]]), {
+    profile: { takesValue: true },
+    config: { takesValue: true },
+    'auth-token-stdin': { takesValue: false },
+    'auth-token-command': CONFIG_FLAGS.get('auth-token-command')!,
+  });
+  const [subcommand, ...positionals] = parseWords(rest, flags);
+  expect(['status', 'logout']).toContain(subcommand);
+  expect(positionals).toEqual([]);
 }
 
 /** `operate guide [topic]` or `operate guide --list`, with `-o` for the list. */
@@ -337,6 +359,7 @@ const UTILITIES: Readonly<Record<string, (rest: readonly string[]) => void>> = {
   },
   guide: checkGuide,
   config: checkConfig,
+  auth: checkAuth,
   completion: (rest) => {
     expect(rest).toHaveLength(1);
     expect(['bash', 'zsh', 'fish']).toContain(rest[0]);

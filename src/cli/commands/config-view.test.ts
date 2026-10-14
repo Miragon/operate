@@ -4,7 +4,9 @@ import { maskedView, profileView, showHeader, showRows } from './config-view.js'
 
 const VIEW: ConfigView = {
   configFile: '/c.json',
+  projectFile: null,
   profile: null,
+  profileFile: null,
   values: {
     url: { value: 'http://h/rest', source: 'default' },
     engine: { value: null, source: 'default' },

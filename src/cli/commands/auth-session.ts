@@ -8,7 +8,6 @@
 
 import type { Command } from 'commander';
 import { configError } from '../../config/config-error.js';
-import { readConfigFile } from '../../config/file.js';
 import type { Env } from '../../config/pick.js';
 import { selectedAuth } from '../../config/resolve-auth.js';
 import { unusedToken, unusedTokenNote } from '../../config/resolve-bearer.js';
@@ -17,7 +16,8 @@ import { selectProfile } from '../../config/resolve.js';
 import { ENV, type OAuthConfig, type ResolvedConfig, type Source } from '../../config/types.js';
 import type { CliContext } from '../context.js';
 import { configFlags, type GlobalOptions, readGlobals } from '../globals.js';
-import { configPath, isExplicit, openSession, type Session } from '../session.js';
+import { loadConfig } from '../config-files.js';
+import { openSession, type Session } from '../session.js';
 import { bearerNotManaged } from './auth-bearer.js';
 
 /**
@@ -106,14 +106,13 @@ async function otherTypeInstead(context: CliContext, globals: GlobalOptions, com
   const { runtime } = context;
   const { env } = runtime;
   try {
-    const path = configPath(runtime, globals.config);
-    const file = await readConfigFile(runtime.fs, path, isExplicit(runtime, globals.config));
+    const { config } = await loadConfig(runtime, globals.config);
     const flags = configFlags(globals);
-    const selected = selectProfile(flags, env, file);
+    const selected = selectProfile(flags, env, config);
     const auth = selectedAuth(flags, env, selected);
     const profile = selected.name;
     if (auth?.type === 'bearer' && command === 'login') {
-      return bearerNotManaged(command, { profile, source: auth.source, env });
+      return bearerNotManaged(command, { profile, source: auth.source, env, token: auth.token });
     }
     if (auth?.type !== 'basic') return undefined;
     const unused = unusedToken({ flags, env, selected }, 'basic', auth.label);
@@ -141,7 +140,10 @@ export async function authSession(command: Command, context: CliContext, name: s
 /** The OAuth settings of the session; other auth types do not log in. */
 export function oauthOf(session: Session, name: string, env: Env): OAuthConfig {
   const { auth, profile, sources } = session.config;
-  if (auth.type === 'bearer') throw bearerNotManaged(name, { profile, source: sources.auth, env });
+  if (auth.type === 'bearer') {
+    const token = { origin: auth.origin, command: auth.command !== undefined };
+    throw bearerNotManaged(name, { profile, source: sources.auth, env, token });
+  }
   if (auth.type !== 'oauth') throw notOAuth(name, notOAuthOf(session.config), env);
   return auth;
 }

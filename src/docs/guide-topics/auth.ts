@@ -1,10 +1,10 @@
-/** `operate guide auth`: Basic auth, bearer tokens and OAuth logins. */
+/** `operate guide auth`: Basic auth, bearer tokens, token commands and OAuth logins. */
 
 import type { GuideTopic } from './topic.js';
 
 export const AUTH_TOPIC: GuideTopic = {
   name: 'auth',
-  summary: 'Basic auth, bearer tokens from elsewhere, OAuth logins, what to do on exit 4',
+  summary: 'Basic auth, bearer tokens and token commands, OAuth logins, what to do on exit 4',
   text: `# operate guide auth: Basic auth, bearer tokens and OAuth
 
 The auth type comes from \`--auth none|basic|oauth|bearer\`, \`OPERATE_AUTH\` or the profile; without
@@ -34,6 +34,25 @@ exit 4 \`TOKEN_EXPIRED\` ask the user for a new token.
 \`\`\`sh
 operate config set ci --auth bearer --auth-token-env CI_ENGINE_TOKEN
 \`\`\`
+
+## Token commands
+
+A token command prints the token on its first line: \`--auth-token-command <cmd>\`,
+\`OPERATE_TOKEN_COMMAND\` or a profile (\`config set --auth-token-command\`). operate runs it when it
+needs a token, reuses a JWT until shortly before it expires and runs it again once after a 401. A
+failing command exits 4 with \`LOGIN_FAILED\` and the end of its stderr. \`operate auth status\` runs
+it and shows the token's claims; \`operate auth logout\` drops the cached token.
+
+\`\`\`sh
+operate config set dev --auth bearer --auth-token-command './scripts/token.sh dev'
+operate auth status --profile dev
+\`\`\`
+
+A token command of a project file (\`.operate.json\`) runs code from the repository, and a variable
+it names for a secret (\`tokenEnv\`, \`passwordEnv\`, \`clientSecretEnv\`) goes to its engine: both
+take effect only after a person reviewed the file and ran \`operate config trust\`, again after
+every change. On the CONFIG error (exit 3) that says the file is not trusted, stop and ask the
+user; never run \`operate config trust\` yourself.
 
 ## OAuth
 

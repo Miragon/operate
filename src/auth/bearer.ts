@@ -6,7 +6,7 @@
  * explain a 401 or 403. Opaque tokens are sent as they are. Never shows the token.
  */
 
-import { ENV, type BearerAuthConfig } from '../config/types.js';
+import { ENV, type StaticBearerConfig } from '../config/types.js';
 import { OperateError } from '../errors.js';
 import { isExpired, type JwtClaims, jwtClaims } from './jwt.js';
 import type { AuthProvider, Principal } from './types.js';
@@ -16,14 +16,14 @@ function iso(epochMs: number): string {
 }
 
 /** How a person or agent supplies a new token for the source of this one. */
-export function renewal(config: BearerAuthConfig): string {
+export function renewal(config: StaticBearerConfig): string {
   if (config.source === 'flag') return 'pipe it into --auth-token-stdin';
   if (config.variable !== undefined) return `set ${config.variable}`;
   return `set ${ENV.token} (it overrides the stored token) or store it with \`operate config set ${config.profile ?? '<profile>'} --auth-token-stdin\``;
 }
 
 /** The TOKEN_EXPIRED error of a JWT whose `exp` lies more than 30 s in the past. */
-export function tokenExpired(config: BearerAuthConfig, expiresAt: number): OperateError {
+export function tokenExpired(config: StaticBearerConfig, expiresAt: number): OperateError {
   const when = `the bearer token from ${config.origin} expired at ${iso(expiresAt)}`;
   return new OperateError('TOKEN_EXPIRED', `T${when.slice(1)}`, {
     hint: `operate never refreshes bearer tokens: ${when}; fetch a new one (e.g. with your identity provider's CLI) and ${renewal(config)}.`,
@@ -69,32 +69,37 @@ function unauthorizedCheck(claims: JwtClaims | undefined, now: number): string {
   return 'Check that the engine (or the gateway in front of it) expects its issuer and audience and trusts the key that signed it (operate checks no signatures)';
 }
 
-function unauthorizedHint(
-  config: BearerAuthConfig,
-  claims: JwtClaims | undefined,
-  now: number,
-): string {
-  return `Bearer auth failed: the engine rejected the bearer token from ${config.origin}${details(claims, now)}. ${unauthorizedCheck(claims, now)}; fetch a new token (e.g. with your identity provider's CLI) and ${renewal(config)}. operate sends the token as it is and never refreshes it.`;
+/** A token as the hints of a 401 or 403 describe it: where it came from and its claims. */
+export interface RejectedToken {
+  readonly origin: string;
+  readonly claims: JwtClaims | undefined;
+  readonly now: number;
 }
 
-function forbiddenHint(
-  config: BearerAuthConfig,
-  claims: JwtClaims | undefined,
-  now: number,
-): string {
-  return `The engine (or the gateway in front of it) refused the bearer token from ${config.origin}${details(claims, now)}: the token was accepted, but it lacks the roles or scopes this operation needs, or its user has no engine authorization for it. Request a token with the required roles or scopes (another scope or audience at the identity provider), or ask for the engine authorization.`;
+/**
+ * The hint of a 401 or 403 to a request with a bearer token; `next` says what to do after a 401
+ * (fetch a new token, or check the token command). Undefined for other statuses.
+ */
+export function bearerRejectedHint(
+  status: number,
+  token: RejectedToken,
+  next: string,
+): string | undefined {
+  const { origin, claims, now } = token;
+  if (status === 401) {
+    return `Bearer auth failed: the engine rejected the bearer token from ${origin}${details(claims, now)}. ${unauthorizedCheck(claims, now)}; ${next}`;
+  }
+  if (status !== 403) return undefined;
+  return `The engine (or the gateway in front of it) refused the bearer token from ${origin}${details(claims, now)}: the token was accepted, but it lacks the roles or scopes this operation needs, or its user has no engine authorization for it. Request a token with the required roles or scopes (another scope or audience at the identity provider), or ask for the engine authorization.`;
 }
 
 /** The user of a JWT (preferred_username, else sub) and where the token came from. */
-function principalOf(
-  config: BearerAuthConfig,
-  claims: JwtClaims | undefined,
-): Principal | undefined {
+export function principalOf(origin: string, claims: JwtClaims | undefined): Principal | undefined {
   const user = claims?.user ?? claims?.subject ?? null;
-  return user === null ? undefined : { user, source: config.origin };
+  return user === null ? undefined : { user, source: origin };
 }
 
-export function bearerAuth(config: BearerAuthConfig, now: () => number): AuthProvider {
+export function bearerAuth(config: StaticBearerConfig, now: () => number): AuthProvider {
   const claims = jwtClaims(config.token);
   const headers = { Authorization: `Bearer ${config.token}` };
   const expiresAt = claims?.expiresAt ?? null;
@@ -103,7 +108,8 @@ export function bearerAuth(config: BearerAuthConfig, now: () => number): AuthPro
     expiresAt !== null && isExpired({ expiresAt }, now())
       ? tokenExpired(config, expiresAt)
       : undefined;
-  const principal = principalOf(config, claims);
+  const principal = principalOf(config.origin, claims);
+  const next = `fetch a new token (e.g. with your identity provider's CLI) and ${renewal(config)}. operate sends the token as it is and never refreshes it.`;
   return {
     type: 'bearer',
     headers: () => {
@@ -117,9 +123,7 @@ export function bearerAuth(config: BearerAuthConfig, now: () => number): AuthPro
       return Promise.resolve({ headers, note });
     },
     ...(principal === undefined ? {} : { principal }),
-    rejectedHint: (status) => {
-      if (status === 401) return unauthorizedHint(config, claims, now());
-      return status === 403 ? forbiddenHint(config, claims, now()) : undefined;
-    },
+    rejectedHint: (status) =>
+      bearerRejectedHint(status, { origin: config.origin, claims, now: now() }, next),
   };
 }

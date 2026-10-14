@@ -1,16 +1,28 @@
 /**
- * `operate auth status|login|logout` with a bearer token obtained elsewhere (design §18). `auth
- * status` shows what operate can tell about the token without sending it: where it comes from
- * and, for a JWT, subject, issuer, audience and expiry (no signature check); an expired JWT exits
- * with TOKEN_EXPIRED (exit 4) after the view. `auth login` and `auth logout` do not apply: operate
- * never fetches, refreshes or stores such a token. Never prints the token.
+ * `operate auth status|login|logout` with a bearer token obtained elsewhere (design §18, §23).
+ * `auth status` shows what operate can tell about the token without sending it: where it comes
+ * from (for a token command, the command, which it runs unless its token is cached) and, for a
+ * JWT, subject, issuer, audience and expiry (no signature check); an expired JWT exits with
+ * TOKEN_EXPIRED (exit 4) after the view. `auth login` does not apply: operate never logs in for
+ * such a token. `auth logout` only removes the cached token of a token command. Never prints the
+ * token.
  */
 
 import { tokenExpired } from '../../auth/bearer.js';
+import { type CommandCacheDeps, commandCachePath } from '../../auth/command-cache.js';
+import { configError } from '../../config/config-error.js';
 import { isExpired, type JwtClaims, jwtClaims } from '../../auth/jwt.js';
 import { type Env, nonEmpty } from '../../config/pick.js';
-import { type BearerAuthConfig, ENV, type Source } from '../../config/types.js';
+import type { BearerSource } from '../../config/resolve-bearer.js';
+import {
+  type BearerAuthConfig,
+  type CommandBearerConfig,
+  ENV,
+  type Source,
+  type StaticBearerConfig,
+} from '../../config/types.js';
 import { type OperateError, usageError } from '../../errors.js';
+import type { LogoutView } from './auth-view.js';
 
 export interface BearerStatusView {
   readonly type: 'bearer';
@@ -19,6 +31,10 @@ export interface BearerStatusView {
   readonly source: Source;
   /** `OPERATE_TOKEN`, `CI_TOKEN (auth.tokenEnv of profile "p")`, ... */
   readonly origin: string;
+  /** The token command that printed the token, else null. */
+  readonly command: string | null;
+  /** The token of the command came from operate's cache (the command did not run). */
+  readonly cached: boolean;
   readonly format: 'jwt' | 'opaque';
   /** `sub` of a JWT. */
   readonly subject: string | null;
@@ -41,14 +57,25 @@ const OPAQUE: JwtClaims = {
   audience: [],
 };
 
-export function bearerStatusView(config: BearerAuthConfig, now: number): BearerStatusView {
-  const claims = jwtClaims(config.token);
+/**
+ * The view of the bearer token `token` (the configured one, or the one the token command printed;
+ * `cached` when it came from operate's cache).
+ */
+export function bearerStatusView(
+  config: BearerAuthConfig,
+  token: string,
+  now: number,
+  cached = false,
+): BearerStatusView {
+  const claims = jwtClaims(token);
   const { subject, user, issuer, audience, expiresAt } = claims ?? OPAQUE;
   return {
     type: 'bearer',
     profile: config.profile ?? null,
     source: config.source,
     origin: config.origin,
+    command: config.command?.line ?? null,
+    cached,
     format: claims === undefined ? 'opaque' : 'jwt',
     subject,
     user,
@@ -60,19 +87,23 @@ export function bearerStatusView(config: BearerAuthConfig, now: number): BearerS
 }
 
 /** TOKEN_EXPIRED for a JWT whose `exp` lies more than 30 s in the past, else undefined. */
-export function expiredError(config: BearerAuthConfig, now: number): OperateError | undefined {
+export function expiredError(config: StaticBearerConfig, now: number): OperateError | undefined {
   const expiresAt = jwtClaims(config.token)?.expiresAt ?? null;
   return expiresAt !== null && isExpired({ expiresAt }, now)
     ? tokenExpired(config, expiresAt)
     : undefined;
 }
 
-/** What selected bearer auth for an `auth` command, which has no `--auth` option. */
+/**
+ * What selected bearer auth for an `auth` command, which has no `--auth` option, and where its
+ * token comes from (a token command: `command`).
+ */
 export interface BearerSelection {
   readonly profile: string | undefined;
   /** Where the type came from (`ResolvedConfig.sources.auth`). */
   readonly source: Source;
   readonly env: Env;
+  readonly token?: BearerSource | undefined;
 }
 
 type Selector = 'profile' | 'type variable' | 'token';
@@ -83,11 +114,17 @@ function selectorOf({ source, env }: BearerSelection): Selector {
   return source === 'env' && nonEmpty(env[ENV.auth]) !== undefined ? 'type variable' : 'token';
 }
 
+/** The flag or variable that gave the token (or token command) of a selection without a type. */
+function givenBy(selection: BearerSelection): string {
+  if (selection.token !== undefined) return selection.token.origin;
+  return selection.source === 'flag' ? '--auth-token-stdin' : ENV.token;
+}
+
 function selectedBy(selector: Selector, selection: BearerSelection): string {
   if (selector === 'profile') return `the auth.type of profile "${selection.profile ?? ''}"`;
   if (selector === 'type variable') return `${ENV.auth}=bearer`;
-  const from = selection.source === 'flag' ? '--auth-token-stdin' : ENV.token;
-  return `a token from ${from} without an auth type`;
+  const noun = selection.token?.command === true ? 'a token command' : 'a token';
+  return `${noun} from ${givenBy(selection)} without an auth type`;
 }
 
 /** The settings that apply once OPERATE_AUTH is unset. */
@@ -104,7 +141,7 @@ function loginWay(selector: Selector, selection: BearerSelection): string {
   if (selector === 'type variable') {
     return `To log in with OAuth instead, unset ${ENV.auth} so that the auth settings of ${settingsOf(selection.profile)} apply.`;
   }
-  const unset = selector === 'token' ? `unset ${ENV.token} and configure OAuth: ` : '';
+  const unset = selector === 'token' ? `unset ${givenBy(selection)} and configure OAuth: ` : '';
   return `For an OAuth login run by operate: ${unset}${OAUTH_SETUP(name)}.`;
 }
 
@@ -115,7 +152,12 @@ function logoutWay(selector: Selector, selection: BearerSelection): string {
   }
   return selector === 'type variable'
     ? `unset ${ENV.auth} to use the auth settings of ${settingsOf(selection.profile)}`
-    : `unset ${ENV.token} to stop sending it`;
+    : `unset ${givenBy(selection)} to stop sending it`;
+}
+
+/** Why `auth login` does not apply to the token of a token command, and what to run instead. */
+function commandLoginHint(by: string, selection: BearerSelection): string {
+  return `${capitalized(by)}: operate runs the token command (${selection.token?.origin ?? ''}) whenever it needs a token and never logs in itself; \`operate auth status\` runs it and shows the token's claims and expiry. ${loginWay(selectorOf(selection), selection)}`;
 }
 
 /**
@@ -126,11 +168,38 @@ function logoutWay(selector: Selector, selection: BearerSelection): string {
 export function bearerNotManaged(command: string, selection: BearerSelection): OperateError {
   const selector = selectorOf(selection);
   const by = `bearer auth is selected by ${selectedBy(selector, selection)}`;
+  if (command !== 'logout' && selection.token?.command === true) {
+    return usageError(
+      `operate auth ${command} does not apply to bearer tokens`,
+      commandLoginHint(by, selection),
+    );
+  }
   const hint =
     command === 'logout'
       ? `operate stores no bearer token, so there is nothing to log out (${by}); ${logoutWay(selector, selection)}. The token stays valid at the engine until it expires; revoke it with the tool that issued it.`
       : `${capitalized(by)}: operate sends a token from elsewhere (company SSO tooling, a CI secret, az account get-access-token, gcloud auth print-access-token) as it is and never logs in, refreshes or stores it. Fetch a new token with that tool and set ${ENV.token} (or the variable named by the profile's tokenEnv); \`operate auth status\` shows its expiry. ${loginWay(selector, selection)}`;
   return usageError(`operate auth ${command} does not apply to bearer tokens`, hint);
+}
+
+/**
+ * `auth logout` with a token command: removes operate's cached token of the command (the token
+ * itself stays valid at the engine until it expires); the next command runs the command again.
+ */
+export async function logoutCommand(
+  config: CommandBearerConfig,
+  deps: CommandCacheDeps,
+): Promise<LogoutView> {
+  const tokenCache = await commandCachePath(config.command, deps);
+  let removed: boolean;
+  try {
+    removed = await deps.fs.remove(tokenCache);
+  } catch (error) {
+    throw configError(
+      `Cannot remove the cached token ${tokenCache} (${error instanceof Error ? error.message : String(error)})`,
+      'Check the permissions of the token directory.',
+    );
+  }
+  return { profile: config.profile ?? null, tokenCache, removed, revoked: null };
 }
 
 function capitalized(text: string): string {

@@ -267,7 +267,7 @@ describe('unsetProfileKeys', () => {
     expect(error.code).toBe('CONFIG');
     expect(error.message).toBe('Unknown profile key "user"');
     expect(error.details.hint).toBe(
-      'Valid keys: url, engine, auth, output, timeout, headers, readOnly; OAuth settings: issuer, endpoints, clientId, clientSecret, scopes, audience, redirectPort; bearer token: token, tokenEnv.',
+      'Valid keys: url, engine, auth, output, timeout, headers, readOnly; OAuth settings: issuer, endpoints, clientId, clientSecret, scopes, audience, redirectPort; bearer token: token, tokenEnv, tokenCommand.',
     );
   });
 
@@ -406,8 +406,9 @@ describe('listProfiles', () => {
       defaultProfile: 'prod',
       profiles: { zeta: {}, prod: TWO.profiles.prod ?? {}, alpha: { readOnly: false } },
     };
+    const none = { url: null, engine: null, auth: null, readOnly: false, scope: 'user' };
     expect(listProfiles(config)).toEqual([
-      { name: 'alpha', default: false, url: null, engine: null, auth: null, readOnly: false },
+      { name: 'alpha', default: false, ...none },
       {
         name: 'prod',
         default: true,
@@ -415,8 +416,9 @@ describe('listProfiles', () => {
         engine: 'main',
         auth: 'none',
         readOnly: true,
+        scope: 'user',
       },
-      { name: 'zeta', default: false, url: null, engine: null, auth: null, readOnly: false },
+      { name: 'zeta', default: false, ...none },
     ]);
   });
 
@@ -435,7 +437,9 @@ describe('showConfig', () => {
     );
     expect(showConfig(resolved, '/home/me/.config/operate/config.json')).toEqual({
       configFile: '/home/me/.config/operate/config.json',
+      projectFile: null,
       profile: 'dev',
+      profileFile: '/home/me/.config/operate/config.json',
       values: {
         url: { value: 'http://localhost:8080/engine-rest', source: 'profile' },
         engine: { value: null, source: 'default' },

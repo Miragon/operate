@@ -5,13 +5,17 @@
  * checks them in front of an unmodified engine. operate only sends `Authorization: Bearer
  * <token>`: no login, no refresh, no token cache.
  *
+ * Token commands (design §23) fetch such tokens for operate: a script that runs the client
+ * credentials grant, from the environment and from a project file (design §22), which needs
+ * `operate config trust`.
+ *
  * The 5 s token of `operate-cli-short` is issued first, in `beforeAll`, so the 30 s expiry grace of
  * the TOKEN_EXPIRED test mostly passes while the other tests run. Every CLI run is checked against
  * every token the suite has seen (and each JWT's signature on its own); only `--show-secrets` runs
  * may print the one token they send.
  */
 
-import { readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -32,6 +36,7 @@ import {
   CLIENTS,
   clientCredentialsToken,
   directLogin,
+  endpointsOf,
   USER,
 } from './support/keycloak.js';
 import {
@@ -577,6 +582,8 @@ describe.skipIf(engine === undefined)(`Bearer tokens from elsewhere at ${engine 
   it('shows subject, issuer, audience and expiry in auth status, never the token', async () => {
     const claims = {
       type: 'bearer',
+      command: null,
+      cached: false,
       format: 'jwt',
       subject: claimsOf(ciToken).sub,
       user: SERVICE_ACCOUNT,
@@ -888,6 +895,153 @@ describe.skipIf(engine === undefined)(`Bearer tokens from elsewhere at ${engine 
       user: USER.username,
       expiresAt: expired,
       expired: true,
+    });
+  });
+  describe('token commands', () => {
+    /**
+     * The token command: the client credentials grant of `operate-ci`, run by the shell. It logs
+     * every run and every token it prints (so no output may contain one); IT_FAIL makes it fail,
+     * IT_GARBAGE_FIRST prints a token the gateway rejects on its first run.
+     */
+    const SCRIPT = `import { appendFileSync, readFileSync } from 'node:fs';
+const { IT_RUNS, IT_TOKENS, IT_ENDPOINT, IT_CLIENT, IT_SECRET } = process.env;
+const runs = (() => { try { return readFileSync(IT_RUNS, 'utf8').split('\\n').filter(Boolean).length; } catch { return 0; } })();
+appendFileSync(IT_RUNS, 'run\\n');
+if (process.env.IT_FAIL) { console.error('the token endpoint is unreachable (it)'); process.exit(7); }
+let token = 'garbage-token-it';
+if (!process.env.IT_GARBAGE_FIRST || runs > 0) {
+  const answer = await fetch(IT_ENDPOINT, { method: 'POST', body: new URLSearchParams({ grant_type: 'client_credentials', client_id: IT_CLIENT, client_secret: IT_SECRET }) });
+  token = (await answer.json()).access_token;
+}
+appendFileSync(IT_TOKENS, token + '\\n');
+console.log(token);
+`;
+    let repo = '';
+    let runsFile = '';
+    let tokensFile = '';
+    /** The command line, relative to the repository root (where a project file's command runs). */
+    const COMMAND = `${JSON.stringify(process.execPath)} token.mjs`;
+
+    const runs = async () =>
+      (await readFile(runsFile, 'utf8').catch(() => '')).split('\n').filter(Boolean).length;
+
+    /** The variables of the command (passed through operate's environment). */
+    function commandEnv(extra: EnvOverrides = {}): EnvOverrides {
+      return {
+        IT_RUNS: runsFile,
+        IT_TOKENS: tokensFile,
+        IT_ENDPOINT: endpointsOf(top().issuer).token,
+        IT_CLIENT: CLIENTS.ci,
+        IT_SECRET: CI_CLIENT_SECRET,
+        ...extra,
+      };
+    }
+
+    /**
+     * Runs in the repository without OPERATE_CONFIG and OPERATE_URL, so the project file counts;
+     * checks that no output contains a token the command printed.
+     */
+    async function inRepo(args: readonly string[], extra: EnvOverrides = {}) {
+      const result = await cli(args, {
+        timeoutMs: RUN_TIMEOUT_MS,
+        cwd: join(repo, 'src'),
+        env: commandEnv({ OPERATE_CONFIG: undefined, OPERATE_URL: undefined, ...extra }),
+      });
+      remember(...(await readFile(tokensFile, 'utf8').catch(() => '')).split('\n').filter(Boolean));
+      expectHidden(result);
+      return result;
+    }
+
+    beforeAll(async () => {
+      const dir = required(workdir, 'the work directory');
+      repo = join(dir, 'repo');
+      await mkdir(join(repo, '.git'), { recursive: true });
+      await mkdir(join(repo, 'src'), { recursive: true });
+      await writeFile(join(repo, 'token.mjs'), SCRIPT);
+      runsFile = join(dir, 'token-runs.log');
+      tokensFile = join(dir, 'token-values.log');
+    });
+
+    it("fetches the token with a project file's command, once trusted, and reuses it", async () => {
+      const set = await inRepo([
+        'config',
+        'set',
+        'it-command',
+        '--project',
+        '--url',
+        top().url,
+        '--auth-token-command',
+        COMMAND,
+      ]);
+      expect(expectSuccess(set).stderr).toContain(
+        `Created the project file ${join(repo, '.operate.json')}`,
+      );
+      const count = await inRepo(countArgs());
+      expect(expectSuccess(count).json<Count>().count).toBeGreaterThanOrEqual(0);
+      expect(await runs()).toBe(1);
+      // the next call takes the cached JWT
+      const verbose = await inRepo(countArgs(globalFlag('verbose')));
+      expectSuccess(verbose);
+      expect(verbose.stderr).toContain(
+        '* Using the token of the bearer token command of auth.tokenCommand of profile "it-command", cached until it expires',
+      );
+      expect(verbose.stderr).toMatch(MASKED_BEARER);
+      expect(await runs()).toBe(1);
+      const status = expectSuccess(await inRepo(['auth', 'status'])).json<BearerStatusOutput>();
+      expect(status).toMatchObject({
+        profile: 'it-command',
+        source: 'profile',
+        origin: 'auth.tokenCommand of profile "it-command"',
+        command: COMMAND,
+        cached: true,
+        format: 'jwt',
+        user: SERVICE_ACCOUNT,
+      });
+    });
+
+    it('needs a new trust after the project file changed by hand', async () => {
+      const before = await runs();
+      await appendFile(join(repo, '.operate.json'), '\n');
+      const refused = await inRepo(countArgs());
+      expect(expectError(refused, 'CONFIG', 3).message).toContain('which is not trusted');
+      expect(await runs()).toBe(before);
+      expectSuccess(await inRepo(['config', 'trust']));
+      expectSuccess(await inRepo(countArgs()));
+      // the cache key is the command and its directory, not the file: still no new run
+      expect(await runs()).toBe(before);
+    });
+
+    it('runs the command again after a 401 and retries with the new token', async () => {
+      const retryRuns = join(required(workdir, 'the work directory'), 'retry-runs.log');
+      const result = await inRepo(countArgs(globalFlag('verbose')), {
+        OPERATE_TOKEN_COMMAND: `${JSON.stringify(process.execPath)} ${join(repo, 'token.mjs')}`,
+        OPERATE_URL: top().url,
+        OPERATE_CONFIG: configFile,
+        IT_GARBAGE_FIRST: '1',
+        IT_RUNS: retryRuns,
+      });
+      expectSuccess(result);
+      const answers = trace(result).filter((event) => event.startsWith('< '));
+      expect(answers).toEqual(['< 401', '< 200']);
+      expect((await readFile(retryRuns, 'utf8')).split('\n').filter(Boolean)).toHaveLength(2);
+    });
+
+    it('reports a failing command as LOGIN_FAILED with the end of its stderr', async () => {
+      const env = {
+        OPERATE_TOKEN_COMMAND: `${JSON.stringify(process.execPath)} ${join(repo, 'token.mjs')}`,
+        OPERATE_URL: top().url,
+        OPERATE_CONFIG: configFile,
+        IT_FAIL: '1',
+      };
+      // the token of the previous test is still cached: logout drops it
+      const logout = expectSuccess(await inRepo(['auth', 'logout'], env));
+      expect(logout.json()).toMatchObject({ profile: null, removed: true, revoked: null });
+      const result = await inRepo(countArgs(), env);
+      const error = expectError(result, 'LOGIN_FAILED', 4);
+      expect(error.message).toBe(
+        'The bearer token command (OPERATE_TOKEN_COMMAND) failed with exit code 7: the token endpoint is unreachable (it)',
+      );
+      expect(result.stderr).not.toMatch(SENT_REQUEST);
     });
   });
 });

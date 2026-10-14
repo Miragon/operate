@@ -98,7 +98,10 @@ docker run --rm -it --user "$(id -u):$(id -g)" -v "$HOME/.config/operate:/config
 ```
 
 `operate auth login` listens on `127.0.0.1` inside the container, which a browser outside cannot
-reach: in containers use Basic auth or a bearer token (`OPERATE_TOKEN`). Each image carries an
+reach: in containers use Basic auth or a bearer token (`OPERATE_TOKEN`). The image has no shell, so
+token commands (`--auth-token-command`, `auth.tokenCommand`) cannot run in it either: fetch the
+token outside and pass it with `-e OPERATE_TOKEN`. A project file (`.operate.json`) in the mounted
+`/work` directory is used as on the host. Each image carries an
 SBOM and SLSA provenance (`docker buildx imagetools inspect ghcr.io/miragon/operate:<version>
 --format '{{ json .SBOM }}'`), and `gh attestation verify oci://ghcr.io/miragon/operate:<version>
 --repo Miragon/operate` verifies where it was built.
