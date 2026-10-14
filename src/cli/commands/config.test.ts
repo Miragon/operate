@@ -272,15 +272,31 @@ describe('config unset, use, delete and list', () => {
     const runtime = await prepared();
     const result = await sequence(runtime, ['config', 'list']);
     expect(JSON.parse(result.stdout)).toEqual([
-      { name: 'a', default: true, url: URL_A, engine: 'e1', auth: null, readOnly: false },
-      { name: 'b', default: false, url: URL_B, engine: null, auth: null, readOnly: true },
+      {
+        name: 'a',
+        default: true,
+        url: URL_A,
+        engine: 'e1',
+        auth: null,
+        readOnly: false,
+        scope: 'user',
+      },
+      {
+        name: 'b',
+        default: false,
+        url: URL_B,
+        engine: null,
+        auth: null,
+        readOnly: true,
+        scope: 'user',
+      },
     ]);
     const table = await sequence(runtime, ['config', 'list', '-o', 'table']);
     expect(table.stdout).toBe(
       [
-        'name  default  url                        engine  readOnly',
-        `a     true     ${URL_A}  e1      false`,
-        `b     false    ${URL_B}          true`,
+        'name  default  url                        engine  readOnly  scope',
+        `a     true     ${URL_A}  e1      false     user`,
+        `b     false    ${URL_B}          true      user`,
         '',
       ].join('\n'),
     );
@@ -305,7 +321,9 @@ describe('config show', () => {
     });
     expect(JSON.parse(result.stdout)).toEqual({
       configFile: CONFIG_PATH,
+      projectFile: null,
       profile: 'a',
+      profileFile: CONFIG_PATH,
       values: {
         url: { value: URL_A, source: 'profile' },
         engine: { value: 'e2', source: 'flag' },

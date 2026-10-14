@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { fakeRuntime } from '../../test/support/fake-runtime.js';
-import { oauthConfig, oauthDeps } from '../../test/support/oauth.js';
+import { authDeps, oauthConfig } from '../../test/support/oauth.js';
 import type { AuthConfig } from '../config/types.js';
 import { OperateError } from '../errors.js';
 import { createAuthProvider } from './index.js';
 
-const deps = oauthDeps(fakeRuntime());
+const deps = authDeps(fakeRuntime());
 
 describe('createAuthProvider', () => {
   it('creates the none provider', async () => {
@@ -36,7 +36,7 @@ describe('createAuthProvider', () => {
 
   it('creates the OAuth provider, which reads the token cache only when asked', async () => {
     const runtime = fakeRuntime();
-    const provider = createAuthProvider(oauthConfig(), oauthDeps(runtime));
+    const provider = createAuthProvider(oauthConfig(), authDeps(runtime));
     expect(provider.type).toBe('oauth');
     expect(provider.principal).toBeUndefined();
     expect(typeof provider.refresh).toBe('function');

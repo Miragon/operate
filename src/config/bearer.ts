@@ -1,8 +1,9 @@
 /**
  * Validation of bearer tokens obtained outside operate (design §18): the token itself (a pasted
- * `Bearer ` prefix is dropped, the rest must be an RFC 6750 b64token) and the bearer rules for a
- * profile's auth object in the config file (the name of the variable that holds the token is
- * checked by variable.ts). Messages name where a value came from and never repeat a token.
+ * `Bearer ` prefix is dropped, the rest must be an RFC 6750 b64token), the command line that
+ * prints one (design §23) and the bearer rules for a profile's auth object in the config file
+ * (the name of the variable that holds the token is checked by variable.ts). Messages name where
+ * a value came from and never repeat a token.
  */
 
 import { isRecord } from '../util.js';
@@ -46,6 +47,26 @@ export function normalizeToken(raw: string, origin: string): string {
   return token;
 }
 
+/** True for a usable token command: one line, not blank. */
+function isTokenCommand(value: unknown): value is string {
+  return isNonEmptyString(value) && !CONTROL.test(value);
+}
+
+/**
+ * A token command line as given to `--auth-token-command` or OPERATE_TOKEN_COMMAND (`origin`),
+ * trimmed: one line, not blank (CONFIG otherwise).
+ */
+export function validateTokenCommand(command: string, origin: string): string {
+  const line = command.trim();
+  if (!isTokenCommand(line)) {
+    throw configError(
+      `The bearer token command from ${origin} must be one line that is not blank`,
+      `Give the command line that prints the token, e.g. --auth-token-command './scripts/token.sh dev'; put longer scripts into a file and run that.`,
+    );
+  }
+  return line;
+}
+
 type Check = readonly [check: (value: unknown) => boolean, expected: string];
 
 /** Shape checks of the bearer keys in the config file (the token syntax is checked on use). */
@@ -55,6 +76,10 @@ export const BEARER_CHECKS: Readonly<Record<(typeof BEARER_AUTH_KEYS)[number], C
     'the name of an environment variable, e.g. CI_ENGINE_TOKEN',
   ],
   token: [isNonEmptyString, 'a non-empty string'],
+  tokenCommand: [
+    isTokenCommand,
+    'a command line that prints the token, one line, e.g. "./scripts/token.sh dev"',
+  ],
 };
 
 function keysOf(value: Record<string, unknown>, keys: readonly string[]): string[] {
@@ -76,7 +101,7 @@ export function bearerMixProblem(name: string, value: Record<string, unknown>) {
 /**
  * The bearer rules for the auth object of profile `name` (after the shape checks and the mix
  * check): bearer keys need type bearer or none (a stored token never implies a type), and one
- * token source. Never quotes values.
+ * token source (a variable, the token or a command). Never quotes values.
  */
 export function bearerProfileProblem(name: string, value: Record<string, unknown>) {
   const bearer = keysOf(value, BEARER_AUTH_KEYS);
@@ -87,9 +112,10 @@ export function bearerProfileProblem(name: string, value: Record<string, unknown
     const actual = type === undefined ? 'is not set' : `is ${type as string}`;
     return `profile "${name}" has bearer token keys (${bearer.join(', ')}) but its auth.type ${actual}; set "type": "bearer"`;
   }
-  return bearer.length > 1
-    ? `profile "${name}" sets both auth.token and auth.tokenEnv; keep one (tokenEnv is recommended)`
-    : undefined;
+  if (bearer.length < 2) return undefined;
+  const keys = bearer.map((key) => `auth.${key}`);
+  const listed = `${keys.slice(0, -1).join(', ')} and ${keys.at(-1) ?? ''}`;
+  return `profile "${name}" sets ${bearer.length > 2 ? listed : `both ${listed}`}; keep one (tokenEnv or tokenCommand is recommended)`;
 }
 
 /** True when the stored auth object has a bearer token setting. */

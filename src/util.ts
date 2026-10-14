@@ -35,6 +35,30 @@ export function mergeHeaders(
   return Object.fromEntries(merged.values());
 }
 
+const SECRET_HEADERS: ReadonlySet<string> = new Set([
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'set-cookie',
+]);
+const SECRET_NAME_PARTS = ['token', 'secret', 'password', 'api-key', 'apikey'];
+
+/**
+ * True for a header that carries a secret: credentials, cookies and names containing token,
+ * secret, password or api-key. Output masks their values; a project file must not store them.
+ */
+export function isSecretHeader(name: string): boolean {
+  const lower = name.toLowerCase();
+  return SECRET_HEADERS.has(lower) || SECRET_NAME_PARTS.some((part) => lower.includes(part));
+}
+
+/** Lower-case hex of the SHA-256 of `data` (text as UTF-8), with WebCrypto. */
+export async function sha256Hex(data: string | Uint8Array): Promise<string> {
+  const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 /** The parts of `JSON` that TypeScript's ES2023 lib does not describe (Node.js >= 21 has them). */
 interface SourceJson {
   parse(

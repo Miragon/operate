@@ -55,8 +55,28 @@ export interface LoopbackServer {
   close(): Promise<void>;
 }
 
+/** How `runCommand` runs a command line. */
+export interface CommandOptions {
+  /** The working directory; the current one when absent. */
+  readonly cwd?: string;
+  /** The command is killed once it runs longer. */
+  readonly timeoutMs: number;
+}
+
+/** What a command line did: its exit code and output (both streams cut after 1 MiB). */
+export interface CommandResult {
+  /** null when a signal ended it, also the kill after the timeout. */
+  readonly exitCode: number | null;
+  /** It ran longer than `timeoutMs` and was killed. */
+  readonly timedOut: boolean;
+  readonly stdout: Uint8Array;
+  readonly stderr: Uint8Array;
+}
+
 export interface Runtime {
   readonly env: Readonly<Record<string, string | undefined>>;
+  /** The current working directory (absolute): project config files are looked up from it. */
+  readonly cwd: string;
   readonly stdout: OutputStream;
   readonly stderr: OutputStream;
   readStdin(): Promise<Uint8Array>;
@@ -94,4 +114,10 @@ export interface Runtime {
    * polling of the workflow commands; the fake runtime advances its clock instead).
    */
   sleep(ms: number): Promise<void>;
+  /**
+   * Runs a command line in the shell (`sh -c`, `cmd.exe /d /s /c` on Windows) with stdin closed
+   * and stdout and stderr captured; rejects when it cannot be started (e.g. a missing `cwd`). Only
+   * a bearer token command (auth.tokenCommand) runs one.
+   */
+  runCommand(command: string, options: CommandOptions): Promise<CommandResult>;
 }

@@ -72,7 +72,8 @@ describe('completionContext', () => {
     );
     const config = byName(root.commands, 'config');
     expect(byName(config.commands, 'path')).toMatchObject({
-      description: 'Print the location of the config file',
+      description:
+        'Print the location of your config file; with --project the project file in effect, else where `config set --project` creates one',
       kind: 'command',
       commands: [],
     });

@@ -90,6 +90,12 @@ export const GLOBAL_OPTIONS: readonly GlobalOptionSpec[] = [
     long: 'auth-token-stdin',
     description: 'Read the bearer token from the first line of stdin (env OPERATE_TOKEN)',
   },
+  {
+    long: 'auth-token-command',
+    value: '<cmd>',
+    description:
+      'Command line that prints the bearer token; operate runs it when it needs a token (env OPERATE_TOKEN_COMMAND)',
+  },
   { long: 'verbose', description: 'Trace requests and responses on stderr' },
   { long: 'out-file', value: '<path>', description: 'Write the response body to a file' },
   {
@@ -114,6 +120,7 @@ export interface GlobalOptions {
   readonly outFile?: string;
   readonly auth?: string;
   readonly authUser?: string;
+  readonly authTokenCommand?: string;
   readonly headers: readonly string[];
   readonly pretty: boolean;
   readonly dryRun: boolean;
@@ -190,6 +197,7 @@ export function readGlobals(command: Command): GlobalOptions {
       outFile: text('outFile'),
       auth: text('auth'),
       authUser: text('authUser'),
+      authTokenCommand: text('authTokenCommand'),
     }),
     headers: Array.isArray(opts.header) ? (opts.header as string[]) : [],
     pretty: flag('pretty'),
@@ -223,5 +231,6 @@ export function configFlags(globals: GlobalOptions, secrets: StdinSecrets = {}):
     authUser: globals.authUser,
     authPassword: secrets.password,
     authToken: secrets.token,
+    authTokenCommand: globals.authTokenCommand,
   });
 }

@@ -2,9 +2,9 @@
 
 `operate` supports [HTTP Basic authentication](#basic-auth), [OAuth 2.0](#oauth) with the
 authorization code flow and PKCE, for engines behind a gateway that checks tokens of Keycloak,
-Microsoft Entra ID, Auth0 or another OpenID Connect provider, and [bearer tokens](#bearer-tokens)
-you get elsewhere (SSO tooling, a CI secret, `az`, `gcloud`). Other schemes go into
-[headers](#other-headers).
+Microsoft Entra ID, Auth0 or another OpenID Connect provider, [bearer tokens](#bearer-tokens)
+you get elsewhere (SSO tooling, a CI secret, `az`, `gcloud`) and [token commands](#token-commands)
+that operate runs to fetch one. Other schemes go into [headers](#other-headers).
 
 ## Basic auth
 
@@ -231,7 +231,7 @@ operate config set ci --url https://camunda.example.com/engine-rest --auth beare
   audience and expiry (exit 4 when it expired), also for a piped token (`--auth-token-stdin`;
   with a Basic or OAuth profile add `OPERATE_AUTH=bearer`, `auth` commands have no `--auth`); it
   never prints the token. `auth login` and `auth logout` do not apply: operate neither fetches nor
-  stores such tokens.
+  stores such tokens (a [token command](#token-commands) lets operate fetch them).
 - A 401 names the token's source and, for a JWT, the expiry, issuer and audience to check; a 403
   points to missing roles or scopes. operate never retries a rejected token.
 - The token is masked as `Bearer ***` in `--dry-run`, curl, `--verbose` and `config show` unless
@@ -240,6 +240,65 @@ operate config set ci --url https://camunda.example.com/engine-rest --auth beare
   the type). `operate ping` reports `"auth": "bearer"` and, for a JWT, `user` and
   `subject`. A bearer token together with an `Authorization` header is a configuration error, and
   operate warns when it sends the token over plain `http://` beyond `localhost`.
+
+## Token commands
+
+With short-lived tokens (a local Keycloak dev realm, corporate SSO tooling) someone has to fetch a
+new token before nearly every call. A token command does it for operate: a command line that prints
+a bearer token on the first line of its stdout. operate runs it when it needs a token.
+
+| Value         | Flag                         | Environment             | Profile (`auth` object) / `config set` option |
+| ------------- | ---------------------------- | ----------------------- | --------------------------------------------- |
+| type          | `--auth bearer`              | `OPERATE_AUTH`          | `type: "bearer"` / `--auth bearer`            |
+| token command | `--auth-token-command <cmd>` | `OPERATE_TOKEN_COMMAND` | `tokenCommand` / `--auth-token-command <cmd>` |
+
+```sh
+# a local Keycloak dev realm: the password grant of a test user (only for local test realms)
+operate config set dev --url http://localhost:8080/engine-rest --auth bearer --auth-token-command './scripts/dev-token.sh'
+operate auth status --profile dev
+operate task list --profile dev
+```
+
+- The token sources in order: `--auth-token-stdin`, `--auth-token-command`, `OPERATE_TOKEN`,
+  `OPERATE_TOKEN_COMMAND`, then the profile's `tokenEnv`, `tokenCommand` or `token` (one of them).
+  Like `OPERATE_TOKEN`, `--auth-token-command` and `OPERATE_TOKEN_COMMAND` select bearer auth
+  without an auth type; an explicit other type leaves them unused (`config show` says so).
+- The shell runs the command (`sh -c`, `cmd.exe` on Windows) with stdin closed, so it must not
+  wait for input; the request timeout (`--timeout`) bounds it. The first line of its stdout is the
+  token (a leading `Bearer ` is dropped, the rest must be a token, not a JSON answer: use e.g.
+  `jq -r .access_token`). A command of a project file runs in the directory of that file, every
+  other one in the working directory.
+- A JWT with `exp` is cached in the token directory (`command-<hash>.json`, mode `0600`, one per
+  command line and directory it runs in) and reused, also by later and parallel commands, until
+  60 s before it expires (at most half its lifetime), so a long `operate wait` keeps a valid token. An opaque token is fetched once per
+  call. After a 401 operate runs the command once more and retries with the new token before it
+  reports the error. A command that prints an expired JWT fails with `TOKEN_EXPIRED` (exit 4).
+- A command that fails, times out or prints no token fails with `LOGIN_FAILED` (exit 4); the
+  message quotes the end of its stderr. Error messages never show the token, nor the command line
+  (`operate config show` and `operate auth status` print it): keep secrets out of the command line
+  and let the command read them from a file or a variable.
+- `operate auth status` runs the command (or uses its cached token) and shows the command, where
+  it comes from and the claims of the token; `operate auth logout` removes the cached token.
+  `--dry-run` runs it too and notes a failure instead of failing.
+
+A token command in a [project file](configuration.md#project-file) runs code from the repository,
+and a variable it names for a secret (`tokenEnv`, `passwordEnv`, `clientSecretEnv`) goes to the
+engine URL the file names. operate therefore runs such a command and reads such a variable only
+after a person reviewed the file and ran `operate config trust` in the repository, which records the
+file with a hash of its content in `trusted.json` of the operate config directory (like direnv's
+`allow`); `config trust` lists the commands and variables it allows. Any change of the file outside
+`operate config ... --project` needs a new `operate config trust`; until then commands fail with a
+CONFIG error (exit 3) that says so. `operate config untrust` withdraws the trust. Token commands and
+variables of your own config file, of a file named with `--config` and of the environment need no
+trust.
+
+```sh
+operate config set dev --project --url http://localhost:8080/engine-rest --auth bearer --auth-token-command './scripts/dev-token.sh'
+operate config trust
+```
+
+Agents never run `operate config trust` themselves: on the CONFIG error about an untrusted project
+file they ask the user to review the file and trust it.
 
 ## Other headers
 

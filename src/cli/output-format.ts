@@ -5,10 +5,10 @@
  * raised before a command got that far use the same order (errors never fail on a bad value).
  */
 
-import { configFilePath, readConfigFile } from '../config/file.js';
 import { selectProfile, validateOutput } from '../config/resolve.js';
 import { ENV, OUTPUT_FORMATS, type OutputFormat } from '../config/types.js';
 import type { Runtime } from '../runtime.js';
+import { loadConfig } from './config-files.js';
 
 /** Table width when stdout is not a terminal, or one that reports no usable width. */
 const DEFAULT_WIDTH = 120;
@@ -54,12 +54,11 @@ export async function profileFormat(
   flags: ProfileFlags,
 ): Promise<OutputFormat | undefined> {
   try {
-    const path = configFilePath(runtime.env, runtime, flags.config);
-    const file = await readConfigFile(runtime.fs, path);
+    const { config } = await loadConfig(runtime, flags.config);
     const selected = selectProfile(
       flags.profile === undefined ? {} : { profile: flags.profile },
       runtime.env,
-      file,
+      config,
     );
     return selected.profile?.output;
   } catch {

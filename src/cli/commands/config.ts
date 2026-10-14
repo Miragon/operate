@@ -1,22 +1,20 @@
 /**
- * `operate config path|show|list|set|unset|use|delete` (design §3). The edits are the pure
- * functions of src/config/edit.ts; this module reads and writes the file (mode 0600) and prints.
+ * `operate config path|show|list|set|unset|use|delete|trust|untrust` (design §3, §22). The edits
+ * are the pure functions of src/config/edit.ts; this module reads and writes the file (the user's
+ * config file with mode 0600, with `--project` the project file, config-project.ts) and prints.
  */
 
 import type { Command } from 'commander';
 import { BEARER_UNSET_KEYS } from '../../config/bearer-edit.js';
 import {
   deleteProfile,
-  listProfiles,
   type ProfileChanges,
   setProfile,
-  showConfig,
   unsetProfileKeys,
   useProfile,
 } from '../../config/edit.js';
-import { readConfigFile, writeConfigFile } from '../../config/file.js';
 import { OAUTH_UNSET_KEYS } from '../../config/oauth-edit.js';
-import { findProfile, validateOutput } from '../../config/resolve.js';
+import { findProfile } from '../../config/resolve.js';
 import { AUTH_TYPES, type ConfigFile, OUTPUT_FORMATS, PROFILE_KEYS } from '../../config/types.js';
 import { checkVariableNames } from '../../config/variable.js';
 import { renderValue } from '../../output/render.js';
@@ -25,10 +23,8 @@ import { subcommand } from '../command.js';
 import { setOptionCompletion, setPositional } from '../completion-meta.js';
 import type { CliContext } from '../context.js';
 import { type DisplayFlags, displayOf } from '../display.js';
-import { addGlobalOptions, readGlobals } from '../globals.js';
+import { addGlobalOptions } from '../globals.js';
 import { collect } from '../options.js';
-import { maxWidthOf } from '../output-format.js';
-import { configPath, isExplicit, openSession } from '../session.js';
 import { addBearerOptions, bearerChanges } from './config-bearer.js';
 import {
   addOAuthOptions,
@@ -38,30 +34,26 @@ import {
   type SetSecrets,
   setNotices,
 } from './config-oauth.js';
-import { maskedView, profileView, showHeader, showRows } from './config-view.js';
+import {
+  changeTrust,
+  checkUserProfile,
+  editTarget,
+  overrideNotices,
+  PROJECT_OPTION,
+  readTarget,
+  stillDefined,
+  TRUST_COMMANDS,
+  writeTarget,
+} from './config-project.js';
+import {
+  configSubcommand,
+  FILE_OPTIONS,
+  OPTIONS_GROUP,
+  registerReadCommands,
+} from './config-read.js';
+import { profileView } from './config-view.js';
 import type { UtilityCommand } from './types.js';
 
-/**
- * Global options accepted by `config show`: the config related ones. Config commands inherit
- * `-h, --help` from the program, under the same "Options:" heading.
- */
-const SHOW_OPTIONS = [
-  'url',
-  'engine',
-  'profile',
-  'config',
-  'output',
-  'timeout',
-  'header',
-  'auth',
-  'auth-user',
-  'auth-password-stdin',
-  'auth-token-stdin',
-  'read-only',
-  'show-secrets',
-];
-/** Global options of the other config commands; `-o/--output` only chooses the output format. */
-const FILE_OPTIONS = ['config', 'output'];
 /** `config set` has no global `--output`: its `--output` is a profile value, `-o` the format. */
 const SET_OPTIONS = ['config'];
 
@@ -84,64 +76,35 @@ function write(context: CliContext, text: string): void {
   context.runtime.stdout.write(text);
 }
 
-async function printPath(command: Command, context: CliContext): Promise<void> {
-  const globals = readGlobals(command);
-  const view = await displayOf(context, globals);
-  const path = configPath(context.runtime, globals.config);
-  write(context, view.format === 'json' ? renderValue({ path }, view) : `${path}\n`);
+/**
+ * `--config`, `--project` and the output format of an edit command: `-o/--output`, on `config
+ * set` `-o` alone (its `--output` is the profile value).
+ */
+function editFlags(command: Command): DisplayFlags & { readonly project?: boolean } {
+  const { config, output, o, project } = command.opts<{
+    config?: string;
+    output?: string;
+    o?: string;
+    project?: boolean;
+  }>();
+  return compact({ config, output: command.name() === 'set' ? o : output, project });
 }
 
 /**
- * `-o` only chooses how `config show` prints: the values are what an operation command resolves
- * without it (OPERATE_OUTPUT, the profile's output or the default).
+ * Reads the target file, applies the edit and writes it back. `own`: the profile the edit needs
+ * in the user's file (`config unset|use|delete`); one that only the project file has asks for
+ * `--project`.
  */
-async function printConfig(command: Command, context: CliContext): Promise<void> {
-  const { output, ...globals } = readGlobals(command);
-  const display = output === undefined ? undefined : validateOutput(output);
-  const session = await openSession(context, globals);
-  const format = display ?? session.format;
-  context.state.format = format;
-  const view = maskedView(showConfig(session.config, session.configPath), globals.showSecrets);
-  const options = { format, pretty: session.pretty, maxWidth: maxWidthOf(context.runtime) };
-  write(
-    context,
-    format === 'json'
-      ? renderValue(view, options)
-      : `${showHeader(view)}${renderValue(showRows(view), options)}`,
-  );
-}
-
-async function printProfiles(command: Command, context: CliContext): Promise<void> {
-  const globals = readGlobals(command);
-  const view = await displayOf(context, globals);
-  const path = configPath(context.runtime, globals.config);
-  const file = await readConfigFile(
-    context.runtime.fs,
-    path,
-    isExplicit(context.runtime, globals.config),
-  );
-  write(context, renderValue(listProfiles(file), view));
-}
-
-/**
- * `--config` and the output format of an edit command: `-o/--output`, on `config set` `-o` alone
- * (its `--output` is the profile value).
- */
-function editFlags(command: Command): DisplayFlags {
-  const { config, output, o } = command.opts<{ config?: string; output?: string; o?: string }>();
-  return compact({ config, output: command.name() === 'set' ? o : output });
-}
-
-/** Reads the config file, applies the edit and writes it back with mode 0600. */
-async function editConfig(command: Command, context: CliContext, edit: Edit) {
+async function editConfig(command: Command, context: CliContext, edit: Edit, own?: string) {
   const { runtime } = context;
   const flags = editFlags(command);
   const view = await displayOf(context, flags);
-  const path = configPath(runtime, flags.config);
-  const previous = await readConfigFile(runtime.fs, path);
+  const target = await editTarget(runtime, flags);
+  const { file: previous, trusted } = await readTarget(runtime, target);
+  if (own !== undefined) checkUserProfile(target, previous, own);
   const file = edit(previous);
-  await writeConfigFile(runtime.fs, path, file);
-  return { file, previous, path, view };
+  await writeTarget(runtime, target, file, trusted);
+  return { file, previous, path: target.path, view, target };
 }
 
 /**
@@ -168,10 +131,24 @@ function profileChanges(command: Command, secrets: SetSecrets): ProfileChanges {
   });
 }
 
-/** Applies the edit and prints the profile; resolves to the file before and after, and its path. */
-async function editProfile(name: string, command: Command, context: CliContext, edit: Edit) {
-  const edited = await editConfig(command, context, edit);
+/** An edit of profile `name`; `own`: the profile must be in the edited file (see editConfig). */
+interface ProfileEdit {
+  readonly name: string;
+  readonly edit: Edit;
+  readonly own?: boolean;
+}
+
+/**
+ * Applies the edit and prints the profile; resolves to the file before and after, and its path.
+ * Notices say when the user's profile now overrides a project profile or default.
+ */
+async function editProfile(command: Command, context: CliContext, change: ProfileEdit) {
+  const { name, edit, own } = change;
+  const edited = await editConfig(command, context, edit, own === true ? name : undefined);
   write(context, renderValue(profileView(edited.file, name, context.runtime.env), edited.view));
+  for (const notice of overrideNotices(edited.target, name, edited.previous, edited.file)) {
+    context.runtime.stderr.write(`${notice}\n`);
+  }
   return edited;
 }
 
@@ -184,49 +161,32 @@ async function setProfileFrom(name: string, command: Command, context: CliContex
   const secrets = await readSetSecrets(command, context);
   const changes = profileChanges(command, secrets);
   checkVariableNames(changes, runtime.env);
-  const { file, previous, path } = await editProfile(name, command, context, (current) =>
-    setProfile(current, name, changes),
-  );
+  const { file, previous, path, target } = await editProfile(command, context, {
+    name,
+    edit: (current) => setProfile(current, name, changes),
+  });
   const before = findProfile(previous, name);
   const after = findProfile(file, name);
   const outcome = { name, path, before, after, secrets, changes, env: runtime.env };
-  for (const notice of setNotices(outcome)) runtime.stderr.write(`${notice}\n`);
+  const created =
+    target.project && previous === undefined
+      ? [`Created the project file ${path}; commit it to share its profiles.`]
+      : [];
+  for (const notice of [...created, ...setNotices(outcome)]) runtime.stderr.write(`${notice}\n`);
 }
 
 async function removeProfile(name: string, command: Command, context: CliContext): Promise<void> {
-  const { path } = await editConfig(command, context, (file) => deleteProfile(file, name));
+  const edit = (file: ConfigFile | undefined) => deleteProfile(file, name);
+  const { path, target } = await editConfig(command, context, edit, name);
   context.runtime.stderr.write(`Deleted profile "${name}" from ${path}\n`);
-  await removeLogin(name, context);
+  if (!(await stillDefined(name, target, context.runtime))) await removeLogin(name, context);
 }
 
-/** Heading of the own options of config commands (commander's default). */
-const OPTIONS_GROUP = 'Options:';
-
-function configSubcommand(parent: Command, name: string, description: string, options: string[]) {
-  return addGlobalOptions(
-    subcommand(parent, name).description(description),
-    options,
-    OPTIONS_GROUP,
-  );
-}
-
-function registerReadCommands(config: Command, context: CliContext): void {
-  const path = configSubcommand(
-    config,
-    'path',
-    'Print the location of the config file',
-    FILE_OPTIONS,
-  );
-  path.action(() => printPath(path, context));
-  const show = configSubcommand(
-    config,
-    'show',
-    'Print the effective configuration and where each value comes from; header values, the password, the client secret and the bearer token are masked unless --show-secrets. -o only formats this output: the values are what an operation command resolves without it.',
-    SHOW_OPTIONS,
-  );
-  show.action(() => printConfig(show, context));
-  const list = configSubcommand(config, 'list', 'List the profiles', FILE_OPTIONS);
-  list.action(() => printProfiles(list, context));
+function registerTrustCommands(config: Command, context: CliContext): void {
+  for (const [name, description, trust] of TRUST_COMMANDS) {
+    const command = configSubcommand(config, name, description, ['output']);
+    command.action(() => changeTrust(command, context, trust));
+  }
 }
 
 /** Fixed values of the options of `config set`, for shell completion. */
@@ -251,7 +211,7 @@ function completeProfiles(command: Command, rest?: readonly string[]): Command {
 function registerSet(config: Command, context: CliContext): void {
   const set = subcommand(config, 'set')
     .description(
-      'Create or update a profile; only the given values change. The first profile becomes the default. --output is the output format stored in the profile; -o <format> chooses how the profile is printed. Basic auth: --auth basic --auth-user <name> --auth-password-env <VAR> keeps the password in an environment variable. OAuth: --auth oauth --oauth-issuer <url> --oauth-client-id <id>, then operate auth login --profile <profile> in a terminal. A bearer token from elsewhere: --auth bearer --auth-token-env <VAR>.',
+      'Create or update a profile; only the given values change. The first profile becomes the default. --output is the output format stored in the profile; -o <format> chooses how the profile is printed. Basic auth: --auth basic --auth-user <name> --auth-password-env <VAR> keeps the password in an environment variable. OAuth: --auth oauth --oauth-issuer <url> --oauth-client-id <id>, then operate auth login --profile <profile> in a terminal. A bearer token from elsewhere: --auth bearer --auth-token-env <VAR>, or --auth-token-command <cmd> for a command that prints it. --project writes the project file of the repository instead of your config file.',
     )
     .argument('<profile>', 'Profile name, e.g. local or prod-eu')
     .option('--url <url>', 'REST API root, e.g. http://localhost:8080/engine-rest')
@@ -277,6 +237,7 @@ function registerSet(config: Command, context: CliContext): void {
     .option('--read-only', 'Refuse every operation that is not a read')
     .option('--no-read-only', 'Allow operations that change the engine state')
     .option('--default', 'Make this the default profile')
+    .option(...PROJECT_OPTION)
     .option('-o <format>', 'Output format of the printed profile: json or table');
   addGlobalOptions(set, SET_OPTIONS, OPTIONS_GROUP);
   completeProfiles(set);
@@ -288,7 +249,7 @@ function registerEditCommands(config: Command, context: CliContext): void {
   const unset = configSubcommand(
     config,
     'unset',
-    'Remove values from a profile; auth removes all auth settings, an OAuth setting only itself, token (or tokenEnv) the bearer token',
+    'Remove values from a profile; auth removes all auth settings, an OAuth setting only itself, token (or tokenEnv, tokenCommand) the bearer token',
     FILE_OPTIONS,
   )
     .argument('<profile>', 'Profile name')
@@ -296,17 +257,23 @@ function registerEditCommands(config: Command, context: CliContext): void {
       '<keys...>',
       `Keys to remove: ${PROFILE_KEYS.join(', ')}; OAuth settings: ${OAUTH_UNSET_KEYS.join(', ')}; bearer token: ${BEARER_UNSET_KEYS.join(', ')}`,
     );
-  completeProfiles(unset, [...PROFILE_KEYS, ...OAUTH_UNSET_KEYS, ...BEARER_UNSET_KEYS]);
+  completeProfiles(unset.option(...PROJECT_OPTION), [
+    ...PROFILE_KEYS,
+    ...OAUTH_UNSET_KEYS,
+    ...BEARER_UNSET_KEYS,
+  ]);
   unset.action(async (name: string, keys: string[]) => {
-    await editProfile(name, unset, context, (file) => unsetProfileKeys(file, name, keys));
+    const edit = (file: ConfigFile | undefined) => unsetProfileKeys(file, name, keys);
+    await editProfile(unset, context, { name, edit, own: true });
   });
   const use = configSubcommand(config, 'use', 'Make a profile the default', FILE_OPTIONS);
-  completeProfiles(use.argument('<profile>', 'Profile name'));
+  completeProfiles(use.argument('<profile>', 'Profile name').option(...PROJECT_OPTION));
   use.action(async (name: string) => {
-    await editProfile(name, use, context, (file) => useProfile(file, name));
+    const edit = (file: ConfigFile | undefined) => useProfile(file, name);
+    await editProfile(use, context, { name, edit, own: true });
   });
   const remove = configSubcommand(config, 'delete', 'Delete a profile', FILE_OPTIONS);
-  completeProfiles(remove.argument('<profile>', 'Profile name'));
+  completeProfiles(remove.argument('<profile>', 'Profile name').option(...PROJECT_OPTION));
   remove.action((name: string) => removeProfile(name, remove, context));
 }
 
@@ -317,9 +284,10 @@ export const configCommand: UtilityCommand = {
     const config = subcommand(program, 'config')
       .summary('Manage the config file and its profiles')
       .description(
-        'Manage the config file and its profiles. The file is written with mode 0600; values are validated before they are stored.',
+        'Manage the config file and its profiles. The file is written with mode 0600; values are validated before they are stored. A repository can share profiles in a project file (.operate.json, written with --project); your own profiles of the same name override them.',
       );
     registerReadCommands(config, context);
     registerEditCommands(config, context);
+    registerTrustCommands(config, context);
   },
 };

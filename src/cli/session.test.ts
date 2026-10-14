@@ -2,13 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { CONFIG_PATH, fakeRuntime } from '../../test/support/fake-runtime.js';
 import { loadCatalog } from '../catalog/catalog.js';
 import type { ResolvedConfig } from '../config/types.js';
+import { configPath, isExplicit } from './config-files.js';
 import type { CliContext } from './context.js';
 import type { GlobalOptions } from './globals.js';
 import {
   clientOf,
-  configPath,
   guardsOf,
-  isExplicit,
   openSession,
   readOnlySource,
   renderOptionsOf,

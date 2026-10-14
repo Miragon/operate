@@ -1,8 +1,9 @@
 /**
  * OAuth fixtures for unit tests: resolved configurations, the dependencies of the OAuth modules
- * on a fake runtime, cached logins and the paths of the token cache.
+ * (and of every auth provider) on a fake runtime, cached logins and the paths of the token cache.
  */
 
+import type { AuthDeps } from '../../src/auth/index.js';
 import type { CachedLogin, LoginDeps, OAuthDeps } from '../../src/auth/oauth/types.js';
 import type { OAuthConfig } from '../../src/config/types.js';
 import type { TraceEvent } from '../../src/http/types.js';
@@ -54,6 +55,21 @@ export function oauthDeps(
     timeoutMs: 30_000,
     ...(events === undefined ? {} : { trace: (event: TraceEvent) => events.push(event) }),
     ...rest,
+  };
+}
+
+/**
+ * `oauthDeps` plus the fake shell and its working directory: what every auth provider gets (token
+ * commands run there).
+ */
+export function authDeps(
+  runtime: FakeRuntime,
+  overrides: Partial<AuthDeps> & { readonly events?: TraceEvent[] } = {},
+): AuthDeps {
+  return {
+    runCommand: (command, options) => runtime.runCommand(command, options),
+    cwd: runtime.cwd,
+    ...oauthDeps(runtime, overrides),
   };
 }
 

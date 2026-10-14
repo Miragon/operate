@@ -4,13 +4,10 @@
  */
 
 import type { MultipartPartPreview, RequestPreview } from '../operation/result.js';
-import { isRecord, stringifyJson } from '../util.js';
+import { isRecord, isSecretHeader, stringifyJson } from '../util.js';
 
 /** What a masked secret shows instead of its value. */
 export const MASK = '***';
-
-const SECRET_HEADERS = new Set(['authorization', 'proxy-authorization', 'cookie', 'set-cookie']);
-const SECRET_NAME_PARTS = ['token', 'secret', 'password', 'api-key', 'apikey'];
 
 /** Well-known auth schemes that stay visible in front of a masked credential. */
 const AUTH_SCHEME =
@@ -43,11 +40,6 @@ const FORM_SPECIAL = /^[@<"\t-\r ]|;|[\t-\r ]$/;
 
 /** `-F name=@file` file names that must be double-quoted: separators, quotes and outer blanks. */
 const FORM_FILE_SPECIAL = /[;,"\\]|^[\t-\r ]|[\t-\r ]$/;
-
-function isSecretHeader(name: string): boolean {
-  const lower = name.toLowerCase();
-  return SECRET_HEADERS.has(lower) || SECRET_NAME_PARTS.some((part) => lower.includes(part));
-}
 
 /** `Bearer abc` → `Bearer ***`; values without a known auth scheme → `***`. */
 function maskSecret(value: string): string {

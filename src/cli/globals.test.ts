@@ -53,6 +53,7 @@ describe('global options', () => {
       '--auth-user <name>',
       '--auth-password-stdin',
       '--auth-token-stdin',
+      '--auth-token-command <cmd>',
       '--verbose',
       '--out-file <path>',
       '--show-secrets',

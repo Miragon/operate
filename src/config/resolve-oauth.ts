@@ -27,7 +27,7 @@ import {
   type SelectedProfile,
   type Source,
 } from './types.js';
-import { CLIENT_SECRET_VARIABLE, unsetVariable } from './variable.js';
+import { checkTrustedVariable, CLIENT_SECRET_VARIABLE, unsetVariable } from './variable.js';
 
 export interface OAuthContext {
   readonly flags: ConfigFlags;
@@ -162,10 +162,12 @@ function fromEnvOrProfile(
 }
 
 /**
- * The variable named by auth.clientSecretEnv; it must be set. Its name is repeated only in the
- * usual form (`unsetVariable`): a secret typed in its place must not show up in the error.
+ * The variable named by auth.clientSecretEnv; it must be set (and, named by a project file,
+ * trusted). Its name is repeated only in the usual form (`unsetVariable`): a secret typed in its
+ * place must not show up in the error.
  */
 function secretFromVariable(variable: string, context: OAuthContext): Found<string> {
+  checkTrustedVariable(variable, context.selected, CLIENT_SECRET_VARIABLE);
   const name = context.selected.name ?? '';
   const value = present(context.env[variable]);
   if (value === undefined) throw unsetVariable(variable, name, CLIENT_SECRET_VARIABLE);

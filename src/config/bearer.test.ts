@@ -110,11 +110,22 @@ describe('profileAuthProblem with bearer keys', () => {
     expect(profileAuthProblem('p', { type: 'bearer', token: 7 })).toBe(
       'profile "p" has an invalid auth.token (expected a non-empty string)',
     );
+    for (const tokenCommand of ['a\nb', ' ', 7]) {
+      expect(profileAuthProblem('p', { type: 'bearer', tokenCommand })).toBe(
+        'profile "p" has an invalid auth.tokenCommand (expected a command line that prints the token, one line, e.g. "./scripts/token.sh dev")',
+      );
+    }
+    expect(profileAuthProblem('p', { type: 'bearer', tokenCommand: './t.sh' })).toBeUndefined();
   });
 
   it('refuses both token sources', () => {
     expect(profileAuthProblem('p', { type: 'bearer', token: 'abc', tokenEnv: 'X' })).toBe(
-      'profile "p" sets both auth.token and auth.tokenEnv; keep one (tokenEnv is recommended)',
+      'profile "p" sets both auth.tokenEnv and auth.token; keep one (tokenEnv or tokenCommand is recommended)',
+    );
+    expect(
+      profileAuthProblem('p', { type: 'bearer', token: 'abc', tokenEnv: 'X', tokenCommand: 'c' }),
+    ).toBe(
+      'profile "p" sets auth.tokenEnv, auth.token and auth.tokenCommand; keep one (tokenEnv or tokenCommand is recommended)',
     );
   });
 

@@ -1,8 +1,9 @@
 /**
- * The bearer token part of `operate config set` (design §18): `--auth-token-env <VAR>`
+ * The bearer token part of `operate config set` (design §18, §23): `--auth-token-env <VAR>`
  * (recommended: only the name of the variable is stored; `checkVariableNames` of
- * src/config/variable.ts refuses a token given in its place) and `--auth-token-stdin` (the token
- * itself, in plain text in the 0600 file), and the warning after storing a token.
+ * src/config/variable.ts refuses a token given in its place), `--auth-token-command <command>`
+ * (the command that prints the token) and `--auth-token-stdin` (the token itself, in plain text in
+ * the 0600 file), and the warning after storing a token.
  */
 
 import type { Command } from 'commander';
@@ -24,6 +25,10 @@ export function addBearerOptions(command: Command): Command {
       'Name of the environment variable that holds the bearer token (recommended)',
     )
     .option(
+      '--auth-token-command <cmd>',
+      'Command line that prints the bearer token; operate runs it when it needs a token (in a project file: once the file is trusted)',
+    )
+    .option(
       '--auth-token-stdin',
       'Store the bearer token read from the first line of stdin (plain text in the file; discouraged)',
     );
@@ -31,8 +36,11 @@ export function addBearerOptions(command: Command): Command {
 
 /** The bearer changes of `config set`; `token` is what --auth-token-stdin read. */
 export function bearerChanges(command: Command, token: string | undefined): BearerChanges {
-  const { authTokenEnv } = command.opts<{ readonly authTokenEnv?: string }>();
-  return compact({ authTokenEnv, authToken: token });
+  const { authTokenEnv, authTokenCommand } = command.opts<{
+    readonly authTokenEnv?: string;
+    readonly authTokenCommand?: string;
+  }>();
+  return compact({ authTokenEnv, authTokenCommand, authToken: token });
 }
 
 /** The warning after storing a token read from stdin: it is plain text in the file. */

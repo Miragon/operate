@@ -51,14 +51,14 @@ parse every query flag of every operation through the real program.
 ## Architecture
 
 ```text
-src/bin/        entry point and the Node runtime (I/O, timers, loopback server, browser, lock file)
+src/bin/        entry point and the Node runtime (I/O, timers, loopback server, browser, lock file, shell)
 src/cli/        commander wiring and the utility commands; the only layer that imports commander
 src/operation/  input building, variables, dates, guards, request building, execution, pagination
 src/workflow/   the workflow commands: engine access, instance views, waiting, plans (pure)
 src/docs/       commands, describe, examples, workflow docs, completion and the agent guide (pure)
 src/catalog/    catalog access, schema helpers, body validation (pure)
-src/config/     config resolution and profile editing (pure), file store
-src/auth/       auth providers (none, basic, bearer with JWT expiry, OAuth with token cache; pure)
+src/config/     config resolution and profile editing (pure), file store, project files, trust store
+src/auth/       auth providers (none, basic, bearer with JWT expiry, token commands, OAuth; pure)
 src/http/       fetch based HTTP client and error mapping
 src/output/     JSON, tables, field projection, errors, secret masking (pure)
 scripts/        catalog generator, standalone executable build, packaging smoke test

@@ -340,7 +340,15 @@ describe('config show and list with OAuth', () => {
   it('lists oauth profiles', async () => {
     const result = await cli(['config', 'list'], { files: { [CONFIG_PATH]: oauthProfiles() } });
     expect(JSON.parse(result.stdout)).toEqual([
-      { name: 'p', default: true, url: null, engine: null, auth: 'oauth', readOnly: false },
+      {
+        name: 'p',
+        default: true,
+        url: null,
+        engine: null,
+        auth: 'oauth',
+        readOnly: false,
+        scope: 'user',
+      },
     ]);
   });
 });
@@ -370,7 +378,7 @@ describe('config unset with OAuth settings', () => {
       files: { [CONFIG_PATH]: oauthProfiles() },
     });
     expect(errorOf(unknown.stderr).hint).toBe(
-      'Valid keys: url, engine, auth, output, timeout, headers, readOnly; OAuth settings: issuer, endpoints, clientId, clientSecret, scopes, audience, redirectPort; bearer token: token, tokenEnv.',
+      'Valid keys: url, engine, auth, output, timeout, headers, readOnly; OAuth settings: issuer, endpoints, clientId, clientSecret, scopes, audience, redirectPort; bearer token: token, tokenEnv, tokenCommand.',
     );
   });
 });

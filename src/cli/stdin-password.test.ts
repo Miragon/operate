@@ -78,6 +78,20 @@ describe('checkStdinUse', () => {
     }).not.toThrow();
   });
 
+  it('refuses a piped token together with a token command, before reading stdin', async () => {
+    const error = await usage(
+      Promise.resolve().then(() => {
+        checkStdinUse({ ...use(false, true, false), tokenCommand: true });
+      }),
+    );
+    expect(error.message).toBe(
+      '--auth-token-stdin and --auth-token-command both give the bearer token',
+    );
+    expect(() => {
+      checkStdinUse({ ...use(false, false, false), tokenCommand: true });
+    }).not.toThrow();
+  });
+
   it('refuses the password and the body from stdin together', async () => {
     const error = await usage(
       Promise.resolve().then(() => {

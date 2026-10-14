@@ -130,8 +130,8 @@ Details: [installation](docs/installation.md).
 - [Workflow commands](docs/workflow-commands.md): inspect, wait, advance, retry, deploy, status
 - [Command structure](docs/commands.md): names, arguments, variables, request bodies, files, dates
 - [Output and errors](docs/output-and-errors.md): formats, previews, error fields, exit codes
-- [Configuration](docs/configuration.md): options, environment variables, config file, profiles
-- [Authentication](docs/authentication.md): Basic auth, OAuth logins, bearer tokens, other headers
+- [Configuration](docs/configuration.md): options, environment variables, config and project files, profiles
+- [Authentication](docs/authentication.md): Basic auth, OAuth logins, bearer tokens, token commands, other headers
 - [Safety](docs/safety.md): previews, confirmation, read-only mode
 - [Recipes](docs/recipes.md): command lines for everyday tasks
 - [Using operate from AI agents](docs/agents.md): the guide, the Claude Code plugin and skill

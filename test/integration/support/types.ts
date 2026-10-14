@@ -27,6 +27,10 @@ export interface BearerStatusOutput {
   readonly source: string;
   /** `OPERATE_TOKEN`, `--auth-token-stdin`, `IT_TOKEN (auth.tokenEnv of profile "p")`, ... */
   readonly origin: string;
+  /** The token command that printed the token (design §23), else null. */
+  readonly command: string | null;
+  /** The token of the command came from operate's cache. */
+  readonly cached: boolean;
   readonly format: 'jwt' | 'opaque';
   /** `sub` of a JWT. */
   readonly subject: string | null;

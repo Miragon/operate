@@ -37,17 +37,18 @@ export function explicitConfigPath(env: Env, flag?: string): string | undefined 
   return given(flag) ?? given(env[ENV.config]);
 }
 
-interface Location {
+export interface Location {
   readonly homedir: string;
   readonly platform: string;
 }
 
-function pathModule(platform: string): typeof posix {
+/** The path functions of the platform (win32 or posix). */
+export function pathModule(platform: string): typeof posix {
   return platform === 'win32' ? win32 : posix;
 }
 
 /** The platform's operate config directory (never derived from `--config` / OPERATE_CONFIG). */
-function operateDirectory(env: Env, location: Location): string {
+export function operateDirectory(env: Env, location: Location): string {
   if (location.platform === 'win32') {
     const appData =
       absoluteDir(env.APPDATA, win32) ?? win32.join(location.homedir, 'AppData', 'Roaming');
@@ -278,15 +279,25 @@ export async function readConfigFile(
   return parseConfigFile(new TextDecoder().decode(data), path);
 }
 
-/** Writes the file with mode 0600 (it may contain credentials: headers, a Basic auth password). */
+/** The text of a config file: its default profile and profiles, indented, with a final newline. */
+export function serializeConfigFile(config: ConfigFile): string {
+  const { defaultProfile, profiles } = config;
+  return `${JSON.stringify({ ...(defaultProfile === undefined ? {} : { defaultProfile }), profiles }, null, 2)}\n`;
+}
+
+/**
+ * Writes the file atomically with mode 0600 (it may contain credentials: headers, a Basic auth
+ * password); a project file, which holds no secrets and is shared, with 0644.
+ */
 export async function writeConfigFile(
   fs: FileSystem,
   path: string,
   config: ConfigFile,
+  mode = 0o600,
 ): Promise<void> {
   try {
     await fs.mkdir(dirname(path));
-    await fs.writeFile(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+    await fs.writeFile(path, serializeConfigFile(config), { mode });
   } catch (error) {
     throw ioError('write', path, error);
   }

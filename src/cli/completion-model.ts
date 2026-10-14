@@ -7,7 +7,6 @@
 
 import type { Command, Option } from 'commander';
 import { findGroup } from '../catalog/catalog.js';
-import { configFilePath, readConfigFile } from '../config/file.js';
 import {
   type CompletionCommand,
   type CompletionContext,
@@ -18,6 +17,7 @@ import {
 import { compact } from '../util.js';
 import { globalFromArgv, globalOptionLength } from './argv.js';
 import { optionCompletion, positionalOf } from './completion-meta.js';
+import { loadConfig } from './config-files.js';
 import type { CliContext } from './context.js';
 import { globalOptionObjects } from './globals.js';
 import { createProgram } from './program.js';
@@ -95,13 +95,14 @@ function pathWords(words: readonly string[]): string[] {
   return words.slice(index);
 }
 
-/** Profile names of the config file (`--config`, OPERATE_CONFIG), best effort. */
+/**
+ * Profile names of the config file (`--config`, OPERATE_CONFIG) or of the project file and the
+ * user's config file, best effort.
+ */
 async function profileNames(context: CliContext, words: readonly string[]): Promise<string[]> {
   try {
-    const { runtime } = context;
-    const path = configFilePath(runtime.env, runtime, globalFromArgv(words, 'config'));
-    const file = await readConfigFile(runtime.fs, path);
-    return Object.keys(file?.profiles ?? {}).sort();
+    const { config } = await loadConfig(context.runtime, globalFromArgv(words, 'config'));
+    return Object.keys(config?.profiles ?? {}).sort();
   } catch {
     return [];
   }

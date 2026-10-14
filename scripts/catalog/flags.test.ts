@@ -73,6 +73,7 @@ describe('flag lists', () => {
       'auth-user',
       'auth-password-stdin',
       'auth-token-stdin',
+      'auth-token-command',
       'verbose',
       'out-file',
       'show-secrets',

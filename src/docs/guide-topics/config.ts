@@ -1,11 +1,11 @@
-/** `operate guide config`: profiles, the environment, named engines and headers. */
+/** `operate guide config`: profiles, project files, the environment, named engines and headers. */
 
 import type { GuideTopic } from './topic.js';
 
 export const CONFIG_TOPIC: GuideTopic = {
   name: 'config',
-  summary: 'Profiles, config file, environment variables, named engines, headers, timeouts',
-  text: `# operate guide config: profiles, environment and engines
+  summary: 'Profiles, config and project files, environment variables, engines, headers, timeouts',
+  text: `# operate guide config: profiles, project files, environment and engines
 
 Every setting is resolved on its own: flag > environment variable > profile > default.
 \`operate config show\` prints the values an operation command resolves and where each one comes
@@ -36,11 +36,32 @@ operate config delete prod
 - Use read-only profiles (\`--read-only\`) for production engines: they refuse every command whose
   effect is not \`read\`. Use only \`--config\` files you trust.
 
+## Project file
+
+A repository can share its profiles in \`.operate.json\`, looked up from the working directory up to
+the repository root. They join the profiles of your config file: on a name clash your own profile
+wins as a whole, and the project's \`defaultProfile\` wins inside the repository. A project file
+holds no secrets, only where they come from (\`passwordEnv\`, \`tokenEnv\`, a token command).
+
+\`\`\`sh
+operate config set svc --project --url http://localhost:8112/engine-rest/svc --default
+operate config list
+operate config path --project
+\`\`\`
+
+- \`config set|unset|use|delete --project\` write the project file (a new one goes to the repository
+  root); without \`--project\` they write your own file. \`config list\` shows the \`scope\` of each
+  profile (\`user\` or \`project\`), \`config show\` the file of the selected one.
+- \`--config\` and \`OPERATE_CONFIG\` name one config file and leave the project file out.
+- Its token commands run, and the variables it names for secrets are read, only after a person
+  ran \`operate config trust\`: \`operate guide auth\`.
+
 ## Environment
 
 - Variables: \`OPERATE_URL\`, \`OPERATE_ENGINE\`, \`OPERATE_PROFILE\`, \`OPERATE_CONFIG\`,
   \`OPERATE_OUTPUT\`, \`OPERATE_TIMEOUT\`, \`OPERATE_READ_ONLY\`, \`OPERATE_AUTH\`, \`OPERATE_USERNAME\`,
-  \`OPERATE_PASSWORD\`, \`OPERATE_TOKEN\`, \`OPERATE_OAUTH_*\`, \`OPERATE_HEADERS\`.
+  \`OPERATE_PASSWORD\`, \`OPERATE_TOKEN\`, \`OPERATE_TOKEN_COMMAND\`, \`OPERATE_OAUTH_*\`,
+  \`OPERATE_HEADERS\`.
 - Each value is resolved on its own, so with \`--url\` or \`OPERATE_URL\` set the credentials of the
   profile go to that URL: check \`operate config show\` when a shell has a leftover \`OPERATE_URL\`.
 

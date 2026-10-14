@@ -11,6 +11,7 @@
 import { configError } from './config-error.js';
 import type { Env } from './pick.js';
 import { ENV_NAME } from './syntax.js';
+import type { SelectedProfile } from './types.js';
 
 /** A secret that a profile keeps in an environment variable, as messages name it. */
 export interface SecretVariable {
@@ -161,4 +162,40 @@ export function unsetVariable(name: string, profile: string, variable: SecretVar
     `The ${noun} variable named by auth.${key} of profile "${profile}" is not set or empty`,
     `Its name is not in the usual upper-case form, so it is not repeated: it may be a ${noun} stored by mistake. Check auth.${key} in the config file (\`operate config path\`), or ${another}.`,
   );
+}
+
+/**
+ * The CONFIG error for the variable `name` that auth.passwordEnv (clientSecretEnv, tokenEnv) of
+ * `profile` names in the project file `projectFile`, which `operate config trust` does not cover
+ * (design §23). The name is repeated only in the usual form.
+ */
+function untrustedVariable(
+  name: string,
+  profile: string,
+  variable: SecretVariable,
+  projectFile: string,
+) {
+  const { key, noun } = variable;
+  const named = isConventionalVariable(name)
+    ? `The ${noun} variable ${name} (auth.${key} of profile "${profile}")`
+    : `The ${noun} variable named by auth.${key} of profile "${profile}"`;
+  return configError(
+    `${named} comes from the project file ${projectFile}, which is not trusted`,
+    'A project file decides where commands send credentials, so operate reads the variables it names for secrets only after a person reviewed the file and ran `operate config trust` in the repository (again after every change of the file): otherwise a repository could send any variable of your environment to its engine. An agent asks the user to do that and never trusts a file itself.',
+  );
+}
+
+/**
+ * Refuses to read the variable `name` that the selected profile names for a secret when the
+ * profile comes from a project file that `operate config trust` does not cover (CONFIG). Profiles
+ * of the user's config file pass.
+ */
+export function checkTrustedVariable(
+  name: string,
+  selected: SelectedProfile,
+  variable: SecretVariable,
+): void {
+  const { project } = selected;
+  if (project === undefined || project.trusted) return;
+  throw untrustedVariable(name, selected.name, variable, project.path);
 }
