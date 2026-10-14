@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.0](https://github.com/Miragon/operate/compare/v0.6.0...v0.7.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* `--auth-token-command`, `auth.tokenCommand` (also `config set --auth-token-command`) and `operate config trust|untrust` are removed: export OPERATE_TOKEN_COMMAND instead. A config file with auth.tokenCommand and a project file with a credential or a variable named for one (tokenEnv, passwordEnv, clientSecretEnv) are refused.
+
+### Features
+
+* take the token command only from OPERATE_TOKEN_COMMAND and drop project file trust ([#32](https://github.com/Miragon/operate/issues/32)) ([6e6a88c](https://github.com/Miragon/operate/commit/6e6a88c1655d7df4c43e266e196deaa1620b87cc))
+
 ## [0.6.0](https://github.com/Miragon/operate/compare/v0.5.0...v0.6.0) (2026-10-14)
 
 
