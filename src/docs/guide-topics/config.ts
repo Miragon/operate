@@ -40,8 +40,10 @@ operate config delete prod
 
 A repository can share its profiles in \`.operate.json\`, looked up from the working directory up to
 the repository root. They join the profiles of your config file: on a name clash your own profile
-wins as a whole, and the project's \`defaultProfile\` wins inside the repository. A project file
-holds no secrets, only where they come from (\`passwordEnv\`, \`tokenEnv\`, a token command).
+wins as a whole, and the project's \`defaultProfile\` (one of its own profiles) wins inside the
+repository. A project file names engines, never credentials: they come from the environment
+(\`OPERATE_TOKEN\`, \`OPERATE_TOKEN_COMMAND\`, \`OPERATE_PASSWORD\`, \`OPERATE_OAUTH_CLIENT_SECRET\`)
+or a profile of the same name in your own file.
 
 \`\`\`sh
 operate config set svc --project --url http://localhost:8112/engine-rest/svc --default
@@ -53,8 +55,6 @@ operate config path --project
   root); without \`--project\` they write your own file. \`config list\` shows the \`scope\` of each
   profile (\`user\` or \`project\`), \`config show\` the file of the selected one.
 - \`--config\` and \`OPERATE_CONFIG\` name one config file and leave the project file out.
-- Its token commands run, and the variables it names for secrets are read, only after a person
-  ran \`operate config trust\`: \`operate guide auth\`.
 
 ## Environment
 

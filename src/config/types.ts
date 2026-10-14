@@ -10,9 +10,8 @@ export type AuthType = (typeof AUTH_TYPES)[number];
  * Auth settings of a profile as stored in the config file. Without `type`, a `username` selects
  * Basic auth; OAuth needs `type: "oauth"` (it is never implied), a stored bearer token `type:
  * "bearer"`. `passwordEnv` / `clientSecretEnv` / `tokenEnv` name environment variables holding the
- * secret; a literal `password` / `clientSecret` / `token` is possible but discouraged.
- * `tokenCommand` is a command line that prints a bearer token (design §23). A profile never mixes
- * the keys of Basic auth, OAuth and bearer tokens.
+ * secret; a literal `password` / `clientSecret` / `token` is possible but discouraged. A profile
+ * never mixes the keys of Basic auth, OAuth and bearer tokens.
  */
 export interface ProfileAuth {
   readonly type?: AuthType;
@@ -30,7 +29,6 @@ export interface ProfileAuth {
   readonly redirectPort?: number;
   readonly tokenEnv?: string;
   readonly token?: string;
-  readonly tokenCommand?: string;
 }
 
 export const BASIC_AUTH_KEYS = [
@@ -51,14 +49,10 @@ export const OAUTH_AUTH_KEYS = [
   'redirectPort',
 ] as const satisfies readonly (keyof ProfileAuth)[];
 
-/**
- * Keys of a stored bearer token (design §18, §23): the name of its variable, the token itself, or
- * the command that prints it.
- */
+/** Keys of a stored bearer token (design §18): the name of its variable, or the token itself. */
 export const BEARER_AUTH_KEYS = [
   'tokenEnv',
   'token',
-  'tokenCommand',
 ] as const satisfies readonly (keyof ProfileAuth)[];
 
 /** Keys of a profile's auth object, in the order they are written to the config file. */
@@ -109,21 +103,6 @@ export interface OAuthConfig {
 }
 
 /**
- * A command line that prints a bearer token (design §23): `--auth-token-command`,
- * OPERATE_TOKEN_COMMAND or auth.tokenCommand. operate runs it when it needs a token.
- */
-export interface TokenCommand {
-  /** The command line, run by the shell. */
-  readonly line: string;
-  /** The directory it runs in: the project file's directory; else the current one. */
-  readonly cwd?: string;
-  /** The project file it comes from: it runs only while that file is trusted. */
-  readonly projectFile?: string;
-  /** False for a command of a project file that `operate config trust` does not cover. */
-  readonly trusted: boolean;
-}
-
-/**
  * A bearer token obtained outside operate (design §18): sent as `Authorization: Bearer <token>`.
  * A token given as such is never refreshed and never stored; a token command (design §23) is run
  * again when its token expires or is rejected.
@@ -133,8 +112,7 @@ interface BearerBase {
   readonly source: Source;
   /**
    * Where the token came from, for messages: `--auth-token-stdin`, `OPERATE_TOKEN`, `CI_TOKEN
-   * (auth.tokenEnv of profile "p")`, `auth.token of profile "p"`, `OPERATE_TOKEN_COMMAND` or
-   * `auth.tokenCommand of profile "p"`.
+   * (auth.tokenEnv of profile "p")`, `auth.token of profile "p"` or `OPERATE_TOKEN_COMMAND`.
    */
   readonly origin: string;
   /** The variable that holds the token (OPERATE_TOKEN or the profile's tokenEnv), if any. */
@@ -150,9 +128,12 @@ export interface StaticBearerConfig extends BearerBase {
   readonly command?: undefined;
 }
 
-/** A bearer token that a command prints. */
+/**
+ * A bearer token that the command line of OPERATE_TOKEN_COMMAND prints (design §23); the shell
+ * runs it in the working directory.
+ */
 export interface CommandBearerConfig extends BearerBase {
-  readonly command: TokenCommand;
+  readonly command: string;
   readonly token?: undefined;
 }
 
@@ -171,9 +152,9 @@ export interface NoAuthConfig {
 export type AuthConfig = NoAuthConfig | BasicAuthConfig | OAuthConfig | BearerAuthConfig;
 
 /**
- * A bearer token given by OPERATE_TOKEN or `--auth-token-stdin`, or a token command of
- * OPERATE_TOKEN_COMMAND or `--auth-token-command` (`command`), that the resolved auth type does
- * not use (an explicit none, basic or oauth); `config show` reports it. Never validated.
+ * A bearer token given by OPERATE_TOKEN or `--auth-token-stdin`, or the token command of
+ * OPERATE_TOKEN_COMMAND (`command`), that the resolved auth type does not use (an explicit none,
+ * basic or oauth); `config show` reports it. Never validated.
  */
 export interface UnusedToken {
   readonly value: string;
@@ -222,20 +203,15 @@ export interface ConfigFile {
 /** A project file (`.operate.json`, design §22) whose profiles a command uses. */
 export interface ProjectSource {
   readonly path: string;
-  /** Its directory: the token commands of its profiles run there. */
+  /** Its directory: commands below it share the cached token of OPERATE_TOKEN_COMMAND. */
   readonly directory: string;
-  /**
-   * `operate config trust` covers its current content, so its token commands may run and the
-   * variables it names for secrets may be read; only looked up for a file with such settings
-   * (false otherwise).
-   */
-  readonly trusted: boolean;
 }
 
 /**
  * The profiles a command sees (design §22): the config file named by `--config` or
  * OPERATE_CONFIG, else the project file merged with the user's config file (the user's profile
- * wins on a name clash, the project's defaultProfile wins). Never written to a file.
+ * wins on a name clash; the project's defaultProfile wins when it names a profile of the project
+ * file that the user's file does not override). Never written to a file.
  */
 export interface LoadedConfig extends ConfigFile {
   readonly project?: {
@@ -264,8 +240,6 @@ export interface ConfigFlags {
   readonly authPassword?: string;
   /** The bearer token read from stdin for `--auth-token-stdin`. */
   readonly authToken?: string;
-  /** `--auth-token-command <cmd>` */
-  readonly authTokenCommand?: string;
 }
 
 export type Source = 'flag' | 'env' | 'profile' | 'default';

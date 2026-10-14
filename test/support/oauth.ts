@@ -59,8 +59,8 @@ export function oauthDeps(
 }
 
 /**
- * `oauthDeps` plus the fake shell and its working directory: what every auth provider gets (token
- * commands run there).
+ * `oauthDeps` plus the fake shell and the scope of the token cache (the working directory): what
+ * every auth provider gets.
  */
 export function authDeps(
   runtime: FakeRuntime,
@@ -68,7 +68,7 @@ export function authDeps(
 ): AuthDeps {
   return {
     runCommand: (command, options) => runtime.runCommand(command, options),
-    cwd: runtime.cwd,
+    scope: runtime.cwd,
     ...oauthDeps(runtime, overrides),
   };
 }

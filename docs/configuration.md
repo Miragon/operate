@@ -10,8 +10,7 @@ These work on every API command, `api` and `ping`, after the command path
 (`operate task list -o table`). They cover the target (`--url`, `--engine`, `--profile`,
 `--config`), the output (`-o`, `--fields`, `--pretty`, `--out-file`, `--verbose`), the guards
 (`--dry-run`, `--yes`, `--read-only`), requests (`--timeout`, `-H`) and authentication (`--auth`,
-`--auth-user`, `--auth-password-stdin`, `--auth-token-stdin`, `--auth-token-command`,
-`--show-secrets`).
+`--auth-user`, `--auth-password-stdin`, `--auth-token-stdin`, `--show-secrets`).
 
 The help of every command lists them with their meaning and environment variable:
 `operate ping --help`.
@@ -81,7 +80,7 @@ is never readable under another mode); you can also edit it by hand:
 Profile keys: `url`, `engine`, `auth` (`type`, then either the Basic auth keys `username` and
 `passwordEnv` or `password`, the OAuth keys `issuer`, `authorizationEndpoint`, `tokenEndpoint`,
 `clientId`, `clientSecretEnv` or `clientSecret`, `scopes`, `audience`, `redirectPort`, or the
-bearer token keys `tokenEnv`, `tokenCommand` or `token`; see [Authentication](authentication.md)), `output`,
+bearer token keys `tokenEnv` or `token`; see [Authentication](authentication.md)), `output`,
 `timeout`, `headers`, `readOnly`. Profile names
 use letters, digits, `.`, `_` and `-` and start with a letter or digit, also in a hand-written
 file. URLs with credentials (`https://user:pass@host`) or a query string are rejected, and so are
@@ -124,11 +123,11 @@ before your home directory and at the file system root; the nearest file wins. A
   "profiles": {
     "orders": {
       "url": "http://localhost:8112/engine-rest/orders",
-      "auth": { "type": "bearer", "tokenCommand": "./scripts/dev-token.sh" }
+      "auth": { "type": "bearer" }
     },
     "billing": {
       "url": "http://localhost:8113/engine-rest/billing",
-      "auth": { "type": "bearer", "tokenCommand": "./scripts/dev-token.sh" }
+      "auth": { "type": "bearer" }
     }
   }
 }
@@ -136,16 +135,20 @@ before your home directory and at the file system root; the nearest file wins. A
 
 - The profiles of the project file join those of your config file. On a name clash your own
   profile wins as a whole (none of the project's settings of that profile apply), so you can
-  override one locally. The project's `defaultProfile` wins over yours inside the repository, so a
-  bare `operate status` (and the plugin's `/operate:status`) goes to the repository's engine;
-  `--profile` and `OPERATE_PROFILE` still choose another one.
-- A project file is shared, so it holds no secrets: a literal `password`, `clientSecret` or
-  `token` and secret headers (`Authorization`, cookies, names with `token`, `secret`, `password`,
-  `api-key`) are refused, both in the file and by `config set --project`. Name where a secret comes
-  from instead: `passwordEnv`, `clientSecretEnv`, `tokenEnv` or a
-  [token command](authentication.md#token-commands). operate reads such a variable and runs such a
-  command only after `operate config trust`: otherwise a repository could send any variable of
-  your environment to the engine URL it names.
+  override one locally. The project's `defaultProfile` must be one of its own profiles and wins
+  over yours inside the repository, so a bare `operate status` (and the plugin's `/operate:status`)
+  goes to the repository's engine; `--profile` and `OPERATE_PROFILE` still choose another one. It
+  never selects a profile of yours: when your file has a profile of the same name, your own
+  `defaultProfile` applies.
+- A project file is shared, so it names engines, never credentials: a `password`, `clientSecret`
+  or `token`, the variables `passwordEnv`, `clientSecretEnv` or `tokenEnv` and secret headers
+  (`Authorization`, cookies, names with `token`, `secret`, `password`, `api-key`) are refused, both
+  in the file and by `config set --project` (`config unset ... --project` removes them). The
+  credentials come from the environment (`OPERATE_TOKEN`,
+  [`OPERATE_TOKEN_COMMAND`](authentication.md#token-commands), `OPERATE_PASSWORD`,
+  `OPERATE_OAUTH_CLIENT_SECRET`), an OAuth login (`operate auth login --profile <profile>`) or a
+  profile of the same name in your own config file. So a project file can neither run code through
+  operate nor send a variable of its choice to the URL it names.
 - `operate config set|unset|use|delete --project` write the project file (a new one goes to the
   repository root, outside a repository to the working directory) with mode `0644`; without
   `--project` they write your config file. `config set` notes when a profile of yours now
@@ -161,8 +164,8 @@ operate config list
 operate config path --project
 ```
 
-Treat a project file like code: it decides where commands send your credentials. Its token
-commands run code from the repository and its variables for secrets are sent to its engines, so
-both need a trust step, see [Token commands](authentication.md#token-commands).
+Still, treat a project file like code: it decides where commands send your credentials from the
+environment (`OPERATE_TOKEN`, the token of `OPERATE_TOKEN_COMMAND`, `OPERATE_PASSWORD`) and the
+OAuth login of its profiles.
 
 The same in short form: `operate guide config`.

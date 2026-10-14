@@ -74,7 +74,7 @@ export function bearerStatusView(
     profile: config.profile ?? null,
     source: config.source,
     origin: config.origin,
-    command: config.command?.line ?? null,
+    command: config.command ?? null,
     cached,
     format: claims === undefined ? 'opaque' : 'jwt',
     subject,

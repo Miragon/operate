@@ -6,11 +6,10 @@ import type { FileSystem } from '../runtime.js';
 import {
   findProjectFile,
   mergeProject,
-  needsTrust,
   parseProjectFile,
+  projectProblem,
   projectSecretProblem,
   readProjectFile,
-  trustSettings,
 } from './project.js';
 import type { ConfigFile, ProjectSource } from './types.js';
 
@@ -111,40 +110,64 @@ describe('findProjectFile', () => {
   });
 });
 
-const SECRET_HINT = /names where the secret comes from instead/;
+const SECRET_HINT = /a project file is shared and names no credentials/;
 
 describe('parseProjectFile', () => {
   const path = '/repo/.operate.json';
 
-  it('accepts profiles that name where secrets come from', () => {
+  it('accepts profiles that name engines and auth settings without credentials', () => {
     const text = JSON.stringify({
       defaultProfile: 'a',
       profiles: {
-        a: { url: 'http://h/engine-rest', auth: { type: 'bearer', tokenCommand: './token.sh' } },
-        b: { auth: { username: 'demo', passwordEnv: 'PW' }, headers: { 'X-Tenant-Id': 'acme' } },
-        c: { auth: { type: 'oauth', clientId: 'c', clientSecretEnv: 'SECRET' } },
+        a: { url: 'http://h/engine-rest', auth: { type: 'bearer' } },
+        b: { auth: { username: 'demo' }, headers: { 'X-Tenant-Id': 'acme' } },
+        c: { auth: { type: 'oauth', issuer: 'https://idp.example', clientId: 'c' } },
       },
     });
     expect(parseProjectFile(text, path).defaultProfile).toBe('a');
   });
 
   it.each([
-    [{ username: 'u', password: 'S3cr3t-pw' }, 'password', 'passwordEnv'],
+    [{ username: 'u', password: 'S3cr3t-pw' }, 'password', 'OPERATE_PASSWORD'],
+    [{ username: 'u', passwordEnv: 'S3cr3t_VAR' }, 'passwordEnv', 'OPERATE_PASSWORD'],
     [
       { type: 'oauth', clientId: 'c', clientSecret: 'S3cr3t-cs' },
       'clientSecret',
-      'clientSecretEnv',
+      'OPERATE_OAUTH_CLIENT_SECRET',
     ],
-    [{ type: 'bearer', token: 'S3cr3t-tk' }, 'token', 'tokenEnv or auth.tokenCommand'],
-  ])('refuses the secret of %j without quoting it', async (auth, key, instead) => {
+    [
+      { type: 'oauth', clientId: 'c', clientSecretEnv: 'S3cr3t_VAR' },
+      'clientSecretEnv',
+      'OPERATE_OAUTH_CLIENT_SECRET',
+    ],
+    [{ type: 'bearer', token: 'S3cr3t-tk' }, 'token', 'OPERATE_TOKEN or OPERATE_TOKEN_COMMAND'],
+    [
+      { type: 'bearer', tokenEnv: 'S3cr3t_VAR' },
+      'tokenEnv',
+      'OPERATE_TOKEN or OPERATE_TOKEN_COMMAND',
+    ],
+  ])('refuses the credential of %j without quoting it', async (auth, key, instead) => {
     const text = JSON.stringify({ profiles: { p: { auth } } });
     const error = await failure(() => parseProjectFile(text, path));
     expect(error.code).toBe('CONFIG');
     expect(error.message).toBe(
-      `Invalid project file ${path}: profile "p" stores a secret (auth.${key}); a project file is shared, so it names where the secret comes from instead (auth.${instead})`,
+      `Invalid project file ${path}: profile "p" sets auth.${key}; a project file is shared and names no credentials, so it comes from ${instead} or a profile "p" of your own config file`,
     );
+    expect(error.details.hint).toContain('`operate config unset <profile> auth --project`');
     expect(error.details.hint).toContain('history of your repository');
     expect(`${error.message}${error.details.hint ?? ''}`).not.toContain('S3cr3t');
+  });
+
+  it('refuses a defaultProfile that is not one of its own profiles', async () => {
+    const text = JSON.stringify({ defaultProfile: 'prod', profiles: { svc: {} } });
+    const error = await failure(() => parseProjectFile(text, path));
+    expect(error.message).toBe(
+      `Invalid project file ${path}: defaultProfile "prod" is not one of its profiles; a project file chooses only among its own profiles`,
+    );
+    const blank = JSON.stringify({ defaultProfile: ' ', profiles: {} });
+    expect(parseProjectFile(blank, path).profiles).toEqual({});
+    const padded = JSON.stringify({ defaultProfile: ' svc ', profiles: { svc: {} } });
+    expect(parseProjectFile(padded, path).defaultProfile).toBe(' svc ');
   });
 
   it('refuses secret headers', async () => {
@@ -161,57 +184,40 @@ describe('parseProjectFile', () => {
   });
 });
 
-describe('projectSecretProblem, needsTrust and trustSettings', () => {
-  it('finds the first profile with a secret, or none', () => {
+describe('projectSecretProblem and projectProblem', () => {
+  it('finds the first profile with a credential, or none', () => {
     const file: ConfigFile = {
       profiles: { ok: { url: 'http://h' }, bad: { auth: { type: 'bearer', token: 't' } } },
     };
-    expect(projectSecretProblem(file)).toMatch(/^profile "bad" stores a secret/);
+    expect(projectSecretProblem(file)).toMatch(/^profile "bad" sets auth\.token;/);
     expect(projectSecretProblem({ profiles: { ok: {} } })).toBeUndefined();
     expect(projectSecretProblem({ profiles: {} })).toBeUndefined();
     expect(projectSecretProblem(file)).toMatch(SECRET_HINT);
   });
 
-  it('tells whether a profile has a token command or names a variable for a secret', () => {
-    for (const auth of [
-      { tokenCommand: 'x' },
-      { tokenEnv: 'X' },
-      { passwordEnv: 'X' },
-      { clientSecretEnv: 'X' },
-    ]) {
-      expect(needsTrust({ profiles: { a: {}, b: { auth } } }), JSON.stringify(auth)).toBe(true);
-    }
-    const plain: ConfigFile = {
-      profiles: { a: { url: 'http://h', auth: { type: 'basic', username: 'u' } } },
-    };
-    expect(needsTrust(plain)).toBe(false);
-    expect(needsTrust({ profiles: {} })).toBe(false);
-  });
-
-  it('lists the settings that need trust by profile', () => {
-    const file: ConfigFile = {
-      profiles: {
-        a: { url: 'http://h' },
-        b: { auth: { type: 'bearer', tokenCommand: './t.sh' } },
-        c: { auth: { type: 'oauth', clientId: 'c', clientSecretEnv: 'SECRET' } },
-        d: { auth: { username: 'u', passwordEnv: 'PW' } },
-      },
-    };
-    expect(trustSettings(file)).toEqual({
-      b: { tokenCommand: './t.sh' },
-      c: { clientSecretEnv: 'SECRET' },
-      d: { passwordEnv: 'PW' },
-    });
+  it('reports a credential before a foreign default, and nothing for a valid file', () => {
+    const both: ConfigFile = { defaultProfile: 'x', profiles: { p: { auth: { token: 't' } } } };
+    expect(projectProblem(both)?.problem).toMatch(/^profile "p" sets auth\.token/);
+    expect(projectProblem(both)?.hint).toMatch(/^Credentials come from the environment/);
+    const foreign = projectProblem({ defaultProfile: 'x', profiles: {} });
+    expect(foreign?.problem).toMatch(/^defaultProfile "x" is not one of its profiles/);
+    expect(foreign?.hint).toBe(
+      'Make one of its profiles the default with `operate config use <profile> --project`, or remove defaultProfile from the file.',
+    );
+    expect(projectProblem({ defaultProfile: 'p', profiles: { p: {} } })).toBeUndefined();
   });
 });
 
 describe('readProjectFile', () => {
-  it('returns the checked file and its bytes', async () => {
-    const text = '{"profiles":{"a":{}}}';
-    const runtime = fakeRuntime({ files: { '/r/.operate.json': text } });
-    const read = await readProjectFile(runtime.fs, '/r/.operate.json');
-    expect(read.file).toEqual({ profiles: { a: {} } });
-    expect(new TextDecoder().decode(read.content)).toBe(text);
+  it('returns the checked file', async () => {
+    const runtime = fakeRuntime({ files: { '/r/.operate.json': '{"profiles":{"a":{}}}' } });
+    expect(await readProjectFile(runtime.fs, '/r/.operate.json')).toEqual({ profiles: { a: {} } });
+    const invalid = fakeRuntime({
+      files: { '/r/.operate.json': '{"profiles":{"a":{"auth":{"type":"bearer","token":"t"}}}}' },
+    });
+    expect((await failure(() => readProjectFile(invalid.fs, '/r/.operate.json'))).message).toMatch(
+      /^Invalid project file \/r\/\.operate\.json: profile "a" sets auth\.token/,
+    );
   });
 
   it('is a CONFIG error naming the file and the reason when it cannot be read', async () => {
@@ -239,7 +245,7 @@ describe('readProjectFile', () => {
 });
 
 describe('mergeProject', () => {
-  const source: ProjectSource = { path: '/r/.operate.json', directory: '/r', trusted: false };
+  const source: ProjectSource = { path: '/r/.operate.json', directory: '/r' };
   const project: ConfigFile = {
     defaultProfile: 'svc',
     profiles: { svc: { url: 'http://project' }, shared: { url: 'http://project-shared' } },
@@ -286,6 +292,26 @@ describe('mergeProject', () => {
       project: { source, profiles: ['svc'], defaultProfile: false },
     });
     expect(none !== undefined && 'defaultProfile' in none).toBe(false);
+  });
+
+  it("never makes a profile of the user's the default", () => {
+    // the project names a profile the user also has (e.g. "prod"): the user's default applies
+    const file: ConfigFile = { defaultProfile: 'prod', profiles: { prod: { url: 'http://evil' } } };
+    const user: ConfigFile = {
+      defaultProfile: 'mine',
+      profiles: { prod: { url: 'https://prod' }, mine: {} },
+    };
+    expect(mergeProject(user, { source, file })).toEqual({
+      defaultProfile: 'mine',
+      profiles: { prod: { url: 'https://prod' }, mine: {} },
+      project: { source, profiles: [], defaultProfile: false },
+    });
+    const noDefault = mergeProject({ profiles: { prod: {} } }, { source, file });
+    expect(noDefault?.defaultProfile).toBeUndefined();
+    // a default that is not one of the project's profiles never selects one of the user's
+    const dangling = mergeProject(user, { source, file: { defaultProfile: 'mine', profiles: {} } });
+    expect(dangling?.defaultProfile).toBe('mine');
+    expect(dangling?.project?.defaultProfile).toBe(false);
   });
 
   it('never lets a project profile win over a user profile of the same name', () => {

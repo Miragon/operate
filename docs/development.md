@@ -57,7 +57,7 @@ src/operation/  input building, variables, dates, guards, request building, exec
 src/workflow/   the workflow commands: engine access, instance views, waiting, plans (pure)
 src/docs/       commands, describe, examples, workflow docs, completion and the agent guide (pure)
 src/catalog/    catalog access, schema helpers, body validation (pure)
-src/config/     config resolution and profile editing (pure), file store, project files, trust store
+src/config/     config resolution and profile editing (pure), file store, project files
 src/auth/       auth providers (none, basic, bearer with JWT expiry, token commands, OAuth; pure)
 src/http/       fetch based HTTP client and error mapping
 src/output/     JSON, tables, field projection, errors, secret masking (pure)

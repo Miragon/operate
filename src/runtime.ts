@@ -55,10 +55,8 @@ export interface LoopbackServer {
   close(): Promise<void>;
 }
 
-/** How `runCommand` runs a command line. */
+/** How `runCommand` runs a command line (in the working directory). */
 export interface CommandOptions {
-  /** The working directory; the current one when absent. */
-  readonly cwd?: string;
   /** The command is killed once it runs longer. */
   readonly timeoutMs: number;
 }
@@ -115,9 +113,9 @@ export interface Runtime {
    */
   sleep(ms: number): Promise<void>;
   /**
-   * Runs a command line in the shell (`sh -c`, `cmd.exe /d /s /c` on Windows) with stdin closed
-   * and stdout and stderr captured; rejects when it cannot be started (e.g. a missing `cwd`). Only
-   * a bearer token command (auth.tokenCommand) runs one.
+   * Runs a command line in the shell (`sh -c`, `cmd.exe /d /s /c` on Windows) in the working
+   * directory, with stdin closed and stdout and stderr captured; rejects when it cannot be
+   * started. Only the bearer token command (OPERATE_TOKEN_COMMAND) runs one.
    */
   runCommand(command: string, options: CommandOptions): Promise<CommandResult>;
 }

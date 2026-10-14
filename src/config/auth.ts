@@ -11,7 +11,7 @@ import { BEARER_CHECKS, bearerMixProblem, bearerProfileProblem } from './bearer.
 import { configError } from './config-error.js';
 import { OAUTH_CHECKS, oauthProfileProblem } from './oauth.js';
 import { CONTROL, ENV_NAME, isNonEmptyString } from './syntax.js';
-import { AUTH_TYPES, type AuthType, PROFILE_AUTH_KEYS, type ProfileAuth } from './types.js';
+import { AUTH_TYPES, type AuthType, ENV, PROFILE_AUTH_KEYS, type ProfileAuth } from './types.js';
 
 const CONTROL_HINT =
   'Remove line breaks, tabs, NUL and other control characters; Basic auth (RFC 7617) does not allow them.';
@@ -88,6 +88,10 @@ const AUTH_EXAMPLE = '{"type": "basic", "username": "demo", "passwordEnv": "CAMU
  */
 export function profileAuthProblem(name: string, value: unknown): string | undefined {
   if (!isRecord(value)) return `profile "${name}" has an invalid auth (expected ${AUTH_EXAMPLE})`;
+  // the token command of 0.6.0 (design §23): only the environment gives one now
+  if (Object.hasOwn(value, 'tokenCommand')) {
+    return `profile "${name}" sets auth.tokenCommand, which operate no longer reads: remove the key from the file and export ${ENV.tokenCommand}=<command> instead`;
+  }
   const allowed: readonly string[] = PROFILE_AUTH_KEYS;
   const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
   if (unknown.length > 0) {

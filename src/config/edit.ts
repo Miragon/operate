@@ -91,12 +91,11 @@ interface OAuthValues {
 
 /**
  * The `token` row of `config show`: the bearer token of type bearer, or a token that is set but
- * not used by the resolved type (`unused` says why). The `tokenCommand` row: the command that
- * prints the token (`config show` never runs it); `trusted` for one of a project file.
+ * not used by the resolved type (`unused` says why). The `tokenCommand` row: the command of
+ * OPERATE_TOKEN_COMMAND that prints the token (`config show` never runs it).
  */
 interface TokenValue extends ConfigValue<string> {
   readonly unused?: string;
-  readonly trusted?: boolean;
 }
 
 /**
@@ -322,8 +321,7 @@ function tokenValue(resolved: ResolvedConfig): { token?: TokenValue; tokenComman
   if (auth.type === 'bearer') {
     const { source, command } = auth;
     if (command === undefined) return { token: { value: auth.token, source } };
-    const trusted = command.projectFile === undefined ? {} : { trusted: command.trusted };
-    return { tokenCommand: { value: command.line, source, ...trusted } };
+    return { tokenCommand: { value: command, source } };
   }
   if (unusedToken === undefined) return {};
   const { value, source, reason } = unusedToken;

@@ -4,9 +4,11 @@
  * directory with `.git`), before the home directory and at the file system root; the nearest file
  * wins. Its profiles are merged with those of the user's config file: the user's profile wins on a
  * name clash (a developer overrides one locally), the project's defaultProfile wins (in the
- * repository its default applies). A project file is shared, so it holds no secrets: only where a
- * secret comes from (passwordEnv, clientSecretEnv, tokenEnv, tokenCommand). Those settings take
- * effect only while `operate config trust` covers the file (TRUST_KEYS, design §23).
+ * repository its default applies) as long as it names a profile of the project file. A project
+ * file is shared and names no credentials, neither secrets nor the variables that hold them: they
+ * come from the environment (OPERATE_TOKEN, OPERATE_TOKEN_COMMAND, OPERATE_PASSWORD,
+ * OPERATE_OAUTH_CLIENT_SECRET) or the user's own config file. So a cloned repository can neither
+ * run code through operate nor send a variable of its choice to the URL it names.
  */
 
 import type { FileSystem } from '../runtime.js';
@@ -64,19 +66,22 @@ export async function findProjectFile(
   }
 }
 
-/** The key of a profile's auth object that names where each stored secret comes from instead. */
-const SECRET_SOURCES = {
-  password: 'passwordEnv',
-  clientSecret: 'clientSecretEnv',
-  token: 'tokenEnv or auth.tokenCommand',
-} as const;
+/** The credential keys of a profile's auth object, and where the credential comes from instead. */
+const CREDENTIALS: Readonly<Partial<Record<keyof ProfileAuth, string>>> = {
+  password: ENV.password,
+  passwordEnv: ENV.password,
+  clientSecret: ENV.oauthClientSecret,
+  clientSecretEnv: ENV.oauthClientSecret,
+  token: `${ENV.token} or ${ENV.tokenCommand}`,
+  tokenEnv: `${ENV.token} or ${ENV.tokenCommand}`,
+};
 
 function secretProblem(name: string, profile: Profile): string | undefined {
-  const key = (Object.keys(SECRET_SOURCES) as (keyof typeof SECRET_SOURCES)[]).find(
-    (candidate) => profile.auth?.[candidate] !== undefined,
+  const key = Object.keys(CREDENTIALS).find(
+    (candidate) => profile.auth?.[candidate as keyof ProfileAuth] !== undefined,
   );
   if (key !== undefined) {
-    return `profile "${name}" stores a secret (auth.${key}); a project file is shared, so it names where the secret comes from instead (auth.${SECRET_SOURCES[key]})`;
+    return `profile "${name}" sets auth.${key}; a project file is shared and names no credentials, so it comes from ${CREDENTIALS[key as keyof ProfileAuth] ?? ''} or a profile "${name}" of your own config file`;
   }
   const header = Object.keys(profile.headers ?? {}).find(isSecretHeader);
   return header === undefined
@@ -85,8 +90,8 @@ function secretProblem(name: string, profile: Profile): string | undefined {
 }
 
 /**
- * Why a project file must not store `file`: a literal password, client secret or token, or a
- * secret header. Undefined when it holds none.
+ * Why a project file must not store `file`: a password, client secret or token, or the variable
+ * that holds one, or a secret header. Undefined when it holds none.
  */
 export function projectSecretProblem(file: ConfigFile): string | undefined {
   for (const [name, profile] of Object.entries(file.profiles)) {
@@ -96,15 +101,41 @@ export function projectSecretProblem(file: ConfigFile): string | undefined {
   return undefined;
 }
 
-/** Parses a project file and refuses secrets in it (CONFIG, the value is never quoted). */
+/** A defaultProfile that names no profile of the file itself. */
+function defaultProblem(file: ConfigFile): string | undefined {
+  const name = given(file.defaultProfile);
+  return name === undefined || Object.hasOwn(file.profiles, name)
+    ? undefined
+    : `defaultProfile "${name}" is not one of its profiles; a project file chooses only among its own profiles`;
+}
+
+const CREDENTIAL_HINT = `Credentials come from the environment (${ENV.token}, ${ENV.tokenCommand}, ${ENV.password}, ${ENV.oauthClientSecret}) or from a profile of the same name in your own config file. Remove it from the project file, e.g. with \`operate config unset <profile> auth --project\` (\`headers\` for a secret header), and a committed secret from the history of your repository, too.`;
+
+const DEFAULT_HINT =
+  'Make one of its profiles the default with `operate config use <profile> --project`, or remove defaultProfile from the file.';
+
+/**
+ * Why `file` is no valid project file, and how to fix it: a credential (projectSecretProblem) or a
+ * defaultProfile that is not one of its profiles. Undefined when it is valid.
+ */
+export function projectProblem(
+  file: ConfigFile,
+): { readonly problem: string; readonly hint: string } | undefined {
+  const secret = projectSecretProblem(file);
+  if (secret !== undefined) return { problem: secret, hint: CREDENTIAL_HINT };
+  const foreign = defaultProblem(file);
+  return foreign === undefined ? undefined : { problem: foreign, hint: DEFAULT_HINT };
+}
+
+/**
+ * Parses a project file and refuses credentials in it (the value is never quoted) and a
+ * defaultProfile it does not define (CONFIG).
+ */
 export function parseProjectFile(text: string, path: string): ConfigFile {
   const file = parseConfigFile(text, path);
-  const problem = projectSecretProblem(file);
-  if (problem !== undefined) {
-    throw configError(
-      `Invalid project file ${path}: ${problem}`,
-      'Remove the secret from the file (and from the history of your repository, if it was committed), and keep it in an environment variable or your own config file (`operate config path`).',
-    );
+  const invalid = projectProblem(file);
+  if (invalid !== undefined) {
+    throw configError(`Invalid project file ${path}: ${invalid.problem}`, invalid.hint);
   }
   return file;
 }
@@ -116,11 +147,8 @@ function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Reads and checks an existing project file; `content` is what `operate config trust` hashes. */
-export async function readProjectFile(
-  fs: FileSystem,
-  path: string,
-): Promise<{ readonly file: ConfigFile; readonly content: Uint8Array }> {
+/** Reads and checks an existing project file. */
+export async function readProjectFile(fs: FileSystem, path: string): Promise<ConfigFile> {
   let content: Uint8Array;
   try {
     content = await fs.readFile(path);
@@ -130,40 +158,7 @@ export async function readProjectFile(
       'Check the file and its permissions; operate looks up .operate.json from the working directory up to the repository root.',
     );
   }
-  return { file: parseProjectFile(new TextDecoder().decode(content), path), content };
-}
-
-/**
- * The auth keys of a project file that take effect only while `operate config trust` covers its
- * content (design §23): a token command runs code from the repository, and the variables named
- * for secrets go to the engine URL that the file names, so without the trust step a repository
- * could send any variable of the environment anywhere.
- */
-const TRUST_KEYS = [
-  'tokenCommand',
-  'tokenEnv',
-  'passwordEnv',
-  'clientSecretEnv',
-] as const satisfies readonly (keyof ProfileAuth)[];
-
-export type TrustKey = (typeof TRUST_KEYS)[number];
-
-/** The settings of each profile that need trust (TRUST_KEYS), for `operate config trust`. */
-export function trustSettings(file: ConfigFile): Record<string, Partial<Record<TrustKey, string>>> {
-  return Object.fromEntries(
-    Object.entries(file.profiles).flatMap(([name, profile]) => {
-      const settings = TRUST_KEYS.flatMap((key) => {
-        const value = profile.auth?.[key];
-        return value === undefined ? [] : [[key, value] as const];
-      });
-      return settings.length === 0 ? [] : [[name, Object.fromEntries(settings)]];
-    }),
-  );
-}
-
-/** True when a profile of the file has a setting that needs trust (TRUST_KEYS). */
-export function needsTrust(file: ConfigFile): boolean {
-  return Object.keys(trustSettings(file)).length > 0;
+  return parseProjectFile(new TextDecoder().decode(content), path);
 }
 
 function given(name: string | undefined): string | undefined {
@@ -173,7 +168,8 @@ function given(name: string | undefined): string | undefined {
 /**
  * The configuration a command sees: the user's config file with the profiles of the project file
  * merged in. A profile of the user's file replaces the project's profile of the same name as a
- * whole; the project's defaultProfile wins over the user's.
+ * whole. The project's defaultProfile wins over the user's, but only for a profile that comes from
+ * the project file: a repository never makes a profile of the user's (e.g. "prod") the default.
  */
 export function mergeProject(
   user: ConfigFile | undefined,
@@ -181,15 +177,13 @@ export function mergeProject(
 ): LoadedConfig | undefined {
   if (project === undefined) return user;
   const own = user?.profiles ?? {};
-  const projectDefault = given(project.file.defaultProfile);
+  const profiles = Object.keys(project.file.profiles).filter((name) => !Object.hasOwn(own, name));
+  const named = given(project.file.defaultProfile);
+  const projectDefault = named !== undefined && profiles.includes(named) ? named : undefined;
   const defaultProfile = projectDefault ?? user?.defaultProfile;
   return {
     ...(defaultProfile === undefined ? {} : { defaultProfile }),
     profiles: { ...project.file.profiles, ...own },
-    project: {
-      source: project.source,
-      profiles: Object.keys(project.file.profiles).filter((name) => !Object.hasOwn(own, name)),
-      defaultProfile: projectDefault !== undefined,
-    },
+    project: { source: project.source, profiles, defaultProfile: projectDefault !== undefined },
   };
 }

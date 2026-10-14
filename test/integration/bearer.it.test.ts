@@ -5,9 +5,9 @@
  * checks them in front of an unmodified engine. operate only sends `Authorization: Bearer
  * <token>`: no login, no refresh, no token cache.
  *
- * Token commands (design §23) fetch such tokens for operate: a script that runs the client
- * credentials grant, from the environment and from a project file (design §22), which needs
- * `operate config trust`.
+ * Token commands (design §23) fetch such tokens for operate: OPERATE_TOKEN_COMMAND runs a script
+ * that runs the client credentials grant, also for the profiles of a project file (design §22),
+ * whose directories share the cached token.
  *
  * The 5 s token of `operate-cli-short` is issued first, in `beforeAll`, so the 30 s expiry grace of
  * the TOKEN_EXPIRED test mostly passes while the other tests run. Every CLI run is checked against
@@ -15,7 +15,7 @@
  * may print the one token they send.
  */
 
-import { appendFile, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -919,8 +919,8 @@ console.log(token);
     let repo = '';
     let runsFile = '';
     let tokensFile = '';
-    /** The command line, relative to the repository root (where a project file's command runs). */
-    const COMMAND = `${JSON.stringify(process.execPath)} token.mjs`;
+    /** The command line: the script by its full path, so it runs in every directory. */
+    const command = () => `${JSON.stringify(process.execPath)} ${join(repo, 'token.mjs')}`;
 
     const runs = async () =>
       (await readFile(runsFile, 'utf8').catch(() => '')).split('\n').filter(Boolean).length;
@@ -941,10 +941,10 @@ console.log(token);
      * Runs in the repository without OPERATE_CONFIG and OPERATE_URL, so the project file counts;
      * checks that no output contains a token the command printed.
      */
-    async function inRepo(args: readonly string[], extra: EnvOverrides = {}) {
+    async function inRepo(args: readonly string[], extra: EnvOverrides = {}, directory = 'src') {
       const result = await cli(args, {
         timeoutMs: RUN_TIMEOUT_MS,
-        cwd: join(repo, 'src'),
+        cwd: join(repo, directory),
         env: commandEnv({ OPERATE_CONFIG: undefined, OPERATE_URL: undefined, ...extra }),
       });
       remember(...(await readFile(tokensFile, 'utf8').catch(() => '')).split('\n').filter(Boolean));
@@ -957,12 +957,13 @@ console.log(token);
       repo = join(dir, 'repo');
       await mkdir(join(repo, '.git'), { recursive: true });
       await mkdir(join(repo, 'src'), { recursive: true });
+      await mkdir(join(repo, 'docs'), { recursive: true });
       await writeFile(join(repo, 'token.mjs'), SCRIPT);
       runsFile = join(dir, 'token-runs.log');
       tokensFile = join(dir, 'token-values.log');
     });
 
-    it("fetches the token with a project file's command, once trusted, and reuses it", async () => {
+    it('fetches the token for a profile of the project file and reuses it', async () => {
       const set = await inRepo([
         'config',
         'set',
@@ -970,51 +971,63 @@ console.log(token);
         '--project',
         '--url',
         top().url,
-        '--auth-token-command',
-        COMMAND,
+        '--auth',
+        'bearer',
       ]);
       expect(expectSuccess(set).stderr).toContain(
         `Created the project file ${join(repo, '.operate.json')}`,
       );
-      const count = await inRepo(countArgs());
+      const env = { OPERATE_TOKEN_COMMAND: command() };
+      const count = await inRepo(countArgs(), env);
       expect(expectSuccess(count).json<Count>().count).toBeGreaterThanOrEqual(0);
       expect(await runs()).toBe(1);
       // the next call takes the cached JWT
-      const verbose = await inRepo(countArgs(globalFlag('verbose')));
+      const verbose = await inRepo(countArgs(globalFlag('verbose')), env);
       expectSuccess(verbose);
       expect(verbose.stderr).toContain(
-        '* Using the token of the bearer token command of auth.tokenCommand of profile "it-command", cached until it expires',
+        '* Using the token of the bearer token command of OPERATE_TOKEN_COMMAND, cached until it expires',
       );
       expect(verbose.stderr).toMatch(MASKED_BEARER);
       expect(await runs()).toBe(1);
-      const status = expectSuccess(await inRepo(['auth', 'status'])).json<BearerStatusOutput>();
+      const status = expectSuccess(
+        await inRepo(['auth', 'status'], env),
+      ).json<BearerStatusOutput>();
       expect(status).toMatchObject({
         profile: 'it-command',
-        source: 'profile',
-        origin: 'auth.tokenCommand of profile "it-command"',
-        command: COMMAND,
+        source: 'env',
+        origin: 'OPERATE_TOKEN_COMMAND',
+        command: command(),
         cached: true,
         format: 'jwt',
         user: SERVICE_ACCOUNT,
       });
     });
 
-    it('needs a new trust after the project file changed by hand', async () => {
+    it('shares the cached token across the directories of the repository', async () => {
       const before = await runs();
-      await appendFile(join(repo, '.operate.json'), '\n');
-      const refused = await inRepo(countArgs());
-      expect(expectError(refused, 'CONFIG', 3).message).toContain('which is not trusted');
+      const env = { OPERATE_TOKEN_COMMAND: command() };
+      expectSuccess(await inRepo(countArgs(), env, 'docs'));
       expect(await runs()).toBe(before);
-      expectSuccess(await inRepo(['config', 'trust']));
-      expectSuccess(await inRepo(countArgs()));
-      // the cache key is the command and its directory, not the file: still no new run
-      expect(await runs()).toBe(before);
+    });
+
+    it('refuses a project file that names a variable for the token, before any request', async () => {
+      const path = join(repo, 'docs', '.operate.json');
+      const file = {
+        profiles: { it: { url: top().url, auth: { type: 'bearer', tokenEnv: 'IT_SECRET' } } },
+      };
+      await writeFile(path, JSON.stringify(file));
+      const refused = await inRepo(countArgs(), { OPERATE_PROFILE: 'it' }, 'docs');
+      expect(expectError(refused, 'CONFIG', 3).message).toContain(
+        'profile "it" sets auth.tokenEnv;',
+      );
+      expect(refused.stderr).not.toMatch(SENT_REQUEST);
+      await rm(path);
     });
 
     it('runs the command again after a 401 and retries with the new token', async () => {
       const retryRuns = join(required(workdir, 'the work directory'), 'retry-runs.log');
       const result = await inRepo(countArgs(globalFlag('verbose')), {
-        OPERATE_TOKEN_COMMAND: `${JSON.stringify(process.execPath)} ${join(repo, 'token.mjs')}`,
+        OPERATE_TOKEN_COMMAND: command(),
         OPERATE_URL: top().url,
         OPERATE_CONFIG: configFile,
         IT_GARBAGE_FIRST: '1',
@@ -1028,7 +1041,7 @@ console.log(token);
 
     it('reports a failing command as LOGIN_FAILED with the end of its stderr', async () => {
       const env = {
-        OPERATE_TOKEN_COMMAND: `${JSON.stringify(process.execPath)} ${join(repo, 'token.mjs')}`,
+        OPERATE_TOKEN_COMMAND: command(),
         OPERATE_URL: top().url,
         OPERATE_CONFIG: configFile,
         IT_FAIL: '1',

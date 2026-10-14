@@ -1,20 +1,16 @@
 /**
  * The configuration a command reads (design §22): the config file named by `--config` or
  * OPERATE_CONFIG alone (it must exist), else the project file (`.operate.json`, looked up from the
- * working directory up to the repository root) merged with the user's config file. Whether
- * `operate config trust` covers the project file is only looked up when it has settings that need
- * trust (token commands, secret variables).
+ * working directory up to the repository root) merged with the user's config file.
  */
 
 import { configFilePath, explicitConfigPath, pathModule, readConfigFile } from '../config/file.js';
 import {
   findProjectFile,
   mergeProject,
-  needsTrust,
   type ProjectFile,
   readProjectFile,
 } from '../config/project.js';
-import { contentHash, isTrusted, readTrustStore, trustStorePath } from '../config/trust.js';
 import type { ConfigFile, LoadedConfig, ProjectSource } from '../config/types.js';
 import type { Runtime } from '../runtime.js';
 
@@ -46,17 +42,9 @@ export async function projectFileOf(
   return findProjectFile(runtime.fs, runtime.cwd, runtime);
 }
 
-/** True when `operate config trust` covers the current content of the project file. */
-async function projectTrusted(runtime: Runtime, path: string, content: Uint8Array) {
-  const store = await readTrustStore(runtime.fs, trustStorePath(runtime.env, runtime));
-  return isTrusted(store, path, await contentHash(content));
-}
-
 async function projectOf(runtime: Runtime, path: string) {
-  const { file, content } = await readProjectFile(runtime.fs, path);
-  const trusted = needsTrust(file) && (await projectTrusted(runtime, path, content));
-  const directory = pathModule(runtime.platform).dirname(path);
-  const source: ProjectSource = { path, directory, trusted };
+  const file = await readProjectFile(runtime.fs, path);
+  const source: ProjectSource = { path, directory: pathModule(runtime.platform).dirname(path) };
   return { source, file };
 }
 

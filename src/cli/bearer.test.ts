@@ -772,20 +772,13 @@ describe('completion of the bearer options', () => {
 
   it('offers bearer and the token options', async () => {
     expect(await values(['ping', '--auth', 'b'])).toEqual(['basic', 'bearer']);
-    expect(await values(['task', 'list', '--auth-to'])).toEqual([
-      '--auth-token-stdin',
-      '--auth-token-command',
-    ]);
+    expect(await values(['task', 'list', '--auth-to'])).toEqual(['--auth-token-stdin']);
     expect(await values(['config', 'set', 'p', '--auth-token'])).toEqual([
       '--auth-token-env',
-      '--auth-token-command',
       '--auth-token-stdin',
     ]);
     expect(await values(['config', 'set', 'p', '--auth', 'be'])).toEqual(['bearer']);
-    expect(await values(['config', 'show', '--auth-t'])).toEqual([
-      '--auth-token-stdin',
-      '--auth-token-command',
-    ]);
+    expect(await values(['config', 'show', '--auth-t'])).toEqual(['--auth-token-stdin']);
   });
 
   it('documents the base URL of the fixtures', () => {
