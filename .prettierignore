@@ -10,3 +10,6 @@ package-lock.json
 # written by release-please (its own Markdown and JSON style)
 CHANGELOG.md
 .release-please-manifest.json
+# the docs site: the VitePress cache and the theme vendored unchanged from Miragon/mcp-toolkit
+docs/.vitepress/cache
+docs/.vitepress/theme

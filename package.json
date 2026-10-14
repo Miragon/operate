@@ -60,6 +60,9 @@
     "test:integration": "npm run build && vitest run --config vitest.integration.config.ts",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run arch && npm run knip && npm run generate:check && npm run test:coverage",
     "demo": "npm run build && tsx scripts/make-demo.ts",
+    "docs:dev": "npm --prefix docs run dev",
+    "docs:build": "npm --prefix docs run build",
+    "docs:preview": "npm --prefix docs run preview",
     "prepack": "npm run build"
   },
   "dependencies": {

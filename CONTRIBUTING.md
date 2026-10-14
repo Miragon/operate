@@ -32,6 +32,7 @@ with [Vitest](https://vitest.dev/). It requires Node.js 24 (`.nvmrc`; the packag
 | `npm run test:mutation:score` | Break threshold over the CI mutation shards (`--informational`: report only)       |
 | `npm run test:integration`    | Build, then run the Testcontainers tests against real engines                      |
 | `npm run demo`                | Redraw the README demo (`docs/assets/demo.gif`)                                    |
+| `npm run docs:dev`            | Serve the docs site with hot reload (`docs:build`, `docs:preview` build and serve) |
 
 `npm run check` is what a change has to pass; CI runs it on every pull request, together with the
 integration tests and the packaging jobs.
@@ -50,6 +51,11 @@ standalone executable instead of `dist/operate.js`.
 `npm run demo` runs the built CLI against a fresh engine at `OPERATE_URL` and needs
 [gifski](https://gif.ski/) on your PATH and network access for the Geist fonts.
 
+The docs site is a [VitePress](https://vitepress.dev/) package of its own in `docs/`, with its own
+`package-lock.json`: run `npm ci --prefix docs` once before the `docs:*` scripts. Its build fails
+on a dead link between the pages. The `Docs` workflow builds it on every pull request that changes
+`docs/` and publishes it to <https://miragon.github.io/operate/> from `main`.
+
 ## How the package is laid out
 
 - `src/`: the CLI in layers, from `src/bin` (entry point) and `src/cli` (commander wiring) down to
@@ -57,7 +63,8 @@ standalone executable instead of `dist/operate.js`.
 - `src/generated/catalog.json`: the command surface, generated from the OpenAPI spec in `spec/`.
 - `scripts/`: catalog generator, standalone executable build, packaging smoke test, demo.
 - `test/`: fakes for the unit tests and the Testcontainers integration tests.
-- `docs/`: the reference the README links to.
+- `docs/`: the documentation, published as the docs site; `docs/.vitepress/` holds its
+  configuration and the theme, copied unchanged from Miragon/mcp-toolkit.
 - `skills/operate/`: the Claude Code plugin with its skill, command and evals.
 
 The layers and their rules, the catalog generation, the packaging and the quality gates are

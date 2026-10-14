@@ -10,6 +10,8 @@ processes and decisions, start and follow instances, work on tasks, fix incident
 instances, look into the history and administer users and permissions. The agent says what should
 happen, and the CLI talks to the REST API.
 
+Documentation: [miragon.github.io/operate](https://miragon.github.io/operate/)
+
 ![One operate advance command completes the task an order process waits at](docs/assets/demo.gif)
 
 ## Why
@@ -125,6 +127,10 @@ Details: [installation](docs/installation.md).
 
 ## Documentation
 
+The documentation is a website, [miragon.github.io/operate](https://miragon.github.io/operate/),
+built from the pages in [`docs/`](docs/):
+
+- [Getting started](docs/getting-started.md): a first triage, then your own engine, Claude Code or CI
 - [Installation](docs/installation.md): npm, standalone executable, container image, shell completion
 - [Quick start](docs/quick-start.md): one process from an empty engine to a finished instance
 - [Workflow commands](docs/workflow-commands.md): inspect, wait, advance, retry, deploy, status

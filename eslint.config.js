@@ -15,6 +15,10 @@ export default defineConfig(
       '.claude/',
       'src/generated/',
       'spec/',
+      // the docs site: its build output, and the theme vendored unchanged from Miragon/mcp-toolkit
+      'docs/.vitepress/cache/',
+      'docs/.vitepress/dist/',
+      'docs/.vitepress/theme/',
     ],
   },
   js.configs.recommended,
@@ -63,6 +67,11 @@ export default defineConfig(
   },
   {
     files: ['**/*.js'],
+    extends: [tseslint.configs.disableTypeChecked],
+  },
+  {
+    // the VitePress config: its own package (docs/package.json), outside the tsconfig.json
+    files: ['docs/**/*.ts'],
     extends: [tseslint.configs.disableTypeChecked],
   },
 );
