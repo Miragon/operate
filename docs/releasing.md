@@ -68,7 +68,7 @@ organization `miragon` with 2FA:
 5. **Rules** (optional): require pull requests on `main` with the check `validate-pr-title` and
    the `check`, `integration`, `standalone executable (linux-x64)` and `container image` jobs of
    CI. Not the `mutation` and `mutation score` jobs: on pull requests they only inform, and pull
-   requests without a mutation baseline of `main` skip them.
+   requests without a mutation baseline of `main` and the release pull request skip them.
 6. **Create the package on npm.** A trusted publisher can only be added to an existing package, and
    OIDC cannot create one. Publish a placeholder once, from a clean checkout of `main`:
 

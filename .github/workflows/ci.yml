@@ -1,6 +1,7 @@
 # Quality gates: fast checks on Node 22/24, validation of the Claude Code plugin, Testcontainers
 # integration tests per engine, the standalone executable and the container image, and incremental
-# mutation testing (informational on pull requests; in full weekly and on demand).
+# mutation testing (informational on pull requests, skipped on the release pull request; in full
+# weekly and on demand).
 name: CI
 
 on:
@@ -198,7 +199,10 @@ jobs:
   # Options that change results therefore belong in stryker.config.js, not on the command line
   # below. Pull requests never run in full: they restore the baseline of main and never save one,
   # and a shard without a baseline for its fingerprint skips Stryker (dependency, configuration or
-  # Node changes; the push to main and the weekly run test those).
+  # Node changes; the push to main and the weekly run test those). The release pull request of
+  # release-please skips Stryker, too: it changes only versions and the changelog, and the push to
+  # main tests the same code. The shards skip by steps, not by a job condition: a skipped matrix
+  # job reports no "mutation (n/4)" check, and the ruleset of main requires them.
   mutation:
     name: mutation (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
@@ -215,6 +219,11 @@ jobs:
       STRYKER_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
       FULL_RUN: ${{ github.event_name == 'schedule' || inputs.full-mutation == true }}
     steps:
+      - name: Skip the release pull request
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--')
+        run: |
+          echo "The release pull request changes no code; the push to main tests it: skipped."
+          echo "SKIP_MUTATION=true" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -233,7 +242,7 @@ jobs:
       # Caches are immutable: the run id in the key lets every run save, the newest one is restored.
       - name: Restore the incremental baseline
         id: restore
-        if: env.FULL_RUN != 'true'
+        if: env.FULL_RUN != 'true' && env.SKIP_MUTATION != 'true'
         uses: actions/cache/restore@v6
         with:
           path: reports/stryker-incremental.json
@@ -241,7 +250,9 @@ jobs:
           restore-keys: ${{ steps.baseline.outputs.key }}-
       # The mutation score job reports skipped shards (no report) on the pull request.
       - name: Skip without a baseline of main
-        if: github.event_name == 'pull_request' && steps.restore.outputs.cache-matched-key == ''
+        if: >-
+          github.event_name == 'pull_request' && env.SKIP_MUTATION != 'true' &&
+          steps.restore.outputs.cache-matched-key == ''
         env:
           KEY: ${{ steps.baseline.outputs.key }}
         run: |

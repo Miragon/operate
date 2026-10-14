@@ -99,7 +99,8 @@ interactive login (loopback server, browser), and the generated catalog is only 
   runs incrementally from the result of `main` (which it never writes) and reports the score, with
   a warning below the threshold. A pull request for which `main` has no result, because it changes
   the dependencies (every Dependabot pull request), that configuration or the Node major, skips it
-  with a notice; the push to `main` tests the change in full. Static mutants (module-level
+  with a notice; the push to `main` tests the change in full. The release pull request of
+  release-please skips it as well: it changes only versions and the changelog. Static mutants (module-level
   constants such as regular expressions) stay in: `ignoreStatic` would save about 40 % of a full
   run, but hide undetected ones.
 - **Testcontainers** integration tests against the three engines, with and without Basic auth,
