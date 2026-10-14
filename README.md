@@ -26,16 +26,16 @@ way is slow, and every id it copies is a chance to hit the wrong instance.
 operate turns this around: the agent names what it means and what should happen, in one short
 command, and the CLI sends the requests. What you get:
 
-- **Fast, because the agent writes little.** One short command replaces a chain of requests.
-- **Cheap to read.** Answers contain what the next step needs, not everything the engine knows.
-- **No guessing.** The CLI lists its own commands and explains each one, so an agent looks things
-  up instead of inventing them.
-- **Safe on real engines.** Every change can be previewed, deleting needs an explicit yes, and an
-  engine can be marked as look-only.
-- **The whole engine.** Deployments, instances, tasks, incidents, migrations, history, decisions,
-  users and permissions: everything the REST API offers is a command.
-- **Made for scripts too.** It never asks questions, and both its answers and its errors are
-  easy for a program to read.
+- One short command replaces a chain of requests, so the agent writes little and works fast.
+- Answers contain what the next step needs, not everything the engine knows.
+- The CLI lists its own commands and explains each one, so an agent looks things up instead of
+  inventing them.
+- Every change can be previewed, deleting needs an explicit yes, and an engine can be marked as
+  look-only, so it is safe on real engines.
+- Everything the REST API offers is a command: deployments, instances, tasks, incidents,
+  migrations, history, decisions, users and permissions.
+- It never asks questions, and both its answers and its errors are easy for a program to read, so
+  scripts can use it too.
 
 ## Install
 
