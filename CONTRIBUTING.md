@@ -63,8 +63,10 @@ on a dead link between the pages. The `Docs` workflow builds it on every pull re
 - `src/generated/catalog.json`: the command surface, generated from the OpenAPI spec in `spec/`.
 - `scripts/`: catalog generator, standalone executable build, packaging smoke test, demo.
 - `test/`: fakes for the unit tests and the Testcontainers integration tests.
-- `docs/`: the documentation, published as the docs site; `docs/.vitepress/` holds its
-  configuration and the theme, copied unchanged from Miragon/mcp-toolkit.
+- `docs/`: the documentation, published as the docs site; `docs/.vitepress/config.ts` holds its
+  configuration. The theme, the colours and the logos are the Miragon docs kit, vendored unchanged
+  from Miragon/corporate-identity into `docs/.vitepress/miragon/` and `docs/public/logo/`;
+  `npm --prefix docs run check:kit` fails when one of its files was edited here.
 - `skills/operate/`: the Claude Code plugin with its skill, command and evals.
 
 The layers and their rules, the catalog generation, the packaging and the quality gates are

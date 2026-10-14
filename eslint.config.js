@@ -15,10 +15,11 @@ export default defineConfig(
       '.claude/',
       'src/generated/',
       'spec/',
-      // the docs site: its build output, and the theme vendored unchanged from Miragon/mcp-toolkit
+      // the docs site: its build output, and the Miragon docs kit vendored unchanged from
+      // Miragon/corporate-identity (node docs/.vitepress/miragon/check.mjs guards it)
       'docs/.vitepress/cache/',
       'docs/.vitepress/dist/',
-      'docs/.vitepress/theme/',
+      'docs/.vitepress/miragon/',
     ],
   },
   js.configs.recommended,

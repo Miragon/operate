@@ -1,7 +1,7 @@
-# Quality gates: fast checks on Node 22/24, validation of the Claude Code plugin, Testcontainers
-# integration tests per engine, the standalone executable and the container image, and incremental
-# mutation testing (informational on pull requests, skipped on the release pull request; in full
-# weekly and on demand).
+# Quality gates: fast checks on Node 22/24, validation of the Claude Code plugin, the brand checks
+# (docs kit and brand-lint), Testcontainers integration tests per engine, the standalone executable
+# and the container image, and incremental mutation testing (informational on pull requests,
+# skipped on the release pull request; in full weekly and on demand).
 name: CI
 
 on:
@@ -88,6 +88,53 @@ jobs:
           for target in . skills/operate skills; do
             claude plugin validate --strict "$target"
           done
+
+  # The Miragon corporate identity: the docs kit in docs/.vitepress/miragon/ and the logos in
+  # docs/public/logo/ equal their source in Miragon/corporate-identity, and brand-lint finds no
+  # hard violation in the docs and the README (rules and exceptions in .miragon/brand.json).
+  brand:
+    name: Brand (CI source + brand-lint)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Read access to the private Miragon/corporate-identity. Without the secret (not set up yet,
+      # or a pull request from a fork) the job warns and skips; the Docs workflow still checks the
+      # kit against its manifest.
+      CI_SOURCE_TOKEN: ${{ secrets.CORPORATE_IDENTITY_READ_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: No access to Miragon/corporate-identity
+        if: env.CI_SOURCE_TOKEN == ''
+        run: echo "::warning title=Brand checks skipped::CORPORATE_IDENTITY_READ_TOKEN is not set, so the docs kit is not compared with Miragon/corporate-identity and brand-lint does not run. Add the secret (contents:read on Miragon/corporate-identity)."
+
+      # Keep ref on the release the kit was vendored from (docs/.vitepress/miragon/manifest.json).
+      - uses: actions/checkout@v7
+        if: env.CI_SOURCE_TOKEN != ''
+        with:
+          repository: Miragon/corporate-identity
+          ref: v1.10.0
+          token: ${{ env.CI_SOURCE_TOKEN }}
+          path: .ci-source
+          sparse-checkout: plugins/miragon-brand
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        if: env.CI_SOURCE_TOKEN != ''
+        with:
+          node-version: 24.x
+          package-manager-cache: false
+
+      - name: The docs kit equals its source in the CI
+        if: env.CI_SOURCE_TOKEN != ''
+        run: node docs/.vitepress/miragon/check.mjs --ci .ci-source
+
+      - name: brand-lint
+        if: env.CI_SOURCE_TOKEN != ''
+        run: node .ci-source/plugins/miragon-brand/scripts/brand-lint.mjs --nur-hart docs README.md
 
   integration:
     name: integration (${{ matrix.engine }})
