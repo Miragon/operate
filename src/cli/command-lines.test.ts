@@ -278,12 +278,6 @@ const CONFIG_FLAGS: Flags = withFlags(OUTPUT_FLAGS, {
     },
   },
   'auth-token-stdin': { takesValue: false },
-  'auth-token-command': {
-    takesValue: true,
-    check: (value) => {
-      expect(value).toMatch(/^\S[^\n]*$/);
-    },
-  },
   project: { takesValue: false },
   'oauth-issuer': {
     takesValue: true,
@@ -314,8 +308,6 @@ const CONFIG_SUBCOMMANDS: Readonly<Record<string, readonly [number, number]>> = 
   unset: [2, Infinity],
   use: [1, 1],
   delete: [1, 1],
-  trust: [0, 0],
-  untrust: [0, 0],
 };
 
 function checkConfig(rest: readonly string[]): void {

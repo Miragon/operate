@@ -39,7 +39,7 @@ import {
   type Source,
   type UnusedToken,
 } from './types.js';
-import { checkTrustedVariable, PASSWORD_VARIABLE, unsetVariable } from './variable.js';
+import { PASSWORD_VARIABLE, unsetVariable } from './variable.js';
 
 interface Context {
   readonly flags: ConfigFlags;
@@ -94,10 +94,7 @@ function passwordFromEnv(variable: string, name: string, env: Env): string {
   throw unsetVariable(variable, name, PASSWORD_VARIABLE);
 }
 
-/**
- * The password of the profile: from the variable it names (of a project file only while it is
- * trusted), else stored literally.
- */
+/** The password of the profile: from the variable it names, else stored literally. */
 function storedPassword({ env, selected }: Context): Found<string> | undefined {
   if (selected.profile === undefined) return undefined;
   const { name, profile } = selected;
@@ -105,7 +102,6 @@ function storedPassword({ env, selected }: Context): Found<string> | undefined {
   if (variable === undefined) {
     return found(present(profile.auth?.password), 'profile', `auth.password of profile "${name}"`);
   }
-  checkTrustedVariable(variable, selected, PASSWORD_VARIABLE);
   const label = `from ${variable}, auth.passwordEnv of profile "${name}"`;
   return { value: passwordFromEnv(variable, name, env), source: 'profile', label };
 }
@@ -350,9 +346,9 @@ export interface SelectedAuth {
 /**
  * The auth type a command would use and where it came from, without resolving credentials (no
  * password or token variable is read, no command is run): the explicit type, else basic for a
- * username or `--auth-password-stdin`, bearer for a token (or token command) of a flag or the
- * environment, else none (source default). Undefined for an unknown type or an inference conflict (resolution reports
- * them).
+ * username or `--auth-password-stdin`, bearer for a token of `--auth-token-stdin` or
+ * OPERATE_TOKEN or for OPERATE_TOKEN_COMMAND, else none (source default). Undefined for an unknown
+ * type or an inference conflict (resolution reports them).
  */
 export function selectedAuth(
   flags: ConfigFlags,

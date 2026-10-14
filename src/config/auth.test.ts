@@ -144,7 +144,7 @@ describe('profileAuthProblem', () => {
       'profile "prod" has an invalid auth (expected {"type": "basic", "username": "demo", "passwordEnv": "CAMUNDA_PASSWORD"})',
     );
     expect(profileAuthProblem('prod', { username: 'x', apiKey: 'abc' })).toBe(
-      'unknown key(s) apiKey in the auth of profile "prod" (allowed: type, username, passwordEnv, password, issuer, authorizationEndpoint, tokenEndpoint, clientId, clientSecretEnv, clientSecret, scopes, audience, redirectPort, tokenEnv, token, tokenCommand)',
+      'unknown key(s) apiKey in the auth of profile "prod" (allowed: type, username, passwordEnv, password, issuer, authorizationEndpoint, tokenEndpoint, clientId, clientSecretEnv, clientSecret, scopes, audience, redirectPort, tokenEnv, token)',
     );
     expect(profileAuthProblem('prod', { username: 7 })).toBe(
       'profile "prod" has an invalid auth.username (expected a non-empty string)',

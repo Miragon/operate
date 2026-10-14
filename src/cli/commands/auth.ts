@@ -13,7 +13,7 @@ import { checkUsable, iso, notLoggedIn, otherIdentity } from '../../auth/oauth/e
 import { identityOf, sameIdentity } from '../../auth/oauth/identity.js';
 import { login } from '../../auth/oauth/login.js';
 import { logout, type LogoutTarget } from '../../auth/oauth/logout.js';
-import type { LoginDeps } from '../../auth/oauth/types.js';
+import type { LoginDeps, OAuthDeps } from '../../auth/oauth/types.js';
 import type { Env } from '../../config/pick.js';
 import { selectedAuth } from '../../config/resolve-auth.js';
 import { endpointSource } from '../../config/resolve-oauth.js';
@@ -25,7 +25,6 @@ import {
 } from '../../config/resolve.js';
 import {
   type BearerAuthConfig,
-  type CommandBearerConfig,
   DEFAULT_TIMEOUT_MS,
   type ResolvedConfig,
   type SelectedProfile,
@@ -40,7 +39,13 @@ import { type Display, displayOf } from '../display.js';
 import { addGlobalOptions, configFlags, type GlobalOptions, readGlobals } from '../globals.js';
 import { maxWidthOf } from '../output-format.js';
 import { loadConfig } from '../config-files.js';
-import { oauthDeps, type Session, sessionAuthDeps, sessionOAuthDeps } from '../session.js';
+import {
+  oauthDeps,
+  type Session,
+  sessionAuthDeps,
+  sessionOAuthDeps,
+  tokenScope,
+} from '../session.js';
 import {
   bearerNotManaged,
   type BearerStatusView,
@@ -53,11 +58,8 @@ import { type LoginView, loginView, type LogoutView, viewRows } from './auth-vie
 import type { UtilityCommand } from './types.js';
 
 const LOGIN_OPTIONS = ['profile', 'config', 'output', 'timeout', 'verbose'];
-/**
- * `--auth-token-stdin` lets `auth status` show a piped bearer token (design §18),
- * `--auth-token-command` the token of a command (design §23).
- */
-const STATUS_OPTIONS = ['profile', 'config', 'output', 'auth-token-stdin', 'auth-token-command'];
+/** `--auth-token-stdin` lets `auth status` show a piped bearer token (design §18). */
+const STATUS_OPTIONS = ['profile', 'config', 'output', 'auth-token-stdin'];
 const OPTIONS_GROUP = 'Options:';
 const DEFAULT_LOGIN_TIMEOUT_MS = 300_000;
 
@@ -207,10 +209,15 @@ function targetOf(
   };
 }
 
-/** The token command of a resolved configuration, if its bearer token comes from one. */
-function commandOf(resolved: ResolvedConfig | undefined): CommandBearerConfig | undefined {
+/**
+ * The token command of a resolved configuration, if its bearer token comes from one, with the
+ * deps of its token cache (`scope`: tokenScope).
+ */
+function commandTarget(resolved: ResolvedConfig | undefined, deps: OAuthDeps, scope: string) {
   const auth = resolved?.auth;
-  return auth?.type === 'bearer' && auth.command !== undefined ? auth : undefined;
+  return auth?.type === 'bearer' && auth.command !== undefined
+    ? { command: auth, deps: { ...deps, scope } }
+    : undefined;
 }
 
 /** What selected bearer auth for logout, or undefined when another type is selected. */
@@ -224,13 +231,13 @@ function bearerSelection(globals: GlobalOptions, env: Env, selected: SelectedPro
 /** What logout works on: the selected profile and, if they resolve, the OAuth settings. */
 async function logoutTarget(globals: GlobalOptions, context: CliContext) {
   const { runtime } = context;
-  const { config: file } = await loadConfig(runtime, globals.config);
+  const { config: file, project } = await loadConfig(runtime, globals.config);
   const selected = selectProfile(configFlags(globals), runtime.env, file);
   const resolution = tryResolve(globals, runtime, file);
   const resolved = 'config' in resolution ? resolution.config : undefined;
   const deps = oauthDeps(runtime, { ...globals, timeoutMs: logoutTimeout(globals, resolved) });
-  const command = commandOf(resolved);
-  if (command !== undefined) return { command, deps };
+  const command = commandTarget(resolved, deps, tokenScope(project?.path, runtime));
+  if (command !== undefined) return command;
   const target = targetOf(selected, resolution);
   const bearer = bearerSelection(globals, runtime.env, selected);
   if (selected.name !== undefined) {
@@ -256,8 +263,7 @@ async function runLogout(command: Command, context: CliContext): Promise<void> {
   const display = await displayOf(context, globals);
   const found = await logoutTarget(globals, context);
   if ('command' in found) {
-    const deps = { ...found.deps, cwd: runtime.cwd };
-    printView(await logoutCommand(found.command, deps), display, runtime);
+    printView(await logoutCommand(found.command, found.deps), display, runtime);
     return;
   }
   const { target, deps, tokenCache } = found;
@@ -294,7 +300,7 @@ function registerStatus(auth: Command, context: CliContext): void {
   const command = authSubcommand(
     auth,
     'status',
-    'Show the cached OAuth login without network access: user, scopes and the expiry of the access and refresh token. Exit 0 when commands can run without a new login, else LOGIN_REQUIRED (exit 4). With a bearer token: its source and, for a JWT, subject, issuer, audience and expiry; an expired JWT exits with TOKEN_EXPIRED (exit 4). Never prints a token.',
+    'Show the cached OAuth login without network access: user, scopes and the expiry of the access and refresh token. Exit 0 when commands can run without a new login, else LOGIN_REQUIRED (exit 4). With a bearer token: its source (OPERATE_TOKEN_COMMAND runs, unless its token is cached) and, for a JWT, subject, issuer, audience and expiry; an expired JWT given as such exits with TOKEN_EXPIRED (exit 4). Never prints a token.',
   );
   addGlobalOptions(command, STATUS_OPTIONS, OPTIONS_GROUP);
   command.action(() => runStatus(command, context));

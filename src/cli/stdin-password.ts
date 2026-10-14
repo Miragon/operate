@@ -54,29 +54,18 @@ export function firstLine(data: Uint8Array, secret: StdinSecret = PASSWORD): str
   return line.replace(/\r+$/, '');
 }
 
-/**
- * What a command reads from stdin: the password, the token, the body (`--body -`); and whether
- * it was given a token command (`--auth-token-command`).
- */
+/** What a command reads from stdin: the password, the token, the body (`--body -`). */
 export interface StdinUse {
   readonly password: boolean;
   readonly token: boolean;
   readonly body: boolean;
-  readonly tokenCommand?: boolean;
 }
 
 /**
- * Two of `--auth-password-stdin`, `--auth-token-stdin` and `--body -` want stdin, or
- * `--auth-token-stdin` comes with `--auth-token-command`: a usage error, raised before stdin is
- * read.
+ * Two of `--auth-password-stdin`, `--auth-token-stdin` and `--body -` want stdin: a usage error,
+ * raised before stdin is read.
  */
 export function checkStdinUse(use: StdinUse): void {
-  if (use.token && use.tokenCommand === true) {
-    throw usageError(
-      '--auth-token-stdin and --auth-token-command both give the bearer token',
-      'Pipe the token into --auth-token-stdin, or let operate run the command that prints it with --auth-token-command; not both.',
-    );
-  }
   if (use.password && use.token) {
     throw usageError(
       '--auth-password-stdin and --auth-token-stdin both read stdin',

@@ -86,7 +86,7 @@ describe('root help texts', () => {
       '',
       'OAuth: a person runs "operate auth login --profile <name>" once in a terminal; commands then refresh the token on their own.',
       '',
-      'Bearer token from elsewhere (SSO tooling, a CI secret): OPERATE_TOKEN, --auth-token-stdin or a profile (operate config set <profile> --auth bearer --auth-token-env <VAR>).',
+      'Bearer token from elsewhere (SSO tooling, a CI secret): OPERATE_TOKEN, --auth-token-stdin or a profile (operate config set <profile> --auth bearer --auth-token-env <VAR>); OPERATE_TOKEN_COMMAND names a command that prints one (operate guide auth).',
       '',
       'Get started:',
       '  operate ping                        check the connection to the engine',

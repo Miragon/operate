@@ -13,10 +13,13 @@ import type { AuthProvider } from './types.js';
 
 /** What the providers need from the outside world: OAuth's dependencies and the shell. */
 export interface AuthDeps extends OAuthDeps {
-  /** Runs a bearer token command (auth.tokenCommand). */
+  /** Runs the bearer token command (OPERATE_TOKEN_COMMAND). */
   readonly runCommand: Runtime['runCommand'];
-  /** The working directory: token commands without a project file run there (`Runtime.cwd`). */
-  readonly cwd: string;
+  /**
+   * The directory whose commands share the cached token of OPERATE_TOKEN_COMMAND: the project
+   * file's directory, else the working directory (`tokenScope` of src/cli/session.ts).
+   */
+  readonly scope: string;
 }
 
 /**

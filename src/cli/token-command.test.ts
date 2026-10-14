@@ -1,8 +1,7 @@
 /**
- * Bearer token commands end to end through `run()` (design §23): `--auth-token-command`,
- * OPERATE_TOKEN_COMMAND and auth.tokenCommand, the header on the wire, the run again after a 401,
- * failures, masking in --verbose and --dry-run, `ping`, `auth status|login|logout` and
- * `config set|show`.
+ * The bearer token command of OPERATE_TOKEN_COMMAND end to end through `run()` (design §23): the
+ * header on the wire, the run again after a 401, the cache per project, failures, masking in
+ * --verbose and --dry-run, `ping`, `auth status|login|logout` and `config show`.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -12,9 +11,7 @@ import {
   CONFIG_PATH,
   execute,
   fakeRuntime,
-  type FakeRuntime,
   type FakeRuntimeOptions,
-  fileText,
 } from '../../test/support/fake-runtime.js';
 import { TOKEN_DIR } from '../../test/support/oauth.js';
 import { run } from './run.js';
@@ -69,27 +66,29 @@ describe('token command sources', () => {
     expect(result.runtime.commandRuns.map((run) => run.command)).toEqual(['print-token']);
   });
 
-  it('runs --auth-token-command and the command of a profile', async () => {
-    const flag = await cli(['task', 'list', '--auth-token-command', 'flag-cmd'], {
+  it('runs it for a bearer profile without a token, bounded by the request timeout', async () => {
+    const files = { [CONFIG_PATH]: profiles({ type: 'bearer' }) };
+    const stored = await cli(['task', 'list', '--timeout', '5000'], {
+      files,
       env: ENV,
       commands: printing('abc'),
     });
-    expect(flag.runtime.commandRuns.map((run) => run.command)).toEqual(['flag-cmd']);
-    const files = { [CONFIG_PATH]: profiles({ type: 'bearer', tokenCommand: 'profile-cmd' }) };
-    const stored = await cli(['task', 'list'], { files, commands: printing('abc') });
     expect(stored.code).toBe(0);
     expect(stored.runtime.commandRuns).toEqual([
-      { command: 'profile-cmd', options: { timeoutMs: 30_000 } },
+      { command: 'print-token', options: { timeoutMs: 5_000 } },
     ]);
   });
 
-  it('refuses --auth-token-stdin together with --auth-token-command before reading stdin', async () => {
-    const result = await cli(['task', 'list', '--auth-token-stdin', '--auth-token-command', 'c']);
-    expect(result.code).toBe(2);
-    expect(errorOf(result.stderr)).toMatchObject({
-      code: 'USAGE',
-      message: '--auth-token-stdin and --auth-token-command both give the bearer token',
-    });
+  it('is no option: neither a flag nor a profile key gives a command', async () => {
+    const flag = await cli(['task', 'list', '--auth-token-command', 'c']);
+    expect(flag.code).toBe(2);
+    const files = { [CONFIG_PATH]: profiles({ type: 'bearer', tokenCommand: 'c' }) };
+    const stored = await cli(['task', 'list'], { files });
+    expect(stored.code).toBe(3);
+    expect(errorOf(stored.stderr).message).toContain(
+      'sets auth.tokenCommand, which operate no longer reads',
+    );
+    expect(stored.runtime.commandRuns).toEqual([]);
   });
 
   it('notes an unused OPERATE_TOKEN_COMMAND in the hint of a 401', async () => {
@@ -177,17 +176,22 @@ describe('a token command and the engine', () => {
     expect(result.stderr).not.toContain(JWT);
   });
 
-  it('runs the command for --dry-run, and notes a failure instead of failing', async () => {
-    const ok = await cli(['task', 'list', '--dry-run'], { env: ENV, commands: printing(JWT) });
-    expect(JSON.parse(ok.stdout)).toMatchObject({ headers: { Authorization: 'Bearer ***' } });
-    const failing = await cli(['task', 'list', '--dry-run'], {
-      env: ENV,
-      commands: { exitCode: 1 },
-    });
-    expect(failing.code).toBe(0);
-    expect(failing.stderr).toBe(
-      'Note: The bearer token command (OPERATE_TOKEN_COMMAND) failed with exit code 1: the request would fail with LOGIN_FAILED.\n',
+  it('never runs the command for --dry-run: a cached token, else a note', async () => {
+    const runtime = fakeRuntime({ fetch: server().fetch, env: ENV, commands: printing(JWT) });
+    const note = await execute(run, ['task', 'list', '--dry-run'], runtime);
+    expect(note.code).toBe(0);
+    expect(JSON.parse(note.stdout)).toMatchObject({ headers: { Accept: 'application/json' } });
+    expect(note.stderr).toBe(
+      'Note: operate runs the bearer token command of OPERATE_TOKEN_COMMAND for the token when it sends the request; --dry-run does not run it.\n',
     );
+    expect(runtime.commandRuns).toEqual([]);
+    await execute(run, ['task', 'list'], runtime);
+    runtime.stdout.chunks.length = 0;
+    runtime.stderr.chunks.length = 0;
+    const cached = await execute(run, ['task', 'list', '--dry-run'], runtime);
+    expect(JSON.parse(cached.stdout)).toMatchObject({ headers: { Authorization: 'Bearer ***' } });
+    expect(cached.stderr).toBe('');
+    expect(runtime.commandRuns).toHaveLength(1);
   });
 
   it('pings with the user of the token', async () => {
@@ -219,13 +223,10 @@ describe('operate auth with a token command', () => {
       expired: false,
     });
     runtime.stdout.chunks.length = 0;
-    const second = await execute(
-      run,
-      ['auth', 'status', '--auth-token-command', 'print-token'],
-      runtime,
-    );
-    expect(JSON.parse(second.stdout)).toMatchObject({ cached: true, source: 'flag' });
+    const second = await execute(run, ['auth', 'status'], runtime);
+    expect(JSON.parse(second.stdout)).toMatchObject({ cached: true, source: 'env' });
     expect(second.stdout + second.stderr).not.toContain(JWT);
+    expect(runtime.commandRuns).toHaveLength(1);
   });
 
   it('status fails with the error of the command', async () => {
@@ -266,12 +267,12 @@ describe('operate auth with a token command', () => {
   });
 
   it('login does not apply and says that operate runs the command', async () => {
-    const files = { [CONFIG_PATH]: profiles({ type: 'bearer', tokenCommand: 'c' }) };
-    const stored = await cli(['auth', 'login'], { files });
+    const files = { [CONFIG_PATH]: profiles({ type: 'bearer' }) };
+    const stored = await cli(['auth', 'login'], { files, env: ENV });
     expect(stored.code).toBe(2);
     expect(errorOf(stored.stderr)).toMatchObject({
       message: 'operate auth login does not apply to bearer tokens',
-      hint: 'Bearer auth is selected by the auth.type of profile "dev": operate runs the token command (auth.tokenCommand of profile "dev") whenever it needs a token and never logs in itself; `operate auth status` runs it and shows the token\'s claims and expiry. For an OAuth login run by operate: operate config set dev --auth oauth --oauth-issuer <url> --oauth-client-id <id>.',
+      hint: 'Bearer auth is selected by the auth.type of profile "dev": operate runs the token command (OPERATE_TOKEN_COMMAND) whenever it needs a token and never logs in itself; `operate auth status` runs it and shows the token\'s claims and expiry. For an OAuth login run by operate: operate config set dev --auth oauth --oauth-issuer <url> --oauth-client-id <id>.',
     });
     const env = await cli(['auth', 'login'], { env: ENV });
     expect(errorOf(env.stderr).hint).toBe(
@@ -281,38 +282,42 @@ describe('operate auth with a token command', () => {
   });
 });
 
-describe('config set and show with a token command', () => {
-  it('stores the command and shows it unmasked', async () => {
-    const runtime: FakeRuntime = fakeRuntime();
-    const set = await execute(
-      run,
-      ['config', 'set', 'dev', '--auth-token-command', './token.sh dev', '-o', 'json'],
-      runtime,
-    );
-    expect(set.code).toBe(0);
-    expect(JSON.parse(fileText(runtime, CONFIG_PATH) ?? '')).toEqual({
-      defaultProfile: 'dev',
-      profiles: { dev: { auth: { type: 'bearer', tokenCommand: './token.sh dev' } } },
+describe('config show with a token command', () => {
+  it('shows the command unmasked, without running it', async () => {
+    const result = await cli(['config', 'show'], {
+      env: { OPERATE_TOKEN_COMMAND: './token.sh dev' },
     });
-    runtime.stdout.chunks.length = 0;
-    const show = await execute(run, ['config', 'show'], runtime);
-    expect(JSON.parse(show.stdout)).toMatchObject({
+    expect(JSON.parse(result.stdout)).toMatchObject({
       values: {
-        auth: { value: 'bearer' },
-        tokenCommand: { value: './token.sh dev', source: 'profile' },
+        auth: { value: 'bearer', source: 'env' },
+        tokenCommand: { value: './token.sh dev', source: 'env' },
       },
     });
-    expect(runtime.commandRuns).toEqual([]);
+    expect(result.runtime.commandRuns).toEqual([]);
   });
+});
 
-  it('refuses a command given next to another token option', async () => {
-    const result = await cli(
-      ['config', 'set', 'dev', '--auth-token-command', 'c', '--auth-token-env', 'X'],
-      { env: { X: 'set' } },
-    );
-    expect(result.code).toBe(3);
-    expect(errorOf(result.stderr).message).toBe(
-      '--auth-token-env and --auth-token-command exclude each other',
-    );
+describe('the cached token of a project', () => {
+  it('is shared by the directories of a repository with a project file', async () => {
+    const fake = server();
+    const files = { '/home/tester/repo/.operate.json': '{"profiles":{}}' };
+    const options = {
+      fetch: fake.fetch,
+      env: { ...ENV, OPERATE_URL: 'http://localhost:8080/engine-rest' },
+      commands: printing(JWT, OTHER),
+      dirs: ['/home/tester/repo/.git'],
+      files,
+    };
+    const inA = fakeRuntime({ ...options, cwd: '/home/tester/repo/services/a' });
+    await execute(run, ['task', 'list'], inA);
+    await execute(run, ['task', 'list'], { ...inA, cwd: '/home/tester/repo/services/b' });
+    // outside the repository the working directory is the scope
+    await execute(run, ['task', 'list'], { ...inA, cwd: '/home/tester/elsewhere' });
+    expect(inA.commandRuns).toHaveLength(2);
+    expect(fake.requests.map((request) => request.headers.authorization)).toEqual([
+      `Bearer ${JWT}`,
+      `Bearer ${JWT}`,
+      `Bearer ${OTHER}`,
+    ]);
   });
 });

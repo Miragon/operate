@@ -1,9 +1,8 @@
 /**
- * Project config files end to end through `run()` (design §22, §23): the lookup from the working
+ * Project config files end to end through `run()` (design §22): the lookup from the working
  * directory, the merge with the user's config file, `config set|unset|use|delete --project`,
- * `config path|list|show`, the secrets a project file refuses, the trust of its token commands and
- * secret variables (`config trust|untrust`, kept across edits by operate) and the files a command
- * reads.
+ * `config path|list|show`, the credentials and the foreign default a project file refuses, and the
+ * files a command reads.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -21,7 +20,6 @@ import { run } from './run.js';
 
 const REPO = '/home/tester/repo';
 const PROJECT = `${REPO}/.operate.json`;
-const STORE = '/home/tester/.config/operate/trusted.json';
 
 function runtimeOf(options: FakeRuntimeOptions = {}): FakeRuntime {
   const server = fakeServer()
@@ -142,7 +140,7 @@ describe('the project file in commands', () => {
     const result = await cli(['ping'], { files });
     expect(result.code).toBe(3);
     expect(errorOf(result.stderr).message).toBe(
-      `Invalid project file ${PROJECT}: profile "p" stores a secret (auth.token); a project file is shared, so it names where the secret comes from instead (auth.tokenEnv or auth.tokenCommand)`,
+      `Invalid project file ${PROJECT}: profile "p" sets auth.token; a project file is shared and names no credentials, so it comes from OPERATE_TOKEN or OPERATE_TOKEN_COMMAND or a profile "p" of your own config file`,
     );
     expect(result.stderr).not.toContain('Tk9-secret');
     // the docs commands still work, with the default output format
@@ -232,9 +230,22 @@ describe('config set|unset|use|delete --project', () => {
     ]);
     expect(token.code).toBe(3);
     expect(errorOf(token.stderr).message).toBe(
-      `The project file ${PROJECT} must not store secrets: profile "p" stores a secret (auth.token); a project file is shared, so it names where the secret comes from instead (auth.tokenEnv or auth.tokenCommand)`,
+      `The project file ${PROJECT} cannot be written: profile "p" sets auth.token; a project file is shared and names no credentials, so it comes from OPERATE_TOKEN or OPERATE_TOKEN_COMMAND or a profile "p" of your own config file`,
     );
-    expect(errorOf(token.stderr).hint).toContain('without --project');
+    expect(errorOf(token.stderr).hint).toBe(
+      'Credentials come from the environment (OPERATE_TOKEN, OPERATE_TOKEN_COMMAND, OPERATE_PASSWORD, OPERATE_OAUTH_CLIENT_SECRET) or from a profile of the same name in your own config file. Remove it from the project file, e.g. with `operate config unset <profile> auth --project` (`headers` for a secret header), and a committed secret from the history of your repository, too.',
+    );
+    const variable = await sequence(runtime, [
+      'config',
+      'set',
+      'p',
+      '--project',
+      '--auth',
+      'bearer',
+      '--auth-token-env',
+      'CI_TOKEN',
+    ]);
+    expect(errorOf(variable.stderr).message).toContain('profile "p" sets auth.tokenEnv;');
     const header = await sequence(runtime, [
       'config',
       'set',
@@ -245,6 +256,28 @@ describe('config set|unset|use|delete --project', () => {
     ]);
     expect(errorOf(header.stderr).message).toContain('stores the secret header X-Api-Key');
     expect(runtime.files.has(PROJECT)).toBe(false);
+  });
+
+  it('repairs a project file with a credential, which every other command refuses', async () => {
+    const runtime = runtimeOf({
+      files: {
+        [PROJECT]: json5({
+          defaultProfile: 'p',
+          profiles: { p: { url: BASE_URL, auth: { type: 'bearer', tokenEnv: 'GITHUB_TOKEN' } } },
+        }),
+      },
+      env: { GITHUB_TOKEN: 'ghp-secret' },
+    });
+    const refused = await sequence(runtime, ['task', 'list']);
+    expect(refused.code).toBe(3);
+    expect(errorOf(refused.stderr).message).toContain('profile "p" sets auth.tokenEnv;');
+    expect(errorOf(refused.stderr).hint).toContain('operate config unset <profile> auth --project');
+    const unset = await sequence(runtime, ['config', 'unset', 'p', 'tokenEnv', '--project']);
+    expect(unset.code).toBe(0);
+    expect(JSON.parse(fileText(runtime, PROJECT) ?? '')).toEqual({
+      defaultProfile: 'p',
+      profiles: { p: { url: BASE_URL, auth: { type: 'bearer' } } },
+    });
   });
 
   it('points a user edit of a project profile to --project', async () => {
@@ -266,19 +299,49 @@ describe('config set|unset|use|delete --project', () => {
     expect(errorOf(missing.stderr).message).toBe('Profile "nope" does not exist');
   });
 
-  it('notes when a profile of the user overrides one of the project, or its default loses', async () => {
+  it('notes when the default of the project wins, or a profile of the user overrides one', async () => {
     const runtime = runtimeOf({ files: { [PROJECT]: PROJECT_FILE } });
-    const set = await sequence(runtime, ['config', 'set', 'svc', '--engine', 'mine']);
-    expect(set.code).toBe(0);
-    expect(set.stderr).toBe(
-      [
-        `Notice: profile "svc" of your config file now overrides the profile of the same name in the project file ${PROJECT} as a whole: none of the project's settings of "svc" apply. Add --project to change the project's profile instead.`,
-        `Notice: in this repository the defaultProfile of the project file ${PROJECT} ("svc") wins; use --profile, OPERATE_PROFILE or \`operate config use <profile> --project\`.`,
-        '',
-      ].join('\n'),
+    const mine = await sequence(runtime, ['config', 'set', 'mine', '--url', 'http://mine/x']);
+    expect(mine.code).toBe(0);
+    expect(mine.stderr).toBe(
+      `Notice: in this repository the defaultProfile of the project file ${PROJECT} ("svc") wins; use --profile, OPERATE_PROFILE or \`operate config use <profile> --project\`.\n`,
     );
-    const again = await sequence(runtime, ['config', 'set', 'svc', '--timeout', '5']);
+    const set = await sequence(runtime, ['config', 'set', 'shared', '--engine', 'mine']);
+    expect(set.stderr).toBe(
+      `Notice: profile "shared" of your config file now overrides the profile of the same name in the project file ${PROJECT} as a whole: none of the project's settings of "shared" apply. Add --project to change the project's profile instead.\n`,
+    );
+    const again = await sequence(runtime, ['config', 'set', 'shared', '--timeout', '5']);
     expect(again.stderr).toBe('');
+    // a profile of the user's named like the project's default takes the default away
+    const svc = await sequence(runtime, ['config', 'set', 'svc', '--default', '--url', BASE_URL]);
+    expect(svc.stderr).not.toContain('wins');
+  });
+
+  it("never makes a profile of the user's the default of the repository", async () => {
+    const files = {
+      [PROJECT]: json5({ defaultProfile: 'prod', profiles: { prod: { url: 'http://evil/x' } } }),
+      [CONFIG_PATH]: json5({
+        defaultProfile: 'mine',
+        profiles: { mine: { url: BASE_URL }, prod: { url: 'https://prod/x' } },
+      }),
+    };
+    const show = await cli(['config', 'show'], { files });
+    expect(JSON.parse(show.stdout)).toMatchObject({ profile: 'mine', profileFile: CONFIG_PATH });
+    const foreign = { [PROJECT]: json5({ defaultProfile: 'prod', profiles: {} }) };
+    const refused = await cli(['task', 'list'], { files: { ...files, ...foreign } });
+    expect(refused.code).toBe(3);
+    expect(errorOf(refused.stderr).message).toBe(
+      `Invalid project file ${PROJECT}: defaultProfile "prod" is not one of its profiles; a project file chooses only among its own profiles`,
+    );
+    // the hint's repair works on the invalid file
+    const runtime = runtimeOf({
+      files: { [PROJECT]: json5({ defaultProfile: 'prod', profiles: { svc: { url: BASE_URL } } }) },
+    });
+    const hint = errorOf((await sequence(runtime, ['config', 'list'])).stderr).hint;
+    expect(hint).toContain('`operate config use <profile> --project`');
+    expect((await sequence(runtime, ['config', 'use', 'svc', '--project'])).code).toBe(0);
+    expect(JSON.parse(fileText(runtime, PROJECT) ?? '')).toMatchObject({ defaultProfile: 'svc' });
+    expect((await sequence(runtime, ['task', 'list'])).code).toBe(0);
   });
 
   it('keeps the OAuth login of a profile that the other file still has', async () => {
@@ -294,153 +357,5 @@ describe('config set|unset|use|delete --project', () => {
     const both = runtimeOf({ files });
     await sequence(both, ['config', 'delete', 'shared']);
     expect(both.files.has(login)).toBe(true);
-  });
-});
-
-describe('config trust and untrust', () => {
-  const COMMAND_FILE = json5({
-    defaultProfile: 'dev',
-    profiles: { dev: { url: BASE_URL, auth: { type: 'bearer', tokenCommand: './token.sh' } } },
-  });
-
-  it('allow the token commands of the current content, until the file changes', async () => {
-    const runtime = runtimeOf({
-      files: { [PROJECT]: COMMAND_FILE },
-      commands: { stdout: 'tok\n' },
-    });
-    const untrusted = await sequence(runtime, ['task', 'list']);
-    expect(untrusted.code).toBe(3);
-    expect(errorOf(untrusted.stderr).message).toBe(
-      `The bearer token command (auth.tokenCommand of profile "dev") comes from the project file ${PROJECT}, which is not trusted`,
-    );
-    expect(runtime.commandRuns).toEqual([]);
-    const trust = await sequence(runtime, ['config', 'trust']);
-    expect(trust.code).toBe(0);
-    expect(JSON.parse(trust.stdout)).toEqual({
-      projectFile: PROJECT,
-      trusted: true,
-      tokenCommands: { dev: './token.sh' },
-      variables: {},
-    });
-    expect(trust.stderr).toBe(
-      `Trusted the current content of ${PROJECT}. operate runs its token commands and reads the variables it names for secrets until the file changes; a change made outside \`operate config ... --project\` needs a new \`operate config trust\`.\n`,
-    );
-    expect(runtime.files.get(STORE)?.mode).toBe(0o600);
-    expect((await sequence(runtime, ['task', 'list'])).code).toBe(0);
-    expect(runtime.commandRuns).toEqual([
-      { command: './token.sh', options: { timeoutMs: 30_000, cwd: REPO } },
-    ]);
-    // a change by hand needs a new trust
-    runtime.files.set(PROJECT, { data: new TextEncoder().encode(`${COMMAND_FILE}\n`) });
-    expect((await sequence(runtime, ['task', 'list'])).code).toBe(3);
-    await sequence(runtime, ['config', 'trust']);
-    const untrust = await sequence(runtime, ['config', 'untrust', '-o', 'table']);
-    const row = (key: string, value: string) => `${key.padEnd(18)}${value}`;
-    expect(untrust.stdout).toBe(
-      [
-        row('KEY', 'VALUE'),
-        row('projectFile', PROJECT),
-        row('trusted', 'false'),
-        row('tokenCommand dev', './token.sh'),
-        '',
-      ].join('\n'),
-    );
-    expect(untrust.stderr).toBe(
-      `No longer trusting ${PROJECT}: its token commands do not run and the variables it names for secrets are not read.\n`,
-    );
-    expect((await sequence(runtime, ['task', 'list'])).code).toBe(3);
-  });
-
-  it('allow the variables a profile names for secrets, which are not read before', async () => {
-    const files = {
-      [PROJECT]: json5({
-        defaultProfile: 'dev',
-        profiles: {
-          dev: { url: BASE_URL, auth: { type: 'bearer', tokenEnv: 'CI_TOKEN' } },
-          ops: { auth: { type: 'basic', username: 'u', passwordEnv: 'CI_PASSWORD' } },
-        },
-      }),
-    };
-    const runtime = runtimeOf({ files, env: { CI_TOKEN: 'tok-1' } });
-    const untrusted = await sequence(runtime, ['task', 'list']);
-    expect(untrusted.code).toBe(3);
-    expect(errorOf(untrusted.stderr).message).toBe(
-      `The token variable CI_TOKEN (auth.tokenEnv of profile "dev") comes from the project file ${PROJECT}, which is not trusted`,
-    );
-    expect(untrusted.stderr).not.toContain('tok-1');
-    const trust = await sequence(runtime, ['config', 'trust']);
-    expect(JSON.parse(trust.stdout)).toEqual({
-      projectFile: PROJECT,
-      trusted: true,
-      tokenCommands: {},
-      variables: { dev: { tokenEnv: 'CI_TOKEN' }, ops: { passwordEnv: 'CI_PASSWORD' } },
-    });
-    const list = await sequence(runtime, ['task', 'list']);
-    expect(list.code).toBe(0);
-    const untrust = await sequence(runtime, ['config', 'untrust', '-o', 'table']);
-    const row = (key: string, value: string) => `${key.padEnd(17)}${value}`;
-    expect(untrust.stdout).toBe(
-      [
-        row('KEY', 'VALUE'),
-        row('projectFile', PROJECT),
-        row('trusted', 'false'),
-        row('tokenEnv dev', 'CI_TOKEN'),
-        row('passwordEnv ops', 'CI_PASSWORD'),
-        '',
-      ].join('\n'),
-    );
-    expect((await sequence(runtime, ['task', 'list'])).code).toBe(3);
-  });
-
-  it('show the untrusted command in config show without running it', async () => {
-    const runtime = runtimeOf({ files: { [PROJECT]: COMMAND_FILE } });
-    const show = await sequence(runtime, ['config', 'show', '-o', 'table']);
-    expect(show.stdout).toContain(
-      'tokenCommand  ./token.sh (not trusted: review the project file, then operate config trust)  profile',
-    );
-    expect(runtime.commandRuns).toEqual([]);
-  });
-
-  it('keep the trust of a file across edits made with --project', async () => {
-    const runtime = runtimeOf({ commands: { stdout: 'tok\n' } });
-    await sequence(runtime, [
-      'config',
-      'set',
-      'dev',
-      '--project',
-      '--url',
-      BASE_URL,
-      '--auth-token-command',
-      './token.sh',
-    ]);
-    expect((await sequence(runtime, ['task', 'list'])).code).toBe(0);
-    await sequence(runtime, ['config', 'set', 'dev', '--project', '--timeout', '5000']);
-    expect((await sequence(runtime, ['task', 'list'])).code).toBe(0);
-    // an untrusted file stays untrusted
-    await sequence(runtime, ['config', 'untrust']);
-    await sequence(runtime, ['config', 'set', 'dev', '--project', '--timeout', '6000']);
-    expect((await sequence(runtime, ['task', 'list'])).code).toBe(3);
-    // without token commands the entry goes
-    await sequence(runtime, ['config', 'trust']);
-    await sequence(runtime, ['config', 'unset', 'dev', 'auth', '--project']);
-    expect(JSON.parse(fileText(runtime, STORE) ?? '')).toEqual({ files: {} });
-  });
-
-  it('need a project file, and say when OPERATE_CONFIG leaves it out', async () => {
-    const none = await cli(['config', 'trust']);
-    expect(none.code).toBe(3);
-    expect(errorOf(none.stderr).message).toBe(`No project file in ${REPO}/src or above`);
-    const plain = await cli(['config', 'trust'], {
-      files: { [PROJECT]: '{"profiles":{}}', '/c.json': '{"profiles":{}}' },
-      env: { OPERATE_CONFIG: '/c.json' },
-    });
-    expect(plain.stderr).toBe(
-      `Trusted the current content of ${PROJECT}. It has no token commands and names no variables for secrets, so it needs no trust. Note: OPERATE_CONFIG names a config file, so commands do not use the project file now.\n`,
-    );
-    const untrust = await cli(['config', 'untrust'], {
-      files: { [PROJECT]: '{"profiles":{}}', '/c.json': '{"profiles":{}}' },
-      env: { OPERATE_CONFIG: '/c.json' },
-    });
-    expect(untrust.stderr).toContain('are not read. Note: OPERATE_CONFIG');
   });
 });

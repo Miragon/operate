@@ -1,7 +1,7 @@
 /**
- * `operate config path|show|list|set|unset|use|delete|trust|untrust` (design §3, §22). The edits
- * are the pure functions of src/config/edit.ts; this module reads and writes the file (the user's
- * config file with mode 0600, with `--project` the project file, config-project.ts) and prints.
+ * `operate config path|show|list|set|unset|use|delete` (design §3, §22). The edits are the pure
+ * functions of src/config/edit.ts; this module reads and writes the file (the user's config file
+ * with mode 0600, with `--project` the project file, config-project.ts) and prints.
  */
 
 import type { Command } from 'commander';
@@ -35,14 +35,12 @@ import {
   setNotices,
 } from './config-oauth.js';
 import {
-  changeTrust,
   checkUserProfile,
   editTarget,
   overrideNotices,
   PROJECT_OPTION,
   readTarget,
   stillDefined,
-  TRUST_COMMANDS,
   writeTarget,
 } from './config-project.js';
 import {
@@ -100,10 +98,10 @@ async function editConfig(command: Command, context: CliContext, edit: Edit, own
   const flags = editFlags(command);
   const view = await displayOf(context, flags);
   const target = await editTarget(runtime, flags);
-  const { file: previous, trusted } = await readTarget(runtime, target);
+  const previous = await readTarget(runtime, target);
   if (own !== undefined) checkUserProfile(target, previous, own);
   const file = edit(previous);
-  await writeTarget(runtime, target, file, trusted);
+  await writeTarget(runtime, target, file);
   return { file, previous, path: target.path, view, target };
 }
 
@@ -182,13 +180,6 @@ async function removeProfile(name: string, command: Command, context: CliContext
   if (!(await stillDefined(name, target, context.runtime))) await removeLogin(name, context);
 }
 
-function registerTrustCommands(config: Command, context: CliContext): void {
-  for (const [name, description, trust] of TRUST_COMMANDS) {
-    const command = configSubcommand(config, name, description, ['output']);
-    command.action(() => changeTrust(command, context, trust));
-  }
-}
-
 /** Fixed values of the options of `config set`, for shell completion. */
 const SET_VALUES: Readonly<Record<string, readonly string[]>> = {
   '--auth': AUTH_TYPES,
@@ -211,7 +202,7 @@ function completeProfiles(command: Command, rest?: readonly string[]): Command {
 function registerSet(config: Command, context: CliContext): void {
   const set = subcommand(config, 'set')
     .description(
-      'Create or update a profile; only the given values change. The first profile becomes the default. --output is the output format stored in the profile; -o <format> chooses how the profile is printed. Basic auth: --auth basic --auth-user <name> --auth-password-env <VAR> keeps the password in an environment variable. OAuth: --auth oauth --oauth-issuer <url> --oauth-client-id <id>, then operate auth login --profile <profile> in a terminal. A bearer token from elsewhere: --auth bearer --auth-token-env <VAR>, or --auth-token-command <cmd> for a command that prints it. --project writes the project file of the repository instead of your config file.',
+      'Create or update a profile; only the given values change. The first profile becomes the default. --output is the output format stored in the profile; -o <format> chooses how the profile is printed. Basic auth: --auth basic --auth-user <name> --auth-password-env <VAR> keeps the password in an environment variable. OAuth: --auth oauth --oauth-issuer <url> --oauth-client-id <id>, then operate auth login --profile <profile> in a terminal. A bearer token from elsewhere: --auth bearer --auth-token-env <VAR>. --project writes the project file of the repository instead of your config file.',
     )
     .argument('<profile>', 'Profile name, e.g. local or prod-eu')
     .option('--url <url>', 'REST API root, e.g. http://localhost:8080/engine-rest')
@@ -249,7 +240,7 @@ function registerEditCommands(config: Command, context: CliContext): void {
   const unset = configSubcommand(
     config,
     'unset',
-    'Remove values from a profile; auth removes all auth settings, an OAuth setting only itself, token (or tokenEnv, tokenCommand) the bearer token',
+    'Remove values from a profile; auth removes all auth settings, an OAuth setting only itself, token (or tokenEnv) the bearer token',
     FILE_OPTIONS,
   )
     .argument('<profile>', 'Profile name')
@@ -288,6 +279,5 @@ export const configCommand: UtilityCommand = {
       );
     registerReadCommands(config, context);
     registerEditCommands(config, context);
-    registerTrustCommands(config, context);
   },
 };

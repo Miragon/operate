@@ -35,7 +35,6 @@ const SHOW_OPTIONS = [
   'auth-user',
   'auth-password-stdin',
   'auth-token-stdin',
-  'auth-token-command',
   'read-only',
   'show-secrets',
 ];

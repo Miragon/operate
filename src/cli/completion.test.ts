@@ -203,7 +203,6 @@ describe('operate __complete', () => {
       'redirectPort',
       'token',
       'tokenEnv',
-      'tokenCommand',
     ]);
     expect(await values(['config', 'unset', 'prod', 'url', 'e'], { files })).toEqual([
       'engine',

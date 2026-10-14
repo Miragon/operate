@@ -65,19 +65,9 @@ export function maskedView(view: ConfigView, showSecrets: boolean): ConfigView {
   };
 }
 
-/**
- * A VALUE cell: lists (scopes) space-joined; an unused token says why it is not used, a token
- * command of a project file that it is not trusted.
- */
-function cell(entry: {
-  readonly value: unknown;
-  readonly unused?: string;
-  readonly trusted?: boolean;
-}): unknown {
+/** A VALUE cell: lists (scopes) space-joined; an unused token says why it is not used. */
+function cell(entry: { readonly value: unknown; readonly unused?: string }): unknown {
   if (entry.unused !== undefined) return `${String(entry.value)} (unused: ${entry.unused})`;
-  if (entry.trusted === false) {
-    return `${String(entry.value)} (not trusted: review the project file, then operate config trust)`;
-  }
   return Array.isArray(entry.value) ? entry.value.join(' ') : entry.value;
 }
 

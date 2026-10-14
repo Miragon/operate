@@ -6,7 +6,7 @@
 import { type AuthDeps, createAuthProvider } from '../auth/index.js';
 import { withAuthNote } from '../auth/note.js';
 import type { OAuthDeps } from '../auth/oauth/types.js';
-import { tokenDirectory, tokenPath } from '../config/file.js';
+import { pathModule, tokenDirectory, tokenPath } from '../config/file.js';
 import { plainHttpHost } from '../config/oauth.js';
 import { resolveConfig } from '../config/resolve.js';
 import { unusedTokenNote } from '../config/resolve-bearer.js';
@@ -59,7 +59,6 @@ export async function openSession(
     password: authPasswordStdin,
     token: authTokenStdin,
     body: options.bodyFromStdin === true,
-    tokenCommand: globals.authTokenCommand !== undefined,
   });
   const files = await loadConfig(runtime, globals.config);
   const password = authPasswordStdin ? await readStdinPassword(runtime) : undefined;
@@ -119,12 +118,23 @@ export function sessionOAuthDeps(session: Session, runtime: Runtime): OAuthDeps 
   return oauthDeps(runtime, { timeoutMs: session.config.timeoutMs, verbose, showSecrets });
 }
 
-/** What every auth provider of a session needs: `sessionOAuthDeps`, the shell and its directory. */
+/**
+ * The directory whose commands share the cached token of OPERATE_TOKEN_COMMAND: the directory of
+ * the project file in effect (an agent moving between the services of a repository fetches one
+ * token), else the working directory.
+ */
+export function tokenScope(projectPath: string | undefined, runtime: Runtime): string {
+  return projectPath === undefined
+    ? runtime.cwd
+    : pathModule(runtime.platform).dirname(projectPath);
+}
+
+/** What every auth provider of a session needs: `sessionOAuthDeps`, the shell and its scope. */
 export function sessionAuthDeps(session: Session, runtime: Runtime): AuthDeps {
   return {
     ...sessionOAuthDeps(session, runtime),
     runCommand: (command, options) => runtime.runCommand(command, options),
-    cwd: runtime.cwd,
+    scope: tokenScope(session.projectPath, runtime),
   };
 }
 
