@@ -1,39 +1,22 @@
 /**
- * The project file part of `operate config` (design §22, §23): the file an edit writes (the user's
- * config file, or with `--project` the project file `.operate.json`), the checks and notices of
- * edits next to a project file, and `config trust|untrust`, which allow or forbid the token
- * commands and secret variables of the project file's current content.
+ * The project file part of `operate config` (design §22): the file an edit writes (the user's
+ * config file, or with `--project` the project file `.operate.json`), and the checks and notices
+ * of edits next to a project file.
  */
 
-import type { Command } from 'commander';
 import { configError } from '../../config/config-error.js';
-import { readConfigFile, serializeConfigFile, writeConfigFile } from '../../config/file.js';
+import { readConfigFile, writeConfigFile } from '../../config/file.js';
 import {
   findProjectFile,
-  needsTrust,
   PROJECT_FILE,
-  projectSecretProblem,
+  projectProblem,
   readProjectFile,
-  type TrustKey,
-  trustSettings,
 } from '../../config/project.js';
 import { findProfile } from '../../config/resolve.js';
-import {
-  contentHash,
-  isTrusted,
-  readTrustStore,
-  trustStorePath,
-  withTrust,
-  writeTrustStore,
-} from '../../config/trust.js';
 import { type ConfigFile, ENV } from '../../config/types.js';
 import { usageError } from '../../errors.js';
-import { renderValue } from '../../output/render.js';
 import type { Runtime } from '../../runtime.js';
-import { configPath, isExplicit, projectFileOf } from '../config-files.js';
-import type { CliContext } from '../context.js';
-import { displayOf } from '../display.js';
-import { readGlobals } from '../globals.js';
+import { configPath, projectFileOf } from '../config-files.js';
 
 export const PROJECT_OPTION = [
   '--project',
@@ -60,7 +43,7 @@ async function projectInEffect(runtime: Runtime, flag: string | undefined) {
   try {
     const found = await projectFileOf(runtime, flag);
     if (found?.exists !== true) return undefined;
-    return { path: found.path, file: (await readProjectFile(runtime.fs, found.path)).file };
+    return { path: found.path, file: await readProjectFile(runtime.fs, found.path) };
   } catch {
     return undefined;
   }
@@ -87,53 +70,36 @@ export async function editTarget(
   return { path: found.path, project: true };
 }
 
-/** The current content of the target, and for a project file whether it is trusted. */
-export async function readTarget(runtime: Runtime, target: EditTarget) {
-  if (!target.project) {
-    return { file: await readConfigFile(runtime.fs, target.path), trusted: false };
-  }
-  if (!(await runtime.fs.exists(target.path))) return { file: undefined, trusted: true };
-  const { file, content } = await readProjectFile(runtime.fs, target.path);
-  const store = await readTrustStore(runtime.fs, trustStorePath(runtime.env, runtime));
-  // a file without settings that need trust is no risk, so whatever an edit adds is the user's own
-  const trusted = !needsTrust(file) || isTrusted(store, target.path, await contentHash(content));
-  return { file, trusted };
+/**
+ * The current content of the target. A project file is read without its checks, so that an edit
+ * can remove what they refuse (`config unset <profile> tokenEnv --project`); writeTarget checks.
+ */
+export function readTarget(runtime: Runtime, target: EditTarget): Promise<ConfigFile | undefined> {
+  return readConfigFile(runtime.fs, target.path);
 }
 
 /**
- * Writes the edited file. A project file must stay free of secrets (CONFIG, nothing written) and
- * is readable by others (0644, it is shared). An edit keeps the trust of a project file: when it
- * was trusted before (or had no settings that need trust), its new content is trusted, since the
- * token commands and variables in it are the user's own.
+ * Writes the edited file. A project file must stay free of credentials and choose its default
+ * among its own profiles (CONFIG, nothing written), and is readable by others (0644, it is
+ * shared).
  */
 export async function writeTarget(
   runtime: Runtime,
   target: EditTarget,
   file: ConfigFile,
-  trusted: boolean,
 ): Promise<void> {
   if (!target.project) {
     await writeConfigFile(runtime.fs, target.path, file);
     return;
   }
-  const problem = projectSecretProblem(file);
-  if (problem !== undefined) {
+  const invalid = projectProblem(file);
+  if (invalid !== undefined) {
     throw configError(
-      `The project file ${target.path} must not store secrets: ${problem}`,
-      'Store the name of the variable that holds the secret (--auth-password-env, --oauth-client-secret-env, --auth-token-env) or a token command (--auth-token-command), or keep the profile in your own config file (without --project).',
+      `The project file ${target.path} cannot be written: ${invalid.problem}`,
+      invalid.hint,
     );
   }
   await writeConfigFile(runtime.fs, target.path, file, 0o644);
-  if (!trusted) return;
-  const path = trustStorePath(runtime.env, runtime);
-  const hash = needsTrust(file)
-    ? await contentHash(new TextEncoder().encode(serializeConfigFile(file)))
-    : undefined;
-  await writeTrustStore(
-    runtime.fs,
-    path,
-    withTrust(await readTrustStore(runtime.fs, path), target.path, hash),
-  );
 }
 
 /**
@@ -163,6 +129,8 @@ function overrideNotice(other: Other, name: string, before?: ConfigFile, after?:
 function defaultNotice(other: Other, before: ConfigFile | undefined, after: ConfigFile) {
   const projectDefault = other.file.defaultProfile?.trim() ?? '';
   if (after.defaultProfile === before?.defaultProfile || projectDefault === '') return undefined;
+  // a profile of the user's file of the same name takes the project's default away
+  if (findProfile(after, projectDefault) !== undefined) return undefined;
   return `Notice: in this repository the defaultProfile of the project file ${other.path} ("${projectDefault}") wins; use --profile, ${ENV.profile} or \`operate config use <profile> --project\`.`;
 }
 
@@ -185,71 +153,4 @@ export async function stillDefined(name: string, target: EditTarget, runtime: Ru
   if (!target.project) return findProfile(target.other?.file, name) !== undefined;
   const own = await readConfigFile(runtime.fs, configPath(runtime, undefined));
   return findProfile(own, name) !== undefined;
-}
-
-/** `config trust` and `config untrust`: name, description, and whether they trust. */
-export const TRUST_COMMANDS = [
-  [
-    'trust',
-    'Allow the token commands (auth.tokenCommand) and the variables named for secrets (auth.tokenEnv, auth.passwordEnv, auth.clientSecretEnv) of the project file in its current content; review the file first. A change of the file outside `operate config ... --project` needs a new trust. For a person, not for agents.',
-    true,
-  ],
-  ['untrust', 'Forbid the token commands and secret variables of the project file again', false],
-] as const;
-
-/**
- * What `config trust` allows: the token commands by profile, and the variables named for secrets
- * by profile and key.
- */
-function trustView(settings: ReturnType<typeof trustSettings>) {
-  const tokenCommands: Record<string, string> = {};
-  const variables: Record<string, Partial<Record<TrustKey, string>>> = {};
-  for (const [name, { tokenCommand, ...named }] of Object.entries(settings)) {
-    if (tokenCommand !== undefined) tokenCommands[name] = tokenCommand;
-    if (Object.keys(named).length > 0) variables[name] = named;
-  }
-  return { tokenCommands, variables };
-}
-
-/** `config trust` (`trust`) and `config untrust`: records or removes the project file's trust. */
-export async function changeTrust(command: Command, context: CliContext, trust: boolean) {
-  const { runtime } = context;
-  const display = await displayOf(context, readGlobals(command));
-  const found = await findProjectFile(runtime.fs, runtime.cwd, runtime);
-  if (found?.exists !== true) {
-    throw configError(
-      `No project file in ${runtime.cwd} or above`,
-      `operate looks up ${PROJECT_FILE} from the working directory up to the repository root; \`operate config set <profile> --project --url <url>\` creates one.`,
-    );
-  }
-  const { file, content } = await readProjectFile(runtime.fs, found.path);
-  const storePath = trustStorePath(runtime.env, runtime);
-  const store = await readTrustStore(runtime.fs, storePath);
-  const hash = trust ? await contentHash(content) : undefined;
-  await writeTrustStore(runtime.fs, storePath, withTrust(store, found.path, hash));
-  const settings = trustSettings(file);
-  const view = { projectFile: found.path, trusted: trust, ...trustView(settings) };
-  const rows = [
-    { KEY: 'projectFile', VALUE: found.path },
-    { KEY: 'trusted', VALUE: trust },
-    ...Object.entries(settings).flatMap(([name, values]) =>
-      Object.entries(values).map(([key, value]) => ({ KEY: `${key} ${name}`, VALUE: value })),
-    ),
-  ];
-  runtime.stdout.write(renderValue(display.format === 'json' ? view : rows, display));
-  const notice = trustNotice(found.path, trust, needsTrust(file), isExplicit(runtime, undefined));
-  runtime.stderr.write(`${notice}\n`);
-}
-
-function trustNotice(path: string, trust: boolean, needed: boolean, explicit: boolean): string {
-  const unused = explicit
-    ? ` Note: OPERATE_CONFIG names a config file, so commands do not use the project file now.`
-    : '';
-  if (!trust) {
-    return `No longer trusting ${path}: its token commands do not run and the variables it names for secrets are not read.${unused}`;
-  }
-  const what = needed
-    ? 'operate runs its token commands and reads the variables it names for secrets until the file changes; a change made outside `operate config ... --project` needs a new `operate config trust`.'
-    : 'It has no token commands and names no variables for secrets, so it needs no trust.';
-  return `Trusted the current content of ${path}. ${what}${unused}`;
 }

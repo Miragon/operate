@@ -37,22 +37,21 @@ operate config set ci --auth bearer --auth-token-env CI_ENGINE_TOKEN
 
 ## Token commands
 
-A token command prints the token on its first line: \`--auth-token-command <cmd>\`,
-\`OPERATE_TOKEN_COMMAND\` or a profile (\`config set --auth-token-command\`). operate runs it when it
-needs a token, reuses a JWT until shortly before it expires and runs it again once after a 401. A
-failing command exits 4 with \`LOGIN_FAILED\` and the end of its stderr. \`operate auth status\` runs
-it and shows the token's claims; \`operate auth logout\` drops the cached token.
+\`OPERATE_TOKEN_COMMAND\` holds a command line that prints the token on its first line. operate runs
+it in the working directory when it needs a token, reuses a JWT until shortly before it expires
+(also in later calls) and runs it again after a 401. A failing command exits 4 with
+\`LOGIN_FAILED\` and the end of its stderr. \`operate auth status\` runs it and shows the token's
+claims; \`operate auth logout\` drops the cached token. A repository sets it for agents in the
+\`env\` of its \`.claude/settings.json\`, so agent command lines stay short. Use an absolute path or
+no path: a relative one (\`./token.sh\`) runs the script of whatever directory operate runs in.
 
-\`\`\`sh
-operate config set dev --auth bearer --auth-token-command './scripts/token.sh dev'
-operate auth status --profile dev
+\`\`\`json
+{
+  "env": {
+    "OPERATE_TOKEN_COMMAND": "curl -s -d grant_type=password -d client_id=operate-dev -d username=demo -d password=demo http://localhost:8180/realms/dev/protocol/openid-connect/token | jq -r .access_token"
+  }
+}
 \`\`\`
-
-A token command of a project file (\`.operate.json\`) runs code from the repository, and a variable
-it names for a secret (\`tokenEnv\`, \`passwordEnv\`, \`clientSecretEnv\`) goes to its engine: both
-take effect only after a person reviewed the file and ran \`operate config trust\`, again after
-every change. On the CONFIG error (exit 3) that says the file is not trusted, stop and ask the
-user; never run \`operate config trust\` yourself.
 
 ## OAuth
 

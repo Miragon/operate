@@ -2,6 +2,7 @@ import {
   chmod,
   mkdir,
   mkdtemp,
+  realpath,
   readdir,
   readFile,
   rm,
@@ -377,21 +378,12 @@ describe('createNodeRuntime().runCommand', () => {
     expect(text(result.stderr)).toBe('oops\n');
   });
 
-  it('runs in the given directory with stdin closed', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'operate-cmd-'));
-    try {
-      const result = await runtime.runCommand('pwd; cat; echo done', {
-        cwd: directory,
-        timeoutMs: 10_000,
-      });
-      expect(result.exitCode).toBe(0);
-      const [cwd, done] = text(result.stdout).trim().split('\n');
-      expect(await stat(cwd ?? '')).toBeDefined();
-      expect(cwd?.endsWith(directory.split('/').at(-1) ?? '')).toBe(true);
-      expect(done).toBe('done');
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+  it('runs in the working directory with stdin closed', async () => {
+    const result = await runtime.runCommand('pwd; cat; echo done', { timeoutMs: 10_000 });
+    expect(result.exitCode).toBe(0);
+    const [cwd, done] = text(result.stdout).trim().split('\n');
+    expect(await realpath(cwd ?? '')).toBe(await realpath(process.cwd()));
+    expect(done).toBe('done');
   });
 
   it('stops a command that runs too long', async () => {
@@ -406,11 +398,5 @@ describe('createNodeRuntime().runCommand', () => {
     const result = await runtime.runCommand('head -c 1100000 /dev/zero', { timeoutMs: 10_000 });
     expect(result.exitCode).toBe(0);
     expect(result.stdout.length).toBe(1_048_576);
-  });
-
-  it('rejects when the command cannot be started', async () => {
-    await expect(
-      runtime.runCommand('echo x', { cwd: '/does/not/exist', timeoutMs: 1_000 }),
-    ).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

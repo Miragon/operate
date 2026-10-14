@@ -225,8 +225,8 @@ operate config set ci --url https://camunda.example.com/engine-rest --auth beare
   being stored or repeated.
 - JWTs: operate reads `exp`, `sub`, `preferred_username`, `iss` and `aud` without checking the
   signature (the engine or its gateway does). A JWT whose `exp` lies more than 30 s in the past
-  fails before any request with `TOKEN_EXPIRED` (exit 4): fetch a new token. Opaque tokens are sent
-  as they are.
+  fails before any request with `TOKEN_EXPIRED` (exit 4): fetch a new token (a
+  [token command](#token-commands) runs again instead). Opaque tokens are sent as they are.
 - `operate auth status` shows where the token comes from and, for a JWT, subject, user, issuer,
   audience and expiry (exit 4 when it expired), also for a piped token (`--auth-token-stdin`;
   with a Basic or OAuth profile add `OPERATE_AUTH=bearer`, `auth` commands have no `--auth`); it
@@ -244,61 +244,46 @@ operate config set ci --url https://camunda.example.com/engine-rest --auth beare
 ## Token commands
 
 With short-lived tokens (a local Keycloak dev realm, corporate SSO tooling) someone has to fetch a
-new token before nearly every call. A token command does it for operate: a command line that prints
-a bearer token on the first line of its stdout. operate runs it when it needs a token.
-
-| Value         | Flag                         | Environment             | Profile (`auth` object) / `config set` option |
-| ------------- | ---------------------------- | ----------------------- | --------------------------------------------- |
-| type          | `--auth bearer`              | `OPERATE_AUTH`          | `type: "bearer"` / `--auth bearer`            |
-| token command | `--auth-token-command <cmd>` | `OPERATE_TOKEN_COMMAND` | `tokenCommand` / `--auth-token-command <cmd>` |
+new token before nearly every call. `OPERATE_TOKEN_COMMAND` does it for operate: a command line that
+prints a bearer token on the first line of its stdout. operate runs it when it needs a token. A
+repository sets it for agents in the `env` of its `.claude/settings.json` (Claude Code applies it
+once you trusted the folder), people in their shell or in direnv's `.envrc`.
 
 ```sh
 # a local Keycloak dev realm: the password grant of a test user (only for local test realms)
-operate config set dev --url http://localhost:8080/engine-rest --auth bearer --auth-token-command './scripts/dev-token.sh'
-operate auth status --profile dev
-operate task list --profile dev
+export OPERATE_TOKEN_COMMAND="$PWD/scripts/dev-token.sh"
+operate task list
 ```
 
-- The token sources in order: `--auth-token-stdin`, `--auth-token-command`, `OPERATE_TOKEN`,
-  `OPERATE_TOKEN_COMMAND`, then the profile's `tokenEnv`, `tokenCommand` or `token` (one of them).
-  Like `OPERATE_TOKEN`, `--auth-token-command` and `OPERATE_TOKEN_COMMAND` select bearer auth
-  without an auth type; an explicit other type leaves them unused (`config show` says so).
-- The shell runs the command (`sh -c`, `cmd.exe` on Windows) with stdin closed, so it must not
-  wait for input; the request timeout (`--timeout`) bounds it. The first line of its stdout is the
-  token (a leading `Bearer ` is dropped, the rest must be a token, not a JSON answer: use e.g.
-  `jq -r .access_token`). A command of a project file runs in the directory of that file, every
-  other one in the working directory.
-- A JWT with `exp` is cached in the token directory (`command-<hash>.json`, mode `0600`, one per
-  command line and directory it runs in) and reused, also by later and parallel commands, until
-  60 s before it expires (at most half its lifetime), so a long `operate wait` keeps a valid token. An opaque token is fetched once per
-  call. After a 401 operate runs the command once more and retries with the new token before it
-  reports the error. A command that prints an expired JWT fails with `TOKEN_EXPIRED` (exit 4).
-- A command that fails, times out or prints no token fails with `LOGIN_FAILED` (exit 4); the
-  message quotes the end of its stderr. Error messages never show the token, nor the command line
-  (`operate config show` and `operate auth status` print it): keep secrets out of the command line
-  and let the command read them from a file or a variable.
-- `operate auth status` runs the command (or uses its cached token) and shows the command, where
-  it comes from and the claims of the token; `operate auth logout` removes the cached token.
-  `--dry-run` runs it too and notes a failure instead of failing.
+- The token sources in order: `--auth-token-stdin`, `OPERATE_TOKEN`, `OPERATE_TOKEN_COMMAND`, then
+  the profile's `tokenEnv` or `token`. Like `OPERATE_TOKEN`, `OPERATE_TOKEN_COMMAND` selects bearer
+  auth without an auth type; an explicit other type leaves it unused (`config show` says so).
+- The shell runs the command (`sh -c`, `cmd.exe` on Windows) in the working directory with stdin
+  closed, so it must not wait for input; the request timeout (`--timeout`) bounds it. The first
+  line of its stdout is the token (a leading `Bearer ` is dropped, the rest must be a token, not a
+  JSON answer: use e.g. `jq -r .access_token`). Name a script by its absolute path, or use a
+  command without a path (`curl ... | jq -r .access_token`): a relative one such as
+  `./scripts/dev-token.sh` runs the script of whatever directory operate runs in, also of a
+  repository you just cloned.
+- A JWT with `exp` is cached in the token directory (`command-<hash>.json`, mode `0600`) and
+  reused, also by later and parallel commands, until 60 s before it expires (at most half its
+  lifetime), so a long `operate wait` keeps a valid token. There is one cached token per command
+  line and project (the directory of the [project file](configuration.md#project-file) in effect,
+  else the working directory). An opaque token is fetched once per call. A JWT the command prints
+  is sent even when it expired: after a 401 operate runs the command once more and retries the
+  request with the new token before it reports the error.
+- A command that cannot start, fails, times out or prints no token fails with `LOGIN_FAILED`
+  (exit 4); the message quotes the end of its stderr. Error messages never show the token, nor the
+  command line (`operate config show` and `operate auth status` print it): keep secrets out of the
+  command line and let the command read them from a file or a variable.
+- `operate auth status` runs the command (or uses its cached token) and shows the command and the
+  claims of the token; `operate auth logout` removes the cached token. `--dry-run` never runs it:
+  it shows a cached token, else a note.
 
-A token command in a [project file](configuration.md#project-file) runs code from the repository,
-and a variable it names for a secret (`tokenEnv`, `passwordEnv`, `clientSecretEnv`) goes to the
-engine URL the file names. operate therefore runs such a command and reads such a variable only
-after a person reviewed the file and ran `operate config trust` in the repository, which records the
-file with a hash of its content in `trusted.json` of the operate config directory (like direnv's
-`allow`); `config trust` lists the commands and variables it allows. Any change of the file outside
-`operate config ... --project` needs a new `operate config trust`; until then commands fail with a
-CONFIG error (exit 3) that says so. `operate config untrust` withdraws the trust. Token commands and
-variables of your own config file, of a file named with `--config` and of the environment need no
-trust.
-
-```sh
-operate config set dev --project --url http://localhost:8080/engine-rest --auth bearer --auth-token-command './scripts/dev-token.sh'
-operate config trust
-```
-
-Agents never run `operate config trust` themselves: on the CONFIG error about an untrusted project
-file they ask the user to review the file and trust it.
+Only the environment sets a token command, never a profile or a
+[project file](configuration.md#project-file): a project file cannot make operate run code. The
+files that set the environment for you, `.claude/settings.json` and `.envrc`, have trust steps of
+their own.
 
 ## Other headers
 

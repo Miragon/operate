@@ -24,12 +24,13 @@ itself:
   a terminal; `operate auth status` tells an agent whether the login is usable.
 - A bearer token from elsewhere (`OPERATE_TOKEN`) is never refreshed by operate: on
   `TOKEN_EXPIRED` (exit 4) the agent asks for a new token. A token command
-  (`--auth-token-command`, `OPERATE_TOKEN_COMMAND`, `auth.tokenCommand`) fetches short-lived tokens
-  instead, so agent command lines stay short and can be pre-approved.
+  (`OPERATE_TOKEN_COMMAND`, e.g. in the `env` of the repository's `.claude/settings.json`, with an
+  absolute path or no path) fetches short-lived tokens instead, so agent command lines stay short
+  and can be pre-approved.
 - A repository can ship its engines as profiles in a project file (`.operate.json`), so an agent
-  session needs no setup and a bare `operate status` reaches the repository's engine. Token
-  commands of a project file run, and the variables it names for secrets are read, only after a
-  person ran `operate config trust`; agents never do.
+  session needs no setup and a bare `operate status` reaches the repository's engine. A project
+  file names engines, never credentials, so it can neither run code nor send a secret of its
+  choice.
 
 A typical agent workflow is discover, describe, preview, run, with a topic of the guide when the
 task needs more:

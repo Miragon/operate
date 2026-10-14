@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { jwtWith, NOW_S, VALID_CLAIMS } from '../../test/support/bearer.js';
 import { fakeRuntime, type FakeRuntime } from '../../test/support/fake-runtime.js';
 import { authDeps } from '../../test/support/oauth.js';
-import type { CommandBearerConfig, TokenCommand } from '../config/types.js';
-import { OperateError } from '../errors.js';
+import type { CommandBearerConfig } from '../config/types.js';
 import type { TraceEvent } from '../http/types.js';
 import { commandCachePath } from './command-cache.js';
 import { commandBearerAuth, commandToken } from './command-provider.js';
@@ -11,13 +10,8 @@ import { createAuthProvider } from './index.js';
 
 const NOW = NOW_S * 1000;
 
-function config(command: Partial<TokenCommand> = {}): CommandBearerConfig {
-  return {
-    type: 'bearer',
-    source: 'env',
-    origin: 'OPERATE_TOKEN_COMMAND',
-    command: { line: 'print-token', trusted: true, ...command },
-  };
+function config(): CommandBearerConfig {
+  return { type: 'bearer', source: 'env', origin: 'OPERATE_TOKEN_COMMAND', command: 'print-token' };
 }
 
 /** A shell whose command prints the next of `tokens` (the last one again when they run out). */
@@ -32,9 +26,12 @@ function printing(...tokens: string[]): FakeRuntime {
   });
 }
 
-function provider(runtime: FakeRuntime, events?: TraceEvent[], command?: Partial<TokenCommand>) {
-  const deps = authDeps(runtime, events === undefined ? {} : { events });
-  return commandBearerAuth(config(command), deps);
+function provider(runtime: FakeRuntime, events?: TraceEvent[], scope?: string) {
+  const deps = authDeps(runtime, {
+    ...(events === undefined ? {} : { events }),
+    ...(scope === undefined ? {} : { scope }),
+  });
+  return commandBearerAuth(config(), deps);
 }
 
 const JWT = jwtWith(VALID_CLAIMS);
@@ -82,9 +79,19 @@ describe('commandBearerAuth', () => {
     await provider(runtime, events).headers();
     expect(events.map((event) => (event.type === 'note' ? event.message : ''))).toEqual([
       'Running the bearer token command of OPERATE_TOKEN_COMMAND.',
-      'The bearer token command printed a token after 0 ms.',
       'Cached the token until shortly before it expires at 2023-11-14T23:13:20.000Z.',
     ]);
+  });
+
+  it('keeps one cached token per scope', async () => {
+    const runtime = printing(JWT, OTHER);
+    await provider(runtime, undefined, '/repo-a').headers();
+    const other = provider(runtime, undefined, '/repo-b');
+    await expect(other.headers()).resolves.toEqual({ Authorization: `Bearer ${OTHER}` });
+    await expect(provider(runtime, undefined, '/repo-a').headers()).resolves.toEqual({
+      Authorization: `Bearer ${JWT}`,
+    });
+    expect(runtime.commandRuns).toHaveLength(2);
   });
 
   it('fetches an opaque token once per call and never caches it', async () => {
@@ -99,14 +106,17 @@ describe('commandBearerAuth', () => {
     });
   });
 
-  it('runs the command again once after a 401; true only for another token', async () => {
-    const runtime = printing(JWT, OTHER, OTHER);
+  it('runs the command again after every 401; true only for another token', async () => {
+    const runtime = printing(JWT, OTHER, OTHER, JWT);
     const auth = provider(runtime);
     await auth.headers();
     await expect(auth.refresh?.()).resolves.toBe(true);
     await expect(auth.headers()).resolves.toEqual({ Authorization: `Bearer ${OTHER}` });
     await expect(auth.refresh?.()).resolves.toBe(false);
-    expect(runtime.commandRuns).toHaveLength(2);
+    // a later 401 in a long wait (the token was rotated again) runs it again
+    await expect(auth.refresh?.()).resolves.toBe(true);
+    await expect(auth.headers()).resolves.toEqual({ Authorization: `Bearer ${JWT}` });
+    expect(runtime.commandRuns).toHaveLength(4);
     // a 401 before any token (another provider sent the request) runs the command, too
     const fresh = provider(printing(JWT));
     await expect(fresh.refresh?.()).resolves.toBe(true);
@@ -117,54 +127,37 @@ describe('commandBearerAuth', () => {
     expect(same.commandRuns).toHaveLength(2);
   });
 
-  it('fails with TOKEN_EXPIRED when the command prints a JWT expired more than 30 s ago', async () => {
-    const runtime = printing(jwtWith({ ...VALID_CLAIMS, exp: NOW_S - 31 }));
-    const error = await provider(runtime)
-      .headers()
-      .then(
-        () => undefined,
-        (caught: unknown) => caught,
-      );
-    expect(error).toBeInstanceOf(OperateError);
-    expect((error as OperateError).code).toBe('TOKEN_EXPIRED');
-    expect((error as OperateError).message).toBe(
-      'The bearer token that the command of OPERATE_TOKEN_COMMAND printed expired at 2023-11-14T22:12:49.000Z',
-    );
-    expect((error as OperateError).details.hint).toContain('instead of printing a stored one');
-    // within the skew it is sent
-    const skew = printing(jwtWith({ ...VALID_CLAIMS, exp: NOW_S - 30 }));
-    await expect(provider(skew).headers()).resolves.toBeDefined();
+  it('sends an expired token the command printed and runs it again for the next request', async () => {
+    const expired = jwtWith({ ...VALID_CLAIMS, exp: NOW_S - 600 });
+    const runtime = printing(expired, JWT);
+    const auth = provider(runtime);
+    await expect(auth.headers()).resolves.toEqual({ Authorization: `Bearer ${expired}` });
+    await expect(auth.headers()).resolves.toEqual({ Authorization: `Bearer ${JWT}` });
+    expect(runtime.commandRuns).toHaveLength(2);
   });
 
-  it('never reads the cache for an untrusted command', async () => {
+  it('previews a fresh token of the call or the cache, never running the command', async () => {
     const runtime = printing(JWT);
-    await provider(runtime).headers();
-    const untrusted = provider(runtime, undefined, { trusted: false, projectFile: '/r/.x' });
-    await expect(untrusted.headers()).rejects.toMatchObject({ code: 'CONFIG' });
-    await expect(untrusted.preview?.()).rejects.toMatchObject({ code: 'CONFIG' });
-  });
-
-  it('previews the header, or why the request would fail', async () => {
-    await expect(provider(printing(JWT)).preview?.()).resolves.toEqual({
-      headers: { Authorization: `Bearer ${JWT}` },
-    });
-    const failing = provider(fakeRuntime({ commands: { exitCode: 3, stderr: 'no realm' } }));
-    await expect(failing.preview?.()).resolves.toEqual({
+    const note = {
       headers: {},
-      note: 'The bearer token command (OPERATE_TOKEN_COMMAND) failed with exit code 3: no realm: the request would fail with LOGIN_FAILED.',
+      note: 'operate runs the bearer token command of OPERATE_TOKEN_COMMAND for the token when it sends the request; --dry-run does not run it.',
+    };
+    await expect(provider(runtime).preview?.()).resolves.toEqual(note);
+    expect(runtime.commandRuns).toHaveLength(0);
+    const auth = provider(runtime);
+    await auth.headers();
+    const header = { headers: { Authorization: `Bearer ${JWT}` } };
+    await expect(auth.preview?.()).resolves.toEqual(header);
+    await expect(provider(runtime).preview?.()).resolves.toEqual(header);
+    await runtime.sleep(3_540_000);
+    await expect(provider(runtime).preview?.()).resolves.toEqual(note);
+    await expect(auth.preview?.()).resolves.toEqual(note);
+    expect(runtime.commandRuns).toHaveLength(1);
+    const opaque = provider(printing('opaque'));
+    await opaque.headers();
+    await expect(opaque.preview?.()).resolves.toEqual({
+      headers: { Authorization: 'Bearer opaque' },
     });
-    const expired = provider(printing(jwtWith({ exp: NOW_S - 600 })));
-    await expect(expired.preview?.()).resolves.toMatchObject({
-      headers: {},
-      note: expect.stringMatching(/the request would fail with TOKEN_EXPIRED\.$/) as unknown,
-    });
-    const broken = commandBearerAuth(config(), {
-      ...authDeps(fakeRuntime()),
-      now: () => {
-        throw new TypeError('bug');
-      },
-    });
-    await expect(broken.preview?.()).rejects.toThrow(TypeError);
   });
 
   it('explains a 401 and a 403 with the claims of the token it sent', async () => {

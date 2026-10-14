@@ -1,7 +1,8 @@
 /**
- * Runs a command line in the shell for a bearer token command (auth.tokenCommand): stdin closed
- * (operate never waits for input), stdout and stderr captured up to 1 MiB each, killed after the
- * timeout. A kill does not wait for grandchildren that keep the pipes open.
+ * Runs a command line in the shell for the bearer token command (OPERATE_TOKEN_COMMAND): in the
+ * working directory, stdin closed (operate never waits for input), stdout and stderr captured up
+ * to 1 MiB each, killed after the timeout. A kill does not wait for grandchildren that keep the
+ * pipes open.
  */
 
 import { spawn } from 'node:child_process';
@@ -31,7 +32,6 @@ export function runCommand(command: string, options: CommandOptions): Promise<Co
       shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     });
     const stdout = collector();
     const stderr = collector();

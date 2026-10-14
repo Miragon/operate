@@ -45,17 +45,7 @@ describe('changedBearerKeys', () => {
     const both = failure(() => changedBearerKeys(undefined, { authTokenEnv: 'X', authToken: 't' }));
     expect(both.message).toBe('--auth-token-env and --auth-token-stdin exclude each other');
     expect(both.details.hint).toBe(
-      'Store the name of the environment variable that holds the token (recommended), the command that prints it, or the token itself.',
-    );
-    const three = failure(() =>
-      changedBearerKeys(undefined, { authTokenEnv: 'X', authToken: 't', authTokenCommand: 'c' }),
-    );
-    expect(three.message).toBe(
-      '--auth-token-env and --auth-token-stdin and --auth-token-command exclude each other',
-    );
-    const command = failure(() => changedBearerKeys(undefined, { authTokenCommand: 'a\nb' }));
-    expect(command.message).toBe(
-      'The bearer token command from --auth-token-command must be one line that is not blank',
+      'Store the name of the environment variable that holds the token (recommended), or the token itself.',
     );
     const name = failure(() => changedBearerKeys(undefined, { authTokenEnv: 'eyJ.abc.def' }));
     expect(name.message).toBe(
@@ -71,7 +61,6 @@ describe('changedBearerKeys', () => {
     expect(hasBearerOptions({})).toBe(false);
     expect(hasBearerOptions({ authTokenEnv: 'X' })).toBe(true);
     expect(hasBearerOptions({ authToken: 't' })).toBe(true);
-    expect(hasBearerOptions({ authTokenCommand: 'c' })).toBe(true);
   });
 });
 

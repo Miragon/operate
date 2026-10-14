@@ -48,7 +48,7 @@ export function pathModule(platform: string): typeof posix {
 }
 
 /** The platform's operate config directory (never derived from `--config` / OPERATE_CONFIG). */
-export function operateDirectory(env: Env, location: Location): string {
+function operateDirectory(env: Env, location: Location): string {
   if (location.platform === 'win32') {
     const appData =
       absoluteDir(env.APPDATA, win32) ?? win32.join(location.homedir, 'AppData', 'Roaming');
@@ -280,7 +280,7 @@ export async function readConfigFile(
 }
 
 /** The text of a config file: its default profile and profiles, indented, with a final newline. */
-export function serializeConfigFile(config: ConfigFile): string {
+function serializeConfigFile(config: ConfigFile): string {
   const { defaultProfile, profiles } = config;
   return `${JSON.stringify({ ...(defaultProfile === undefined ? {} : { defaultProfile }), profiles }, null, 2)}\n`;
 }
