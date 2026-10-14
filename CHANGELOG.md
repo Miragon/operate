@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.6.0](https://github.com/Miragon/operate/compare/v0.5.0...v0.6.0) (2026-10-14)
+
+
+### Features
+
+* fetch bearer tokens with a command and share profiles in a project file ([#30](https://github.com/Miragon/operate/issues/30)) ([7094f70](https://github.com/Miragon/operate/commit/7094f7066d844adeffa8038769a67f6d43975eb6)), closes [#28](https://github.com/Miragon/operate/issues/28) [#29](https://github.com/Miragon/operate/issues/29)
+* publish standalone binaries and a container image ([#21](https://github.com/Miragon/operate/issues/21)) ([796f1d9](https://github.com/Miragon/operate/commit/796f1d91726e17017c958273a08221b3f807ad9e))
+* split the agent guide into topics ([#23](https://github.com/Miragon/operate/issues/23)) ([b057b76](https://github.com/Miragon/operate/commit/b057b765bfe42ad685478ba3d82fd9937e7b5ea5))
+
+
+### Bug Fixes
+
+* guard secret-looking env names and case-colliding token caches ([#19](https://github.com/Miragon/operate/issues/19)) ([ce6e665](https://github.com/Miragon/operate/commit/ce6e665aa4812685e555cb6ce04aa1295aa00e21))
+* make wait and --wait reliable when the process tree changes during a poll ([#22](https://github.com/Miragon/operate/issues/22)) ([157d2e3](https://github.com/Miragon/operate/commit/157d2e33ff7754d1cb22d16d78dac140ba9a8b2d))
+
+
+### Documentation
+
+* shorten the README, move the reference to docs/ and add community files ([#27](https://github.com/Miragon/operate/issues/27)) ([f7f538e](https://github.com/Miragon/operate/commit/f7f538e1970171aafd5269672e849c4b49fdd8fe))
+
 ## [0.5.0](https://github.com/Miragon/operate/compare/v0.4.0...v0.5.0) (2026-10-11)
 
 
