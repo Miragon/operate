@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.0](https://github.com/Miragon/operate/compare/v0.7.0...v0.8.0) (2026-10-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* OAuth logins cached by operate 0.7.0 and earlier (`tokens/profile-<name>.json`) are no longer read: run `operate auth login` once per login after upgrading. `operate auth logout --profile <name>` of an OAuth profile revokes and removes the old file, `config delete` removes that of the deleted profile.
+
+### Features
+
+* share an OAuth login between profiles of the same file or repository ([#36](https://github.com/Miragon/operate/issues/36)) ([1cce763](https://github.com/Miragon/operate/commit/1cce763cfb1160a381f30a47ec615ddbc68910a1))
+
 ## [0.7.0](https://github.com/Miragon/operate/compare/v0.6.0...v0.7.0) (2026-10-14)
 
 
