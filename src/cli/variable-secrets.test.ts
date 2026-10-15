@@ -117,15 +117,15 @@ describe('secrets typed in place of the name of their variable', () => {
     }
     // config set x2 refused; config set/unset/use print the profile; config list; every
     // command that resolves the auth fails (auth login of a bearer profile: USAGE); auth logout
-    // removes the cached OAuth login (also the one a profile kept from before), revoked without
-    // the secret
+    // removes the cached OAuth login, revoked without the secret (a bearer profile has none:
+    // USAGE)
     expect(codes).toEqual([
       // Basic auth
       3, 3, 0, 0, 0, 3, 3, 0, 3, 3, 3, 3, 3, 3, 0,
       // OAuth
       3, 3, 0, 0, 0, 3, 3, 0, 3, 3, 3, 3, 3, 3, 0,
       // bearer token
-      3, 3, 0, 0, 0, 3, 3, 0, 3, 3, 3, 3, 3, 2, 0,
+      3, 3, 0, 0, 0, 3, 3, 0, 3, 3, 3, 3, 3, 2, 2,
     ]);
   });
 

@@ -8,6 +8,7 @@ import { randomBytes } from 'node:crypto';
 import type { Dirent } from 'node:fs';
 import {
   chmod,
+  lstat,
   mkdir,
   readdir,
   readFile,
@@ -177,6 +178,21 @@ async function directoryEntries(path: string): Promise<DirectoryEntry[]> {
   );
 }
 
+/** Whether the current user owns the entry itself (lstat); false when it is missing. */
+async function ownedByUser(path: string, uid: number): Promise<boolean> {
+  try {
+    return (await lstat(path)).uid === uid;
+  } catch {
+    return false;
+  }
+}
+
+/** The owner check where the platform has user ids (not on Windows). */
+function ownership(): Pick<FileSystem, 'ownedByUser'> {
+  const uid = process.getuid?.();
+  return uid === undefined ? {} : { ownedByUser: (path) => ownedByUser(path, uid) };
+}
+
 const nodeFileSystem: FileSystem = {
   readFile: async (path) => new Uint8Array(await readFile(path)),
   async writeFile(path, data, options) {
@@ -193,6 +209,7 @@ const nodeFileSystem: FileSystem = {
   remove,
   readdir: directoryEntries,
   kind: pathKind,
+  ...ownership(),
 };
 
 /** Cryptographically strong random bytes from WebCrypto, in chunks it accepts. */

@@ -84,7 +84,7 @@ Open this URL in a browser to log in:
 Opened the system browser.
 Waiting up to 300 s for the login at http://127.0.0.1:53682/callback (Ctrl+C cancels).
 Logged in as alice (profile "sso").
-{"profile":"sso","issuer":"https://login.example.com/realms/camunda","clientId":"operate-cli","user":"alice","subject":"27c6dbd7-...","scopes":["openid","offline_access","profile","email"],"accessTokenExpiresAt":"2026-10-09T12:05:00.000Z","accessTokenValid":true,"refreshTokenExpiresAt":"2026-11-08T12:00:00.000Z","canRefresh":true,"loggedInAt":"2026-10-09T12:00:00.000Z","refreshedAt":null,"tokenCache":"/home/me/.config/operate/tokens/profile-sso.json"}
+{"profile":"sso","profiles":["sso"],"issuer":"https://login.example.com/realms/camunda","clientId":"operate-cli","user":"alice","subject":"27c6dbd7-...","scopes":["openid","offline_access","profile","email"],"accessTokenExpiresAt":"2026-10-09T12:05:00.000Z","accessTokenValid":true,"refreshTokenExpiresAt":"2026-11-08T12:00:00.000Z","canRefresh":true,"loggedInAt":"2026-10-09T12:00:00.000Z","refreshedAt":null,"tokenCache":"/home/me/.config/operate/tokens/login-5d41402abc4b2a76b9719d911017c592.json"}
 
 $ operate process-instance list --profile sso
 ```
@@ -126,16 +126,16 @@ $ operate process-instance list --profile sso
   such as Microsoft Entra ID) nothing is revoked and `logout` warns: end the session at the
   provider. A confidential client's login is revoked only with the client secret of the same
   issuer and client.
-- Tokens are cached per profile in `$XDG_CONFIG_HOME/operate/tokens/profile-<name>.json` (default
-  `~/.config/operate/tokens`, Windows `%APPDATA%\operate\tokens`; without a profile
-  `env-<hash>.json`), written atomically with mode `0600` in a `0700` directory, never next to a
-  config file named by `--config`. Upper-case letters of the profile name are percent-encoded
-  (`Prod` → `profile-%50rod.json`), so profiles whose names differ only in case keep separate
-  logins on case-insensitive file systems (macOS, Windows) too; a login that operate 0.5.0 or
-  earlier cached as `profile-Prod.json` moves to the new name on first use. A login is kept for
-  the issuer, client, audience and scopes it was made for; changing them needs a new login
-  (`LOGIN_REQUIRED` names what differs and which `OPERATE_OAUTH_*` variable of the environment
-  causes it).
+- Tokens are cached in `$XDG_CONFIG_HOME/operate/tokens` (default `~/.config/operate/tokens`,
+  Windows `%APPDATA%\operate\tokens`), one file per login (`login-<hash>.json`, see
+  [shared logins](#shared-logins); without a profile `env-<hash>.json`), written atomically with
+  mode `0600` in a `0700` directory, never next to a config file named by `--config`. A login is
+  kept for the issuer, client, audience and scopes it was made for; changing them needs a new
+  login (`LOGIN_REQUIRED` names what differs and which `OPERATE_OAUTH_*` variable of the
+  environment causes it). The `profile-<name>.json` logins of operate 0.7.0 and earlier are no
+  longer used: log in once more. `auth logout --profile <name>` of an OAuth profile revokes and
+  removes the old file of the profile, too (`oldTokenCaches`), `config delete` removes that of
+  the deleted profile; delete others by hand.
 - Refreshes happen 60 s before the access token expires (at most half its lifetime) and once
   after a 401; rotated refresh tokens are stored. Commands running in parallel share one refresh
   through a lock file, so a refresh token is never sent twice (Keycloak ends the session when one
@@ -152,16 +152,61 @@ $ operate process-instance list --profile sso
   `--show-secrets` reveals only the Bearer token. `operate ping` reports `"auth": "oauth"` and the
   user. `config show` lists the OAuth values with their sources (the client secret masked).
 
+### Shared logins
+
+One `operate auth login` serves every OAuth profile of the same origin that stores the same
+issuer (or explicit token endpoint), client id, audience and scopes, so a repository with an
+engine per service needs one login, not one per profile:
+
+```text
+$ operate auth login --profile orders
+...
+Logged in as alice (profile "orders").
+The login also serves 2 other profiles with the same issuer, client, audience and scopes:
+  billing   http://localhost:8113/engine-rest
+  invoices  http://localhost:8114/engine-rest
+```
+
+- The origin is your config file, a config file named by `--config` or `OPERATE_CONFIG`, or the
+  repository of a [project file](configuration.md#project-file): every project file below the
+  repository root, tracked or not, and every worktree of the repository (a worktree counts when
+  its git directory links back to it, as `git worktree add` writes it). Separate clones, a
+  submodule, a copied `.git` file and a project file outside a repository are origins of their
+  own. Like git's `safe.directory`, a `.git` of another user or in a file system root makes no
+  repository (Windows has no owners operate can compare: there only the drive root is refused). A
+  profile of your config file that overrides a project profile of the same name uses the logins of
+  your config file.
+- Only the stored settings decide which login a profile uses; values from `OPERATE_OAUTH_*`
+  variables must still fit the login. A profile with another audience or other scopes has a login
+  of its own, and so has a profile that gets OAuth only from `OPERATE_AUTH=oauth` (no stored
+  `type: "oauth"`). The profiles refresh through one cache file and one lock, so they never send a
+  refresh token twice.
+- `auth login` lists the other profiles the login serves, with their URLs, and `auth status` and
+  `auth logout` name them (`profiles`): those of the files in effect. In a repository, project
+  files elsewhere and other worktrees with the same settings use the login, too, and `logout`
+  ends it for all of them. `config set` says which other profiles share the profile's login.
+  `LOGIN_REQUIRED`, the notes of `--dry-run` and the hint of a 401 name where to log in: the
+  directory of a project file, or `--config` with the config file it names.
+- `config set|unset|delete` remove the login of a profile's previous OAuth settings (without
+  revoking it) when no other OAuth profile of the file uses it any more. The login of a repository
+  stays, with a note: other worktrees and project files of the repository may still use it.
+- A login belongs to the file or repository at its path, so run `auth logout` before you delete a
+  repository whose login is still valid. A login whose settings change outside `operate config`
+  (a pull of the project file, an edit by hand) is no longer found and stays in the token
+  directory, its refresh token valid until it expires: log out before, or delete the file (its
+  `identity` names issuer, client, audience and scopes).
+
 Security notes:
 
 - Use `https://` for the engine URL: operate warns on stderr when it sends the access token over
   plain `http://` to a host other than `localhost`, `127.0.0.1` or `[::1]` (RFC 6750 §5.3).
-- Treat a config file like your own: logins are cached per profile name, so a config file named
-  by `--config` or `OPERATE_CONFIG` whose profile has your profile's name, issuer and client id
-  uses your login and sends your token to its `url` (as `--url` does). Each value resolves on its
-  own, so `OPERATE_OAUTH_CLIENT_SECRET` also goes to the token endpoint of whatever issuer the
-  profile or `OPERATE_OAUTH_ISSUER` names. Point operate (and agents) only at config files and
-  variables you trust.
+- A login only serves the profiles of the origin it was made for: another repository's project
+  file or a config file named by `--config` never gets it, also not with a profile of the same
+  name, issuer and client. Within its origin it goes wherever the profiles' URLs point, so treat a
+  project file like code, and `--url` or `OPERATE_URL` send the login of the selected profile to
+  that URL. Each value resolves on its own, so `OPERATE_OAUTH_CLIENT_SECRET` also goes to the
+  token endpoint of whatever issuer the profile or `OPERATE_OAUTH_ISSUER` names. Point operate
+  (and agents) only at config files and variables you trust.
 - operate rejects a login response whose `iss` (RFC 9207) names another issuer, and requires
   `iss` when the provider advertises it. A provider that sends no `iss` (Microsoft Entra ID) gives
   no such mix-up protection: log in only to issuers you trust.

@@ -353,6 +353,16 @@ describe.skipIf(process.platform === 'win32')('createNodeRuntime().fs.readdir an
     expect(await fs.kind(join(dir, 'missing'))).toBe('missing');
     expect(await fs.kind(join(dir, 'a.bpmn', 'below'))).toBe('missing');
   });
+
+  it('owns what the current user created, a link itself included; nothing that is missing', async () => {
+    await mkdir(join(dir, '.git'));
+    await symlink(join(dir, '.git'), join(dir, 'linked'));
+    await expect(fs.ownedByUser?.(join(dir, '.git'))).resolves.toBe(true);
+    await expect(fs.ownedByUser?.(join(dir, 'linked'))).resolves.toBe(true);
+    await expect(fs.ownedByUser?.(join(dir, 'missing'))).resolves.toBe(false);
+    // the file system root belongs to root, not to the user running the tests
+    if (process.getuid?.() !== 0) await expect(fs.ownedByUser?.('/')).resolves.toBe(false);
+  });
 });
 
 describe('createNodeRuntime().sleep', () => {

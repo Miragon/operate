@@ -10,6 +10,8 @@ import type { OAuthConfig } from '../../config/types.js';
 
 export interface LoginView {
   readonly profile: string | null;
+  /** Every profile that uses the login (design §16.5), in file order; none without a profile. */
+  readonly profiles: readonly string[];
   /** The configured (and discovered) issuer. */
   readonly issuer: string | null;
   readonly clientId: string;
@@ -35,6 +37,10 @@ export interface LoginView {
 
 export interface LogoutView {
   readonly profile: string | null;
+  /** OAuth: every profile that used the login; all of them need a new one. */
+  readonly profiles?: readonly string[];
+  /** The logins operate 0.7.0 and earlier cached under the profile's name, revoked and removed. */
+  readonly oldTokenCaches?: readonly string[];
   readonly tokenCache: string;
   readonly removed: boolean;
   /** null: nothing to revoke or no revocation endpoint. */
@@ -45,15 +51,22 @@ function isoOrNull(epochMs: number | null): string | null {
   return epochMs === null ? null : iso(epochMs);
 }
 
+/** Where a login is cached and which profiles use it. */
+export interface LoginUse {
+  readonly tokenCache: string;
+  readonly profiles: readonly string[];
+}
+
 export function loginView(
   login: CachedLogin,
   config: OAuthConfig,
-  tokenCache: string,
+  use: LoginUse,
   now: number,
 ): LoginView {
   const granted = login.scope?.split(/\s+/).filter((scope) => scope !== '');
   return {
     profile: config.profile ?? null,
+    profiles: use.profiles,
     issuer: config.issuer ?? null,
     clientId: config.clientId,
     user: login.user,
@@ -65,7 +78,7 @@ export function loginView(
     canRefresh: canRefresh(login, now),
     loggedInAt: iso(login.loggedInAt),
     refreshedAt: isoOrNull(login.refreshedAt),
-    tokenCache,
+    tokenCache: use.tokenCache,
   };
 }
 

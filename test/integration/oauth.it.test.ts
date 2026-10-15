@@ -54,8 +54,8 @@ import { makeTempDir, removeTempDir } from './support/temp.js';
 import {
   type CachedLogin,
   envCacheFileName,
-  legacyProfileCacheFile,
-  profileCacheFile,
+  loginCacheFile,
+  loginKeyOf,
   readCache,
   tokenDirectory,
   writeCache,
@@ -89,7 +89,7 @@ const PROFILE = {
   wrongClient: 'wrong-client',
   /** operate-cli with the issuer spelled http://127.0.0.1:<port>/... (only with Docker on localhost) */
   loopbackIp: 'loopback-ip',
-  /** operate-cli like "it": two profiles whose names differ only in case */
+  /** operate-cli like "it" with the email scope: two profiles that share a login, names differ in case */
   caseLower: 'case-it',
   caseUpper: 'Case-It',
 } as const;
@@ -98,11 +98,12 @@ const CLIENT_SECRET_ENV = 'IT_CLIENT_SECRET';
 const UNKNOWN_CLIENT = 'operate-cli-unknown';
 const AUDIENCE = 'engine-rest';
 const DEFAULT_SCOPES = ['openid', 'offline_access'];
+/** The scopes of the profiles that share a login: other than those of "it", so a login of their own. */
+const SHARED = ['openid', 'offline_access', 'email'];
 /** Generous: once, with ~25 unrelated containers running, a Keycloak login took 40 s. */
 const RUN_TIMEOUT_MS = 90_000;
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const JWT = /^[\w-]+\.[\w-]+\.[\w-]+$/;
-const LOGIN_HINT = (profile: string) => `operate auth login --profile ${profile}`;
 const IGNORED_STATE = /Ignored a login callback without the right state/g;
 
 function loginArgs(profile: string, ...extra: string[]): string[] {
@@ -169,8 +170,8 @@ function profilesOf({ url, issuer, host, keycloakPort }: OAuthTopology) {
     [PROFILE.conf]: oauth({ clientId: CLIENTS.confidential, clientSecretEnv: CLIENT_SECRET_ENV }),
     [PROFILE.noaud]: oauth({ clientId: CLIENTS.noAudience }),
     [PROFILE.wrongClient]: oauth({ clientId: UNKNOWN_CLIENT, audience: AUDIENCE }),
-    [PROFILE.caseLower]: oauth({ clientId: CLIENTS.public, audience: AUDIENCE }),
-    [PROFILE.caseUpper]: oauth({ clientId: CLIENTS.public, audience: AUDIENCE }),
+    [PROFILE.caseLower]: oauth({ clientId: CLIENTS.public, audience: AUDIENCE, scopes: SHARED }),
+    [PROFILE.caseUpper]: oauth({ clientId: CLIENTS.public, audience: AUDIENCE, scopes: SHARED }),
     // Keycloak issues tokens for whatever host name the client used; only "localhost" has a twin
     ...(host === 'localhost'
       ? { [PROFILE.loopbackIp]: oauth({ clientId: CLIENTS.public, issuer: loopbackIssuer }) }
@@ -189,8 +190,18 @@ describe.skipIf(engine === undefined)(`OAuth login and tokens against ${engine ?
   };
 
   const top = () => required(topology, 'the OAuth topology');
+  /** The login command of a hint: the suite's config file is named by --config (design §16.5). */
+  const LOGIN_HINT = (profile: string) =>
+    `operate auth login --config ${profilesFile} --profile ${profile}`;
   const tokenEndpoint = () => endpointsOf(top().issuer).token;
-  const cacheFile = (profile: string) => profileCacheFile(workdir, profile);
+  /** The cache file of a profile's login (design §16.5): its config file and stored settings. */
+  const cacheFile = (profile: string) => {
+    const profiles: Readonly<
+      Record<string, { readonly auth: Record<string, unknown> } | undefined>
+    > = profilesOf(top());
+    const stored = required(profiles[profile]?.auth, profile);
+    return loginCacheFile(workdir, loginKeyOf(profilesFile, stored));
+  };
   /** Requests and answers of a run; `<engine>` is the gateway URL, `<token>` the token endpoint. */
   const trace = (result: CliResult) =>
     traceOf(result.stderr, { engine: top().url, token: tokenEndpoint(), issuer: top().issuer });
@@ -366,6 +377,7 @@ describe.skipIf(engine === undefined)(`OAuth login and tokens against ${engine ?
     const view = result.json<LoginOutput>();
     expect(view).toEqual({
       profile: PROFILE.it,
+      profiles: [PROFILE.it],
       issuer,
       clientId: CLIENTS.public,
       user: USER.username,
@@ -643,6 +655,7 @@ describe.skipIf(engine === undefined)(`OAuth login and tokens against ${engine ?
     const logout = await run(authArgs('logout', PROFILE.it));
     expect(expectSuccess(logout).json<LogoutOutput>()).toEqual({
       profile: PROFILE.it,
+      profiles: [PROFILE.it],
       tokenCache: cacheFile(PROFILE.it),
       removed: true,
       revoked: true,
@@ -672,57 +685,52 @@ describe.skipIf(engine === undefined)(`OAuth login and tokens against ${engine ?
     });
   });
 
-  it('keeps the logins of profiles that differ only in case apart, also on macOS and Windows', async () => {
+  it('shares one login between profiles with the same settings, also names that differ in case', async () => {
     const { caseLower, caseUpper } = PROFILE;
     const lower = await login(caseLower);
-    const upper = await login(caseUpper);
-    expect(lower.view.tokenCache).toBe(join(tokenDirectory(workdir), 'profile-case-it.json'));
-    expect(upper.view.tokenCache).toBe(join(tokenDirectory(workdir), 'profile-%43ase-%49t.json'));
-    expect(upper.cache.refreshToken).not.toBe(lower.cache.refreshToken);
-    const files = await readdir(tokenDirectory(workdir));
-    expect(files).toEqual(
-      expect.arrayContaining(['profile-case-it.json', 'profile-%43ase-%49t.json']),
+    expect(lower.view).toMatchObject({
+      profile: caseLower,
+      profiles: [caseLower, caseUpper],
+      tokenCache: cacheFile(caseUpper),
+    });
+    expect(lower.result.stderr).toContain(
+      `The login also serves another profile with the same issuer, client, audience and scopes:\n  ${caseUpper}  ${top().url}\n`,
     );
+    expect(cacheFile(caseLower)).not.toBe(cacheFile(PROFILE.it));
 
-    // on a case-insensitive file system operate 0.5.0 removed the login of "case-it" here
+    // the other profile uses the login and its refresh, and the first one the rotated token
+    await writeCache(cacheFile(caseUpper), { expiresAt: Date.now() - 1_000 });
+    const refreshed = await run(countArgs(caseUpper, globalFlag('verbose')));
+    expect(expectSuccess(refreshed).json<Count>()).toEqual({ count: expect.any(Number) });
+    expect(trace(refreshed)).toEqual(['> POST <token>', '< 200', COUNT_REQUEST, '< 200']);
+    const rotated = await readCache(cacheFile(caseLower));
+    expect(rotated.refreshToken).not.toBe(lower.cache.refreshToken);
+    const reused = await run(countArgs(caseLower, globalFlag('verbose')));
+    expect(trace(expectSuccess(reused))).toEqual([COUNT_REQUEST, '< 200']);
+
+    // a logout of either ends it for both
     const logout = await run(authArgs('logout', caseUpper));
     expect(expectSuccess(logout).json<LogoutOutput>()).toMatchObject({
-      tokenCache: upper.view.tokenCache,
+      profile: caseUpper,
+      profiles: [caseLower, caseUpper],
       removed: true,
       revoked: true,
     });
-    expect(existsSync(cacheFile(caseLower))).toBe(true);
-    expectSuccess(await run(authArgs('status', caseLower)));
-    const count = await run(countArgs(caseLower));
-    expect(expectSuccess(count).json<Count>()).toEqual({ count: expect.any(Number) });
+    expect(logout.stderr).toContain(
+      `Note: the login was shared; profile "${caseLower}" needs a new login, too.`,
+    );
+    const status = await run(authArgs('status', caseLower));
+    expect(expectError(status, 'LOGIN_REQUIRED', 4).hint).toContain(LOGIN_HINT(caseLower));
   });
 
-  it('keeps a login that operate 0.5.0 cached under the old file name of the profile', async () => {
-    const { caseLower, caseUpper } = PROFILE;
-    // "Case-It" logged in with 0.5.0, which cached the login as profile-Case-It.json (here the
-    // login of "case-it" renamed: the same client, issuer, audience and scopes)
+  it('no longer reads a login that operate 0.7.0 cached under the file name of the profile', async () => {
+    const { caseLower } = PROFILE;
     await login(caseLower);
-    const legacy = legacyProfileCacheFile(workdir, caseUpper);
-    await rename(cacheFile(caseLower), legacy);
-    expect(await readdir(tokenDirectory(workdir))).toContain(basename(legacy));
-
-    // the first command of either profile moves it to the current file of "Case-It"
-    const other = await run(authArgs('status', caseLower));
-    expect(expectError(other, 'LOGIN_REQUIRED', 4).hint).toContain(LOGIN_HINT(caseLower));
-    const names = await readdir(tokenDirectory(workdir));
-    expect(names).not.toContain(basename(legacy));
-    expect(names).not.toContain('profile-case-it.json');
-    expect((await stat(cacheFile(caseUpper))).mode & 0o777).toBe(0o600);
-
-    const status = await run(authArgs('status', caseUpper));
-    expect(expectSuccess(status).json<LoginOutput>()).toMatchObject({
-      profile: caseUpper,
-      tokenCache: cacheFile(caseUpper),
-      user: USER.username,
-    });
-    expectSuccess(await run(countArgs(caseUpper)));
-    const logout = await run(authArgs('logout', caseUpper));
-    expect(expectSuccess(logout).json<LogoutOutput>()).toMatchObject({ removed: true });
+    const old = join(tokenDirectory(workdir), `profile-${caseLower}.json`);
+    await rename(cacheFile(caseLower), old);
+    const status = await run(authArgs('status', caseLower));
+    expect(expectError(status, 'LOGIN_REQUIRED', 4).hint).toContain(LOGIN_HINT(caseLower));
+    expect(await readdir(tokenDirectory(workdir))).toContain(basename(old));
   });
 
   it('reports a token of the wrong audience as FORBIDDEN without refreshing', async () => {

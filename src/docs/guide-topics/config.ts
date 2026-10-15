@@ -30,7 +30,10 @@ operate config delete prod
 - \`config set\` stores \`--output\` in the profile and prints in the \`-o\` format; \`config show\`
   shows the values an operation command resolves (its own \`-o\` only formats the output).
 - \`config unset <profile> <key...>\` removes settings (\`url\`, \`engine\`, \`auth\`, \`output\`,
-  \`timeout\`, \`headers\`, \`readOnly\`, ...); \`config delete\` removes the profile.
+  \`timeout\`, \`headers\`, \`readOnly\`, ...); \`config delete\` removes the profile. An edit that
+  changes or removes OAuth settings removes the cached login of the old ones, unless another
+  profile of the file shares it; that of a project file in a repository stays (another worktree
+  may use it), \`operate auth logout\` ends it.
 - \`operate config path\` prints the config file location (\`--config <path>\` overrides it; a file
   named with \`--config\` or \`OPERATE_CONFIG\` must exist, \`config set\` creates it).
 - Use read-only profiles (\`--read-only\`) for production engines: they refuse every command whose

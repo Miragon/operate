@@ -10,6 +10,7 @@ import { configError } from './config-error.js';
 import { redactUrl } from './redact.js';
 import { resolveHeaders } from './headers.js';
 import { type Env, nonEmpty, pick } from './pick.js';
+import { originOf } from './login-key.js';
 import { authorizationConflict, resolveAuth } from './resolve-auth.js';
 import {
   type ConfigFlags,
@@ -81,7 +82,10 @@ function projectOf(file: LoadedConfig | undefined, name: string): ProjectSource 
   return file?.project?.profiles.includes(name) === true ? file.project.source : undefined;
 }
 
-/** The selected profile and, when it comes from there, the project file (design §22). */
+/**
+ * The selected profile, where it comes from (design §16.5) and, when it comes from there, the
+ * project file (design §22).
+ */
 export function selectProfile(
   flags: ConfigFlags,
   env: Env,
@@ -90,9 +94,13 @@ export function selectProfile(
   const selected = profileName(flags, env, file);
   if (selected === undefined) return {};
   const profile = findProfile(file, selected.name);
-  if (profile === undefined) throw missingProfileError(selected.name, file, selected.origin);
+  if (file === undefined || profile === undefined) {
+    throw missingProfileError(selected.name, file, selected.origin);
+  }
   const project = projectOf(file, selected.name);
-  return { name: selected.name, profile, ...compact({ project }) };
+  const origin = originOf(file, selected.name);
+  const configFile = project === undefined ? file.configFile : undefined;
+  return { name: selected.name, profile, ...compact({ project, origin, configFile }) };
 }
 
 function parseUrl(url: string): URL {

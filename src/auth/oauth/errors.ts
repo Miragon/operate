@@ -20,24 +20,64 @@ export function profileNote(profile: string | undefined): string {
   return profile === undefined ? '(no profile)' : `(profile "${profile}")`;
 }
 
+/**
+ * Whose login a message is about and where a person logs in for it (design §16.5): logins are
+ * cached per origin, so the login must run with the same config file or project file. The
+ * resolved OAuthConfig is one.
+ */
+export interface LoginOwner {
+  readonly profile?: string | undefined;
+  /** The directory of the project file the profile comes from. */
+  readonly projectDirectory?: string | undefined;
+  /** The config file named by `--config` or OPERATE_CONFIG the profile comes from. */
+  readonly configFile?: string | undefined;
+}
+
+/** A path as one shell word: as it is when it needs no quotes, else in single quotes. */
+function shellWord(path: string): string {
+  return /^[\w@%+=:,./\\-]+$/.test(path) ? path : `'${path.replace(/'/g, `'\\''`)}'`;
+}
+
+/** `operate auth <command> [--config <file>] [--profile <p>]` for the login of `who`. */
+function authCommand(command: string, who: LoginOwner): string {
+  if (who.profile === undefined) return `operate auth ${command}`;
+  const config = who.configFile === undefined ? '' : ` --config ${shellWord(who.configFile)}`;
+  return `operate auth ${command}${config} --profile ${who.profile}`;
+}
+
 /** The command a person runs to log in. */
-export function loginCommand(profile: string | undefined): string {
-  return profile === undefined ? 'operate auth login' : `operate auth login --profile ${profile}`;
+export function loginCommand(who: LoginOwner): string {
+  return authCommand('login', who);
+}
+
+/** The command that shows the login (no network access). */
+export function statusCommand(who: LoginOwner): string {
+  return authCommand('status', who);
 }
 
 /**
- * The hint of every LOGIN_REQUIRED error. Without a profile the person needs OPERATE_AUTH=oauth
- * too: `auth login` has no `--auth` option, so an agent's `--auth oauth` does not carry over.
+ * `` `operate auth login ...` in a terminal ``, and where: a profile of a project file is logged in
+ * where that file applies. Without a profile the person needs OPERATE_AUTH=oauth too: `auth login`
+ * has no `--auth` option, so an agent's `--auth oauth` does not carry over.
  */
-export function loginHint(profile: string | undefined): string {
+export function inTerminal(who: LoginOwner): string {
+  const where = who.projectDirectory === undefined ? '' : ` in ${who.projectDirectory}`;
   const settings =
-    profile === undefined ? ' with OPERATE_AUTH=oauth and the same OPERATE_OAUTH_* settings' : '';
-  return `Run \`${loginCommand(profile)}\` in a terminal${settings}: a person logs in once in the browser, operate refreshes the token afterwards. Agents cannot log in themselves.`;
+    who.profile === undefined
+      ? ' with OPERATE_AUTH=oauth and the same OPERATE_OAUTH_* settings'
+      : '';
+  return `\`${loginCommand(who)}\` in a terminal${where}${settings}`;
+}
+
+/** The hint of every LOGIN_REQUIRED error. */
+export function loginHint(who: LoginOwner): string {
+  return `Run ${inTerminal(who)}: a person logs in once in the browser, operate refreshes the token afterwards. Agents cannot log in themselves.`;
 }
 
 /** LOGIN_REQUIRED with the login hint, after an optional explanation. */
-export function loginRequired(message: string, profile: string | undefined, why?: string) {
-  const hint = why === undefined ? loginHint(profile) : `${why} ${loginHint(profile)}`;
+export function loginRequired(message: string, who: LoginOwner, why?: string) {
+  const login = loginHint(who);
+  const hint = why === undefined ? login : `${why} ${login}`;
   return new OperateError('LOGIN_REQUIRED', message, { hint });
 }
 
@@ -49,8 +89,14 @@ export function iso(epochMs: number): string {
   return new Date(epochMs).toISOString();
 }
 
-export function notLoggedIn(profile: string | undefined): OperateError {
-  return loginRequired(`Not logged in: ${owner(profile)} has no OAuth login`, profile);
+/** What one login serves (design §16.5), for the hint of a profile that has none. */
+const SHARED_LOGIN =
+  'One login serves every OAuth profile of the same config file, project file or repository that stores the same issuer, client, audience and scopes.';
+
+/** LOGIN_REQUIRED without a cached login. */
+export function notLoggedIn(who: LoginOwner): OperateError {
+  const message = `Not logged in: ${owner(who.profile)} has no OAuth login`;
+  return loginRequired(message, who, who.profile === undefined ? undefined : SHARED_LOGIN);
 }
 
 /**
@@ -66,24 +112,24 @@ export function otherIdentity(stored: LoginIdentity, config: OAuthConfig): Opera
   );
   const why =
     variables.length === 0
-      ? 'The login was made with other settings (the profile changed since, or OPERATE_OAUTH_* variables were set where the login ran).'
+      ? 'The login was made with other settings: OPERATE_OAUTH_* variables were set where the login ran (also through another profile that shares the login).'
       : `${variables.join(', ')} of this environment ${variables.length > 1 ? 'make' : 'makes'} the difference: run the login below with the same ${variables.length > 1 ? 'values' : 'value'}, or unset ${variables.length > 1 ? 'them' : 'it'} here.`;
   return loginRequired(
     `The OAuth login of ${owner(config.profile)} was made for another issuer, client, audience or scopes: ${details}`,
-    config.profile,
+    config,
     why,
   );
 }
 
-export function unknownFormat(path: string, profile: string | undefined): OperateError {
-  return loginRequired(`The token cache ${path} has an unknown format`, profile);
+export function unknownFormat(path: string, who: LoginOwner): OperateError {
+  return loginRequired(`The token cache ${path} has an unknown format`, who);
 }
 
-export function removedWhileRunning(profile: string | undefined): OperateError {
+export function removedWhileRunning(who: LoginOwner): OperateError {
   return loginRequired(
-    `The OAuth login of ${owner(profile)} was removed while this command ran`,
-    profile,
-    'A logout or `operate config delete` removed it.',
+    `The OAuth login of ${owner(who.profile)} was removed while this command ran`,
+    who,
+    'A logout (also of a profile that shares the login) or `operate config set|unset|delete` removed it.',
   );
 }
 
@@ -95,25 +141,26 @@ export const REFRESH_REJECTED =
  * LOGIN_REQUIRED for a login operate cannot refresh: the authorization server refused its
  * refresh token before, it has none, or an expired one.
  */
-export function cannotRefresh(login: CachedLogin, now: number, profile: string | undefined) {
+export function cannotRefresh(login: CachedLogin, now: number, who: LoginOwner) {
   const rejected = login.refreshRejected;
+  const whose = owner(who.profile);
   if (rejected !== undefined) {
     return loginRequired(
-      `The authorization server rejected the refresh token of ${owner(profile)} at ${iso(rejected.at)} (${rejected.error})`,
-      profile,
+      `The authorization server rejected the refresh token of ${whose} at ${iso(rejected.at)} (${rejected.error})`,
+      who,
       REFRESH_REJECTED,
     );
   }
   if (login.refreshToken === null) {
     return loginRequired(
-      `The access token of ${owner(profile)} expired at ${iso(login.expiresAt ?? now)} and there is no refresh token`,
-      profile,
+      `The access token of ${whose} expired at ${iso(login.expiresAt ?? now)} and there is no refresh token`,
+      who,
       'Request the offline_access scope or allow refresh tokens for the client, so that operate can refresh the token.',
     );
   }
   return loginRequired(
-    `The OAuth login of ${owner(profile)} expired at ${iso(login.refreshExpiresAt ?? now)}`,
-    profile,
+    `The OAuth login of ${whose} expired at ${iso(login.refreshExpiresAt ?? now)}`,
+    who,
   );
 }
 
@@ -122,7 +169,7 @@ export function cannotRefresh(login: CachedLogin, now: number, profile: string |
  * authorization server refused its refresh token (recorded only once the access token was due
  * for a refresh or rejected), or the access token expired and there is no usable refresh token.
  */
-export function checkUsable(login: CachedLogin, now: number, profile: string | undefined): void {
+export function checkUsable(login: CachedLogin, now: number, who: LoginOwner): void {
   const expired = isExpired(now, login.expiresAt) && !canRefresh(login, now);
-  if (login.refreshRejected !== undefined || expired) throw cannotRefresh(login, now, profile);
+  if (login.refreshRejected !== undefined || expired) throw cannotRefresh(login, now, who);
 }

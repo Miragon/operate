@@ -119,7 +119,7 @@ async function finish(flow: Flow, code: string): Promise<CachedLogin> {
     clientSecret: config.clientSecret,
     method: metadata.clientAuthMethod,
     endpoint: { url: metadata.tokenEndpoint, source: endpointSource(config) },
-    profile: config.profile,
+    who: config,
   };
   const exchange = { code, redirectUri: flow.redirectUri, verifier: flow.pkce.verifier };
   const tokens = await exchangeCode(client, exchange, deps);

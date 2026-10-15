@@ -10,7 +10,7 @@ import { pathModule, tokenDirectory, tokenPath } from '../config/file.js';
 import { plainHttpHost } from '../config/oauth.js';
 import { resolveConfig } from '../config/resolve.js';
 import { unusedTokenNote } from '../config/resolve-bearer.js';
-import { ENV, type OutputFormat, type ResolvedConfig } from '../config/types.js';
+import { ENV, type LoadedConfig, type OutputFormat, type ResolvedConfig } from '../config/types.js';
 import type { ClientOptions } from '../http/client.js';
 import type { GuardOptions } from '../operation/guards.js';
 import type { Target } from '../operation/request.js';
@@ -31,6 +31,8 @@ export interface Session {
   readonly configPath: string;
   /** The project file in effect, if any (design §22). */
   readonly projectPath: string | undefined;
+  /** The profiles the command sees: the config file and the project file merged. */
+  readonly file: LoadedConfig | undefined;
   readonly format: OutputFormat;
   readonly pretty: boolean;
   readonly fields: readonly string[] | undefined;
@@ -78,6 +80,7 @@ export async function openSession(
     config,
     configPath: files.path,
     projectPath: files.project?.path,
+    file: files.config,
     format,
     pretty: globals.pretty || runtime.stdout.isTTY,
     fields: parseFieldList(globals.fields),

@@ -1,12 +1,10 @@
 /**
- * The OAuth part of `operate config set|delete` (design §16.2.2): the `--oauth-*` options, the
- * secrets `config set` reads from stdin, the notices on stderr after `config set` (also those of
- * Basic auth and bearer tokens) and the removal of a deleted profile's token cache file, under
- * the cache lock so that a refresh in flight cannot write it back.
+ * The OAuth part of `operate config set` (design §16.2.2): the `--oauth-*` options, the
+ * secrets `config set` reads from stdin and the notices on stderr after `config set` (also those
+ * of Basic auth and bearer tokens). What an edit does to cached logins: config-login.ts.
  */
 
 import type { Command } from 'commander';
-import { profileCachePath, removeCache, withCacheLock } from '../../auth/oauth/cache.js';
 import {
   FAMILY_NAMES,
   replacedAuthorization,
@@ -15,10 +13,9 @@ import {
   settingsFamily,
   storedFamily,
 } from '../../config/auth-edit.js';
-import { tokenDirectory, tokenPath } from '../../config/file.js';
 import type { OAuthChanges } from '../../config/oauth-edit.js';
 import type { Env } from '../../config/pick.js';
-import { DEFAULT_TIMEOUT_MS, type Profile } from '../../config/types.js';
+import type { Profile } from '../../config/types.js';
 import { unsetVariableWarnings, type VariableNames } from '../../config/variable.js';
 import { usageError } from '../../errors.js';
 import { compact } from '../../util.js';
@@ -147,11 +144,7 @@ function familyNotice(outcome: SetOutcome): string | undefined {
   const replaced = replacedFamily(outcome.before?.auth, outcome.after?.auth);
   const by = settingsFamily(outcome.after?.auth);
   if (replaced === undefined || by === undefined) return undefined;
-  const logout =
-    replaced === 'oauth'
-      ? ` \`operate auth logout --profile ${outcome.name}\` removes its login.`
-      : '';
-  return `Notice: removed the ${SETTING_NAMES[replaced]} settings of the profile; ${FAMILY_NAMES[by]} replaces them.${logout}`;
+  return `Notice: removed the ${SETTING_NAMES[replaced]} settings of the profile; ${FAMILY_NAMES[by]} replaces them.`;
 }
 
 function headerNotice(outcome: SetOutcome): string | undefined {
@@ -179,33 +172,5 @@ export function setNotices(outcome: SetOutcome): string[] {
       : undefined,
     secrets.token === undefined ? undefined : storedTokenWarning(path),
     ...unsetVariableWarnings(changes, env),
-    outcome.after?.auth?.type === 'oauth'
-      ? `Next: run \`operate auth login --profile ${outcome.name}\` in a terminal to log in.`
-      : undefined,
   ].filter((notice) => notice !== undefined);
-}
-
-/**
- * `config delete`: removes the token cache file of the profile, if any (also one cached under
- * its old file name, `profileCachePath`), holding the cache lock. The login is not revoked
- * (`operate auth logout` does that).
- */
-export async function removeLogin(name: string, context: CliContext): Promise<void> {
-  const { runtime } = context;
-  const tokenDir = tokenDirectory(runtime.env, runtime);
-  const deps = {
-    fs: runtime.fs,
-    tokenDir,
-    tokenPath: (fileName: string) => tokenPath(tokenDir, fileName, runtime.platform),
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-    withLock: <T>(lock: string, holdMs: number, action: () => Promise<T>) =>
-      runtime.withLock(lock, holdMs, action),
-  };
-  const path = await profileCachePath(name, deps);
-  if (!(await runtime.fs.exists(path))) return;
-  if (await withCacheLock(path, deps, () => removeCache(path, deps))) {
-    runtime.stderr.write(
-      `Removed the OAuth login of profile "${name}" (${path}); it was not revoked.\n`,
-    );
-  }
 }

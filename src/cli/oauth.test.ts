@@ -103,7 +103,7 @@ describe('OAuth on operation commands', () => {
       code: 'LOGIN_REQUIRED',
       exitCode: 4,
       message: 'Not logged in: profile "p" has no OAuth login',
-      hint: 'Run `operate auth login --profile p` in a terminal: a person logs in once in the browser, operate refreshes the token afterwards. Agents cannot log in themselves.',
+      hint: 'One login serves every OAuth profile of the same config file, project file or repository that stores the same issuer, client, audience and scopes. Run `operate auth login --profile p` in a terminal: a person logs in once in the browser, operate refreshes the token afterwards. Agents cannot log in themselves.',
     });
   });
 

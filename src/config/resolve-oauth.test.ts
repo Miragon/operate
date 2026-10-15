@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { OperateError } from '../errors.js';
 import { resolveConfig } from './resolve.js';
 import { authorizationConflict, resolveAuth } from './resolve-auth.js';
+import { loginKeyOf } from './login-key.js';
 import { endpointSource } from './resolve-oauth.js';
 import type { ConfigFile, OAuthConfig, ProfileAuth, SelectedProfile } from './types.js';
 
@@ -19,9 +20,21 @@ function failure(action: () => unknown): OperateError {
   throw new Error('expected an error');
 }
 
+const ORIGIN = 'config:/home/tester/.config/operate/config.json';
+
 function profile(auth: ProfileAuth, name = 'p'): SelectedProfile {
-  return { name, profile: { auth } };
+  return { name, profile: { auth }, origin: ORIGIN };
 }
+
+/** The login key of a profile of ORIGIN that stores ISSUER and client operate-cli. */
+const LOGIN = {
+  origin: ORIGIN,
+  issuer: ISSUER,
+  tokenEndpoint: null,
+  clientId: 'operate-cli',
+  audience: null,
+  scopes: ['offline_access', 'openid'],
+};
 
 function oauth(
   flags: Parameters<typeof resolveAuth>[0],
@@ -45,6 +58,7 @@ describe('resolveAuth with OAuth', () => {
         scopes: ['openid', 'offline_access'],
         redirectPort: 0,
         profile: 'p',
+        login: LOGIN,
         sources: {
           endpoints: 'profile',
           clientId: 'profile',
@@ -53,6 +67,49 @@ describe('resolveAuth with OAuth', () => {
         },
       },
       source: 'profile',
+    });
+  });
+
+  it('keys the login on the origin and the stored settings, never on the environment', () => {
+    const env = {
+      OPERATE_OAUTH_ISSUER: 'https://other.example.com/realms/x',
+      OPERATE_OAUTH_SCOPES: 'openid',
+    };
+    const stored = { ...STORED, audience: 'engine-rest', scopes: ['openid', 'openid', 'email'] };
+    expect(oauth({}, env, profile(stored)).login).toEqual({
+      ...LOGIN,
+      audience: 'engine-rest',
+      scopes: ['email', 'openid'],
+    });
+    const endpoints = {
+      type: 'oauth' as const,
+      authorizationEndpoint: `${ISSUER}/auth`,
+      tokenEndpoint: `${ISSUER}/token`,
+      clientId: 'operate-cli',
+    };
+    expect(oauth({}, {}, profile(endpoints)).login).toEqual({
+      ...LOGIN,
+      issuer: null,
+      tokenEndpoint: `${ISSUER}/token`,
+    });
+    // a token endpoint without its authorization endpoint is no explicit endpoint
+    const issuerOnly = { ...STORED, tokenEndpoint: `${ISSUER}/token` };
+    expect(loginKeyOf(ORIGIN, issuerOnly)).toEqual(LOGIN);
+  });
+
+  it('has no login key without a profile, and names the directory of a project profile', () => {
+    const env = { OPERATE_OAUTH_ISSUER: ISSUER, OPERATE_OAUTH_CLIENT_ID: 'operate-cli' };
+    expect(oauth({ auth: 'oauth' }, env).login).toBeUndefined();
+    const project = { path: '/work/shop/.operate.json', directory: '/work/shop' };
+    const selected: SelectedProfile = {
+      name: 'p',
+      profile: { auth: STORED },
+      project,
+      origin: 'repository:/work/shop/.git',
+    };
+    expect(oauth({}, {}, selected)).toMatchObject({
+      login: { ...LOGIN, origin: 'repository:/work/shop/.git' },
+      projectDirectory: '/work/shop',
     });
   });
 
