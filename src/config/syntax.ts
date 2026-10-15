@@ -16,7 +16,7 @@ export function isNonEmptyString(value: unknown): value is string {
 
 /**
  * A profile name: letters, digits, ".", "_" and "-", starting with a letter or digit. Names
- * become token cache file names and appear in hints that people and agents run, so the config
- * file parser enforces it as well as `config set`.
+ * appear in hints and commands that people and agents run, so the config file parser enforces it
+ * as well as `config set`.
  */
 export const PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;

@@ -19,9 +19,11 @@ itself:
 - The workflow commands (`inspect`, `wait`, `advance`, `retry`, `deploy`, `status`) drive a
   process instance without passing ids around; `operate wait` replaces `sleep`, and exit code 9
   says that the process did not reach the expected state.
-- With OAuth, a person logs in once with `operate auth login`; agents never do. A command that
-  needs a new login fails with `LOGIN_REQUIRED` (exit 4) and the hint names the command to run in
-  a terminal; `operate auth status` tells an agent whether the login is usable.
+- With OAuth, a person logs in once with `operate auth login`; agents never do. One login serves
+  every OAuth profile of the repository (in all its worktrees) that stores the same issuer, client,
+  audience and scopes. A command that needs a new login fails with `LOGIN_REQUIRED` (exit 4) and
+  the hint names the command to run in a terminal and where; `operate auth status` tells an agent
+  whether the login is usable.
 - A bearer token from elsewhere (`OPERATE_TOKEN`) is never refreshed by operate: on
   `TOKEN_EXPIRED` (exit 4) the agent asks for a new token. A token command
   (`OPERATE_TOKEN_COMMAND`, e.g. in the `env` of the repository's `.claude/settings.json`, with an
@@ -30,7 +32,7 @@ itself:
 - A repository can ship its engines as profiles in a project file (`.operate.json`), so an agent
   session needs no setup and a bare `operate status` reaches the repository's engine. A project
   file names engines, never credentials, so it can neither run code nor send a secret of its
-  choice.
+  choice, and it only gets the OAuth logins made for its own repository's profiles.
 
 A typical agent workflow is discover, describe, preview, run, with a topic of the guide when the
 task needs more:

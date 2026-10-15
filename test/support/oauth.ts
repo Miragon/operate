@@ -3,23 +3,56 @@
  * (and of every auth provider) on a fake runtime, cached logins and the paths of the token cache.
  */
 
+import { createHash } from 'node:crypto';
 import type { AuthDeps } from '../../src/auth/index.js';
 import type { CachedLogin, LoginDeps, OAuthDeps } from '../../src/auth/oauth/types.js';
-import type { OAuthConfig } from '../../src/config/types.js';
+import type { LoginKey, OAuthConfig } from '../../src/config/types.js';
 import type { TraceEvent } from '../../src/http/types.js';
 import { ISSUER } from './fake-idp.js';
-import type { FakeRuntime } from './fake-runtime.js';
+import { CONFIG_PATH, type FakeRuntime } from './fake-runtime.js';
 
 /** The token directory of the fake runtime's home on Linux. */
 export const TOKEN_DIR = '/home/tester/.config/operate/tokens';
-export const TOKEN_FILE = `${TOKEN_DIR}/profile-p.json`;
+
+/** The origin of the profiles of the fake runtime's config file. */
+const CONFIG_ORIGIN = `config:${CONFIG_PATH}`;
+
+/** The login key of profile p of `oauthProfiles()` in the config file; overrides change it. */
+export function loginKey(overrides: Partial<LoginKey> = {}): LoginKey {
+  const { origin = CONFIG_ORIGIN, profile, ...settings } = overrides;
+  // the key order of the CLI: the file name hashes the JSON
+  return {
+    origin,
+    ...(profile === undefined ? {} : { profile }),
+    issuer: ISSUER,
+    tokenEndpoint: null,
+    clientId: 'operate-cli',
+    audience: null,
+    scopes: ['offline_access', 'openid'],
+    ...settings,
+  };
+}
+
+/** The cache file of a login key (`login-<first 32 hex chars of SHA-256(key JSON)>.json`). */
+export function loginFile(key: LoginKey = loginKey()): string {
+  const digest = createHash('sha256').update(JSON.stringify(key)).digest('hex').slice(0, 32);
+  return `${TOKEN_DIR}/login-${digest}.json`;
+}
+
+/** The cache file of profile p of `oauthProfiles()`. */
+export const TOKEN_FILE = loginFile();
 export const TOKEN_ENDPOINT = `${ISSUER}/protocol/openid-connect/token`;
 export const REVOCATION_ENDPOINT = `${ISSUER}/protocol/openid-connect/revoke`;
 
 /** Changes of the default configuration; undefined removes a property. */
 export type OAuthOverrides = { readonly [K in keyof OAuthConfig]?: OAuthConfig[K] | undefined };
 
+/**
+ * The resolved settings of profile p of `oauthProfiles()`; without a profile (`profile:
+ * undefined`) also without its login key, like the configuration from the environment.
+ */
 export function oauthConfig(overrides: OAuthOverrides = {}): OAuthConfig {
+  const noProfile = 'profile' in overrides && overrides.profile === undefined;
   const merged = {
     type: 'oauth',
     issuer: ISSUER,
@@ -27,6 +60,7 @@ export function oauthConfig(overrides: OAuthOverrides = {}): OAuthConfig {
     scopes: ['openid', 'offline_access'],
     redirectPort: 0,
     profile: 'p',
+    login: noProfile ? undefined : loginKey(),
     sources: {
       endpoints: 'profile',
       clientId: 'profile',

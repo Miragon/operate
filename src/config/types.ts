@@ -90,8 +90,17 @@ export interface OAuthConfig {
   readonly scopes: readonly string[];
   readonly audience?: string;
   readonly redirectPort: number;
-  /** The selected profile; it names the token cache file. */
+  /** The selected profile. */
   readonly profile?: string;
+  /**
+   * The login of the selected profile (design §16.5): profiles with the same key share one cached
+   * login. Absent without a profile: the configuration from the environment has a login of its own.
+   */
+  readonly login?: LoginKey;
+  /** The directory of the project file the profile comes from: a person logs in there. */
+  readonly projectDirectory?: string;
+  /** The config file named by `--config` or OPERATE_CONFIG the profile comes from. */
+  readonly configFile?: string;
   readonly sources: {
     readonly endpoints: Source;
     readonly clientId: Source;
@@ -100,6 +109,32 @@ export interface OAuthConfig {
     readonly audience?: Source;
     readonly redirectPort: Source;
   };
+}
+
+/**
+ * What makes profiles share an OAuth login (design §16.5): where the profile comes from and the
+ * OAuth settings it stores, before the environment applies. The resolved settings still decide
+ * whether a cached login fits (issuer, client, audience and scopes, `identityOf`).
+ */
+export interface LoginKey {
+  /**
+   * Where the profile comes from: `config:<path>` for the user's config file or the one named by
+   * `--config` / OPERATE_CONFIG, `repository:<git directory>` for a project file in a repository
+   * (shared by its worktrees), `project:<path>` for a project file outside one.
+   */
+  readonly origin: string;
+  /**
+   * A profile that stores no `type: "oauth"` (OAuth selected by OPERATE_AUTH) has a login of its
+   * own: its name. Absent for OAuth profiles, which share by their settings.
+   */
+  readonly profile?: string;
+  readonly issuer: string | null;
+  /** The token endpoint of explicit endpoints; null with discovery. */
+  readonly tokenEndpoint: string | null;
+  readonly clientId: string | null;
+  readonly audience: string | null;
+  /** Sorted and deduplicated; the default scopes when the profile stores none. */
+  readonly scopes: readonly string[];
 }
 
 /**
@@ -188,12 +223,25 @@ export const PROFILE_KEYS = [
 export type ProfileKey = (typeof PROFILE_KEYS)[number];
 
 /**
- * The profile a command uses: none, or a profile of the config file with its name and, when it
- * comes from there, the project file.
+ * The profile a command uses: none, or a profile of the config file with its name, where it comes
+ * from (`LoginKey.origin`) and, when it comes from there, the project file.
  */
 export type SelectedProfile =
-  | { readonly name?: undefined; readonly profile?: undefined; readonly project?: undefined }
-  | { readonly name: string; readonly profile: Profile; readonly project?: ProjectSource };
+  | {
+      readonly name?: undefined;
+      readonly profile?: undefined;
+      readonly project?: undefined;
+      readonly origin?: undefined;
+      readonly configFile?: undefined;
+    }
+  | {
+      readonly name: string;
+      readonly profile: Profile;
+      readonly project?: ProjectSource;
+      readonly origin?: string;
+      /** The config file named by `--config` or OPERATE_CONFIG, when the profile comes from it. */
+      readonly configFile?: string;
+    };
 
 export interface ConfigFile {
   readonly defaultProfile?: string;
@@ -205,6 +253,8 @@ export interface ProjectSource {
   readonly path: string;
   /** Its directory: commands below it share the cached token of OPERATE_TOKEN_COMMAND. */
   readonly directory: string;
+  /** Where its profiles come from (`LoginKey.origin`): its repository, else the file itself. */
+  readonly origin?: string;
 }
 
 /**
@@ -214,6 +264,10 @@ export interface ProjectSource {
  * file that the user's file does not override). Never written to a file.
  */
 export interface LoadedConfig extends ConfigFile {
+  /** Where the profiles of the config file come from (`config:<path>`, `LoginKey.origin`). */
+  readonly origin?: string;
+  /** The absolute path of the config file when `--config` or OPERATE_CONFIG named it. */
+  readonly configFile?: string;
   readonly project?: {
     readonly source: ProjectSource;
     /** The profiles that come from the project file (the user's file does not override them). */

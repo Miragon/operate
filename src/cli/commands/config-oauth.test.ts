@@ -211,21 +211,19 @@ describe('config set with OAuth options', () => {
     );
   });
 
-  it('replaces OAuth settings with Basic auth, pointing to auth logout', async () => {
-    const result = await cli(
-      ['config', 'set', 'p', '--auth-user', 'demo', '--auth-password-env', 'PW'],
-      {
-        files: { [CONFIG_PATH]: oauthProfiles() },
-        env: { PW: 'x' },
-      },
-    );
+  it('replaces OAuth settings with Basic auth and removes their login', async () => {
+    const args = ['config', 'set', 'p', '--auth-user', 'demo', '--auth-password-env', 'PW'];
+    const result = await cli(args, {
+      files: { [CONFIG_PATH]: oauthProfiles(), [TOKEN_FILE]: cacheText(cachedLogin(T0)) },
+      env: { PW: 'x' },
+    });
     expect(result.file?.profiles.p?.auth).toEqual({
       type: 'basic',
       username: 'demo',
       passwordEnv: 'PW',
     });
     expect(result.stderr).toBe(
-      'Notice: removed the OAuth settings of the profile; Basic auth replaces them. `operate auth logout --profile p` removes its login.\n',
+      `Notice: removed the OAuth settings of the profile; Basic auth replaces them.\nRemoved the OAuth login of profile "p" for its previous settings (${TOKEN_FILE}); it was not revoked.\n`,
     );
   });
 
@@ -404,11 +402,21 @@ describe('config delete with an OAuth login', () => {
     expect(runtime.locks).toEqual([]);
   });
 
-  it('leaves the login with config unset', async () => {
+  it('keeps the login when config unset leaves the OAuth settings, else removes it', async () => {
     const runtime = fakeRuntime({
-      files: { [CONFIG_PATH]: oauthProfiles(), [TOKEN_FILE]: cacheText(cachedLogin(T0)) },
+      files: {
+        [CONFIG_PATH]: oauthProfiles({}, { engine: 'e' }),
+        [TOKEN_FILE]: cacheText(cachedLogin(T0)),
+      },
     });
-    expect((await execute(run, ['config', 'unset', 'p', 'auth'], runtime)).code).toBe(0);
+    const engine = await execute(run, ['config', 'unset', 'p', 'engine'], runtime);
+    expect(engine.code).toBe(0);
     expect(runtime.files.has(TOKEN_FILE)).toBe(true);
+    runtime.stderr.chunks.length = 0;
+    expect((await execute(run, ['config', 'unset', 'p', 'auth'], runtime)).code).toBe(0);
+    expect(runtime.files.has(TOKEN_FILE)).toBe(false);
+    expect(runtime.stderr.text()).toBe(
+      `Removed the OAuth login of profile "p" for its previous settings (${TOKEN_FILE}); it was not revoked.\n`,
+    );
   });
 });

@@ -47,6 +47,8 @@ export interface BearerStatusOutput {
 /** `operate auth login` (stdout) and `operate auth status`: the cached login, never a token. */
 export interface LoginOutput {
   readonly profile: string | null;
+  /** Every profile that uses the login, in file order. */
+  readonly profiles: readonly string[];
   readonly issuer: string | null;
   readonly clientId: string;
   /** `preferred_username`, else the email of the ID token. */
@@ -69,6 +71,8 @@ export interface LoginOutput {
 /** `operate auth logout`. */
 export interface LogoutOutput {
   readonly profile: string | null;
+  /** OAuth: every profile that used the login. */
+  readonly profiles?: readonly string[];
   readonly tokenCache: string;
   readonly removed: boolean;
   /** null: nothing to revoke or no revocation endpoint. */

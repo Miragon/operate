@@ -14,10 +14,12 @@ import {
   owner,
   profileNote,
   removedWhileRunning,
+  statusCommand,
   unknownFormat,
 } from './errors.js';
 
 const NOW = 1_700_000_000_000;
+const P = { profile: 'p' };
 const HINT =
   'Run `operate auth login --profile p` in a terminal: a person logs in once in the browser, operate refreshes the token afterwards. Agents cannot log in themselves.';
 
@@ -33,11 +35,12 @@ function thrown(action: () => void): OperateError {
 
 describe('login hint', () => {
   it('names the profile, or OPERATE_AUTH and the OPERATE_OAUTH_* settings without one', () => {
-    expect(loginHint('p')).toBe(HINT);
-    expect(loginHint(undefined)).toBe(
+    expect(loginHint(P)).toBe(HINT);
+    expect(loginHint({})).toBe(
       'Run `operate auth login` in a terminal with OPERATE_AUTH=oauth and the same OPERATE_OAUTH_* settings: a person logs in once in the browser, operate refreshes the token afterwards. Agents cannot log in themselves.',
     );
-    expect(loginCommand('prod')).toBe('operate auth login --profile prod');
+    expect(loginCommand({ profile: 'prod' })).toBe('operate auth login --profile prod');
+    expect(loginCommand({ configFile: '/c.json' })).toBe('operate auth login');
     expect(owner('p')).toBe('profile "p"');
     expect(owner(undefined)).toBe('the environment configuration');
     expect(profileNote('p')).toBe('(profile "p")');
@@ -45,28 +48,58 @@ describe('login hint', () => {
   });
 
   it('builds LOGIN_REQUIRED and LOGIN_FAILED with exit code 4', () => {
-    const required = loginRequired('m', 'p', 'Why.');
+    const required = loginRequired('m', P, 'Why.');
     expect(required).toMatchObject({ code: 'LOGIN_REQUIRED', message: 'm' });
     expect(required.exitCode).toBe(4);
     expect(required.details.hint).toBe(`Why. ${HINT}`);
-    expect(loginRequired('m', 'p').details.hint).toBe(HINT);
+    expect(loginRequired('m', P).details.hint).toBe(HINT);
     const failed = loginFailed('f', 'h');
     expect(failed).toMatchObject({ code: 'LOGIN_FAILED', message: 'f', details: { hint: 'h' } });
     expect(failed.exitCode).toBe(4);
   });
 
   it('has the messages of design §16.9', () => {
-    expect(notLoggedIn('p').message).toBe('Not logged in: profile "p" has no OAuth login');
-    expect(unknownFormat('/t.json', 'p').message).toBe(
+    expect(notLoggedIn(P).message).toBe('Not logged in: profile "p" has no OAuth login');
+    expect(unknownFormat('/t.json', P).message).toBe(
       'The token cache /t.json has an unknown format',
     );
-    expect(removedWhileRunning('p').message).toBe(
+    expect(removedWhileRunning(P).message).toBe(
       'The OAuth login of profile "p" was removed while this command ran',
     );
-    expect(removedWhileRunning('p').details.hint).toBe(
-      `A logout or \`operate config delete\` removed it. ${HINT}`,
+    expect(removedWhileRunning(P).details.hint).toBe(
+      `A logout (also of a profile that shares the login) or \`operate config set|unset|delete\` removed it. ${HINT}`,
     );
     expect(iso(0)).toBe('1970-01-01T00:00:00.000Z');
+  });
+
+  it('says that one login serves the profiles with the same settings, but not without a profile', () => {
+    expect(notLoggedIn(P).details.hint).toBe(
+      `One login serves every OAuth profile of the same config file, project file or repository that stores the same issuer, client, audience and scopes. ${HINT}`,
+    );
+    expect(notLoggedIn({}).details.hint).toBe(loginHint({}));
+  });
+
+  it('names where to log in: the project directory, a config file named by --config', () => {
+    expect(loginHint({ profile: 'p', projectDirectory: '/work/shop' })).toContain(
+      'Run `operate auth login --profile p` in a terminal in /work/shop: a person',
+    );
+    expect(loginCommand({ profile: 'p', configFile: '/home/me/ci/operate.json' })).toBe(
+      'operate auth login --config /home/me/ci/operate.json --profile p',
+    );
+    expect(loginCommand({ profile: 'p', configFile: "/home/me/my files/it's.json" })).toBe(
+      "operate auth login --config '/home/me/my files/it'\\''s.json' --profile p",
+    );
+    expect(loginCommand({ profile: 'p', configFile: 'C:\\Users\\me\\op.json' })).toBe(
+      'operate auth login --config C:\\Users\\me\\op.json --profile p',
+    );
+    expect(statusCommand({ profile: 'p', configFile: '/c.json' })).toBe(
+      'operate auth status --config /c.json --profile p',
+    );
+    expect(statusCommand({})).toBe('operate auth status');
+    const who = { profile: 'p', projectDirectory: '/work/shop' };
+    const login = cachedLogin(NOW, { refreshRejected: { at: NOW, error: 'invalid_grant' } });
+    expect(cannotRefresh(login, NOW, who).details.hint).toContain('in a terminal in /work/shop:');
+    expect(removedWhileRunning(who).details.hint).toContain('in /work/shop:');
   });
 });
 
@@ -85,7 +118,7 @@ describe('otherIdentity', () => {
       `${PREFIX}client "operate-cli" (the configuration asks for "other"); audience none (the configuration asks for "engine-rest"); scopes "offline_access openid" (the configuration asks for "openid")`,
     );
     expect(error.details.hint).toBe(
-      `The login was made with other settings (the profile changed since, or OPERATE_OAUTH_* variables were set where the login ran). ${HINT}`,
+      `The login was made with other settings: OPERATE_OAUTH_* variables were set where the login ran (also through another profile that shares the login). ${HINT}`,
     );
   });
 
@@ -142,19 +175,19 @@ describe('otherIdentity', () => {
 describe('checkUsable', () => {
   it('accepts a valid access token or a usable refresh token', () => {
     expect(() => {
-      checkUsable(cachedLogin(NOW), NOW, 'p');
+      checkUsable(cachedLogin(NOW), NOW, P);
     }).not.toThrow();
     expect(() => {
-      checkUsable(cachedLogin(NOW, { expiresAt: NOW - 1 }), NOW, 'p');
+      checkUsable(cachedLogin(NOW, { expiresAt: NOW - 1 }), NOW, P);
     }).not.toThrow();
     expect(() => {
-      checkUsable(cachedLogin(NOW, { refreshToken: null, expiresAt: null }), NOW, 'p');
+      checkUsable(cachedLogin(NOW, { refreshToken: null, expiresAt: null }), NOW, P);
     }).not.toThrow();
   });
 
   it('rejects an expired token without a refresh token', () => {
     const error = thrown(() => {
-      checkUsable(cachedLogin(NOW, { refreshToken: null, expiresAt: NOW }), NOW, 'p');
+      checkUsable(cachedLogin(NOW, { refreshToken: null, expiresAt: NOW }), NOW, P);
     });
     expect(error.code).toBe('LOGIN_REQUIRED');
     expect(error.message).toBe(
@@ -168,7 +201,7 @@ describe('checkUsable', () => {
   it('rejects an expired login', () => {
     const login = cachedLogin(NOW, { expiresAt: NOW - 1, refreshExpiresAt: NOW - 1 });
     const error = thrown(() => {
-      checkUsable(login, NOW, 'p');
+      checkUsable(login, NOW, P);
     });
     expect(error.message).toBe(
       'The OAuth login of profile "p" expired at 2023-11-14T22:13:19.999Z',
@@ -182,7 +215,7 @@ describe('checkUsable', () => {
       refreshRejected: { at: NOW - 5000, error: 'invalid_grant: Invalid refresh token' },
     });
     const error = thrown(() => {
-      checkUsable(login, NOW, 'p');
+      checkUsable(login, NOW, P);
     });
     expect(error.code).toBe('LOGIN_REQUIRED');
     expect(error.message).toBe(
@@ -193,16 +226,16 @@ describe('checkUsable', () => {
     );
     // a refusal is recorded only for a token due for a refresh or rejected: not usable either
     expect(() => {
-      checkUsable({ ...login, expiresAt: NOW + 1 }, NOW, 'p');
+      checkUsable({ ...login, expiresAt: NOW + 1 }, NOW, P);
     }).toThrow('rejected the refresh token');
   });
 
   it('uses the current time for unknown expiries in the message', () => {
     const login = cachedLogin(NOW, { refreshToken: null, expiresAt: null });
-    expect(cannotRefresh(login, NOW, undefined).message).toBe(
+    expect(cannotRefresh(login, NOW, {}).message).toBe(
       'The access token of the environment configuration expired at 2023-11-14T22:13:20.000Z and there is no refresh token',
     );
-    expect(cannotRefresh(cachedLogin(NOW, { refreshExpiresAt: null }), NOW, 'p').message).toBe(
+    expect(cannotRefresh(cachedLogin(NOW, { refreshExpiresAt: null }), NOW, P).message).toBe(
       'The OAuth login of profile "p" expired at 2023-11-14T22:13:20.000Z',
     );
   });

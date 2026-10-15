@@ -8,7 +8,14 @@ import { configError } from '../../config/config-error.js';
 import { OperateError } from '../../errors.js';
 import { isRecord } from '../../util.js';
 import { decodeBase64Url } from '../jwt.js';
-import { loginCommand, loginFailed, loginRequired, owner, REFRESH_REJECTED } from './errors.js';
+import {
+  loginCommand,
+  loginFailed,
+  type LoginOwner,
+  loginRequired,
+  owner,
+  REFRESH_REJECTED,
+} from './errors.js';
 import {
   type ClientCredentials,
   type Endpoint,
@@ -23,7 +30,7 @@ import type { OAuthDeps, TokenResponse } from './types.js';
 /** A token request: endpoint, client authentication and whose login it is. */
 export interface TokenClient extends ClientCredentials {
   readonly endpoint: Endpoint;
-  readonly profile?: string | undefined;
+  readonly who: LoginOwner;
 }
 
 /** RFC 6750 b64token. */
@@ -132,15 +139,16 @@ export function refreshRejection(error: unknown): string | undefined {
   return error instanceof OperateError ? rejections.get(error) : undefined;
 }
 
-function refreshError(error: string, detail: string, profile: string | undefined): OperateError {
+function refreshError(error: string, detail: string, who: LoginOwner): OperateError {
+  const whose = owner(who.profile);
   const rejected =
     error === 'invalid_grant'
       ? loginRequired(
-          `The authorization server rejected the refresh token of ${owner(profile)} ${detail}`,
-          profile,
+          `The authorization server rejected the refresh token of ${whose} ${detail}`,
+          who,
           REFRESH_REJECTED,
         )
-      : loginRequired(`Refreshing the OAuth login of ${owner(profile)} failed ${detail}`, profile);
+      : loginRequired(`Refreshing the OAuth login of ${whose} failed ${detail}`, who);
   rejections.set(rejected, detail.slice(1, -1));
   return rejected;
 }
@@ -151,16 +159,16 @@ function grantError(
   detail: string,
   client: TokenClient,
 ): OperateError {
-  const { profile } = client;
-  if (grant === 'refresh') return refreshError(error, detail, profile);
+  const { who } = client;
+  if (grant === 'refresh') return refreshError(error, detail, who);
   return error === 'invalid_grant'
     ? loginFailed(
         `The authorization server rejected the authorization code ${detail}`,
-        `The code expired or was already used; run \`${loginCommand(profile)}\` again.`,
+        `The code expired or was already used; run \`${loginCommand(who)}\` again.`,
       )
     : loginFailed(
         `The code exchange failed ${detail}`,
-        `Run \`${loginCommand(profile)}\` again; if it keeps failing, check the client at the authorization server.`,
+        `Run \`${loginCommand(who)}\` again; if it keeps failing, check the client at the authorization server.`,
       );
 }
 

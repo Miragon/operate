@@ -14,7 +14,7 @@ import {
   type FakeRuntimeOptions,
   fileText,
 } from '../../test/support/fake-runtime.js';
-import { TOKEN_FILE } from '../../test/support/oauth.js';
+import { cachedLogin, cacheText, oauthProfiles, TOKEN_FILE } from '../../test/support/oauth.js';
 import { usageError } from '../errors.js';
 import { run } from './run.js';
 
@@ -407,14 +407,14 @@ describe('operate auth with a bearer token', () => {
     );
   });
 
-  it('logs out the OAuth login a profile kept from before it switched to a bearer token', async () => {
-    const files = {
-      [CONFIG_PATH]: profiles({ p: { auth: { type: 'bearer', tokenEnv: 'CI_TOKEN' } } }),
-      [TOKEN_FILE]: '{"version": 2}',
-    };
-    const result = await cli(['auth', 'logout'], { files, env: { CI_TOKEN: 't' } });
+  it('removes the OAuth login when config set switches the profile to a bearer token', async () => {
+    const files = { [CONFIG_PATH]: oauthProfiles(), [TOKEN_FILE]: cacheText(cachedLogin(0)) };
+    const args = ['config', 'set', 'p', '--auth', 'bearer', '--auth-token-env', 'CI_TOKEN'];
+    const result = await cli(args, { files, env: { CI_TOKEN: 't' } });
     expect(result.code).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({ profile: 'p', removed: true });
+    expect(result.stderr).toContain(
+      `Removed the OAuth login of profile "p" for its previous settings (${TOKEN_FILE}); it was not revoked.\n`,
+    );
     expect(fileText(result.runtime, TOKEN_FILE)).toBeUndefined();
   });
 
@@ -517,7 +517,7 @@ describe('operate config with a bearer token', () => {
     };
     const fromOAuth = await cli(['config', 'set', 'p', '--auth', 'bearer'], { files: oauth });
     expect(fromOAuth.stderr).toBe(
-      'Notice: removed the OAuth settings of the profile; bearer auth replaces them. `operate auth logout --profile p` removes its login.\n',
+      'Notice: removed the OAuth settings of the profile; bearer auth replaces them.\n',
     );
     const header = {
       [CONFIG_PATH]: profiles({ p: { headers: { Authorization: 'Bearer x' } } }),

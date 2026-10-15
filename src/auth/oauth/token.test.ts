@@ -21,7 +21,7 @@ const PUBLIC: TokenClient = {
   clientId: 'operate-cli',
   method: 'client_secret_basic',
   endpoint: { url: TOKEN_ENDPOINT, source: 'auth.issuer of profile "p"' },
-  profile: 'p',
+  who: { profile: 'p' },
 };
 
 async function rejection(promise: Promise<unknown>): Promise<OperateError> {

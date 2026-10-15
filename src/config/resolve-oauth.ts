@@ -17,11 +17,13 @@ import {
   validateOAuthUrl,
   validateScopes,
 } from './oauth.js';
+import { selectedLoginKey } from './login-key.js';
 import { type Env, nonEmpty } from './pick.js';
 import {
   type ConfigFlags,
   DEFAULT_OAUTH_SCOPES,
   ENV,
+  type LoginKey,
   type OAuthConfig,
   type ProfileAuth,
   type SelectedProfile,
@@ -262,6 +264,11 @@ function validAudience(context: OAuthContext): Found<string> | undefined {
   return audience && { ...audience, value: validateAudience(audience.value, audience.label) };
 }
 
+/** The login key of the selected profile (design §16.5); none without a profile. */
+function loginOf(selected: SelectedProfile): LoginKey | undefined {
+  return selected.name === undefined ? undefined : selectedLoginKey(selected);
+}
+
 /** The resolved OAuth settings; `selectedBy` names what selected OAuth (`--auth oauth`). */
 export function resolveOAuth(context: OAuthContext, selectedBy: string): OAuthConfig {
   refuseStdinPassword(context, selectedBy);
@@ -279,6 +286,9 @@ export function resolveOAuth(context: OAuthContext, selectedBy: string): OAuthCo
       clientSecret: secret?.value,
       audience: audience?.value,
       profile: context.selected.name,
+      login: loginOf(context.selected),
+      projectDirectory: context.selected.project?.directory,
+      configFile: context.selected.configFile,
     }),
     clientId: validateClientId(clientId.value, clientId.label),
     scopes: validateScopes(scopes.value, scopes.label),

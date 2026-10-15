@@ -60,7 +60,9 @@ a terminal, then commands refresh the token. Never run \`auth login\` yourself. 
 \`LOGIN_REQUIRED\`, stop and ask the user to run the command from the hint in a terminal, then retry.
 \`UNAUTHORIZED\`/\`FORBIDDEN\` despite a login is a gateway (issuer, audience, clock) or permission
 problem: do not ask for a new login, report message and hint. \`operate auth status\` (no network)
-tells if the login is usable. Use only \`--config\` files you trust: profiles share logins by name.
+tells if the login is usable. One login serves every OAuth profile of the same config file, project
+file or repository that stores the same issuer, client, audience and scopes: after the user logged
+in once, retry the others too. Use only \`--config\` files you trust.
 
 \`\`\`sh
 operate config set sso --auth oauth --oauth-issuer https://login.example.com/realms/camunda --oauth-client-id operate-cli

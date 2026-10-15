@@ -16,7 +16,7 @@ import { findProfile } from '../../config/resolve.js';
 import { type ConfigFile, ENV } from '../../config/types.js';
 import { usageError } from '../../errors.js';
 import type { Runtime } from '../../runtime.js';
-import { configPath, projectFileOf } from '../config-files.js';
+import { configPath, isExplicit, projectFileOf } from '../config-files.js';
 
 export const PROJECT_OPTION = [
   '--project',
@@ -27,6 +27,8 @@ export const PROJECT_OPTION = [
 export interface EditTarget {
   readonly path: string;
   readonly project: boolean;
+  /** The user's file was named by `--config` or OPERATE_CONFIG. */
+  readonly explicit?: boolean;
   /** The project file in effect, read best effort, when the edit writes the user's file. */
   readonly other?: { readonly path: string; readonly file: ConfigFile };
 }
@@ -57,7 +59,10 @@ export async function editTarget(
   if (flags.project !== true) {
     const other = await projectInEffect(runtime, flags.config);
     const path = configPath(runtime, flags.config);
-    return other === undefined ? { path, project: false } : { path, project: false, other };
+    const explicit = isExplicit(runtime, flags.config);
+    return other === undefined
+      ? { path, project: false, explicit }
+      : { path, project: false, explicit, other };
   }
   if (flags.config !== undefined) {
     throw usageError(
@@ -146,11 +151,4 @@ export function overrideNotices(
   return [overrideNotice(other, name, before, after), defaultNotice(other, before, after)].filter(
     (notice) => notice !== undefined,
   );
-}
-
-/** True when another file still has the profile (then its cached login stays). */
-export async function stillDefined(name: string, target: EditTarget, runtime: Runtime) {
-  if (!target.project) return findProfile(target.other?.file, name) !== undefined;
-  const own = await readConfigFile(runtime.fs, configPath(runtime, undefined));
-  return findProfile(own, name) !== undefined;
 }
