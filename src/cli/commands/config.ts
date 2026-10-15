@@ -26,11 +26,11 @@ import { type DisplayFlags, displayOf } from '../display.js';
 import { addGlobalOptions } from '../globals.js';
 import { collect } from '../options.js';
 import { addBearerOptions, bearerChanges } from './config-bearer.js';
+import { editedLogins } from './config-login.js';
 import {
   addOAuthOptions,
   oauthChanges,
   readSetSecrets,
-  removeLogin,
   type SetSecrets,
   setNotices,
 } from './config-oauth.js';
@@ -40,7 +40,6 @@ import {
   overrideNotices,
   PROJECT_OPTION,
   readTarget,
-  stillDefined,
   writeTarget,
 } from './config-project.js';
 import {
@@ -171,13 +170,15 @@ async function setProfileFrom(name: string, command: Command, context: CliContex
       ? [`Created the project file ${path}; commit it to share its profiles.`]
       : [];
   for (const notice of [...created, ...setNotices(outcome)]) runtime.stderr.write(`${notice}\n`);
+  await editedLogins({ name, before, after: file, target }, runtime, true);
 }
 
 async function removeProfile(name: string, command: Command, context: CliContext): Promise<void> {
   const edit = (file: ConfigFile | undefined) => deleteProfile(file, name);
-  const { path, target } = await editConfig(command, context, edit, name);
+  const { file, previous, path, target } = await editConfig(command, context, edit, name);
   context.runtime.stderr.write(`Deleted profile "${name}" from ${path}\n`);
-  if (!(await stillDefined(name, target, context.runtime))) await removeLogin(name, context);
+  const before = findProfile(previous, name);
+  await editedLogins({ name, before, after: file, target }, context.runtime, false);
 }
 
 /** Fixed values of the options of `config set`, for shell completion. */
@@ -255,7 +256,9 @@ function registerEditCommands(config: Command, context: CliContext): void {
   ]);
   unset.action(async (name: string, keys: string[]) => {
     const edit = (file: ConfigFile | undefined) => unsetProfileKeys(file, name, keys);
-    await editProfile(unset, context, { name, edit, own: true });
+    const { file, previous, target } = await editProfile(unset, context, { name, edit, own: true });
+    const before = findProfile(previous, name);
+    await editedLogins({ name, before, after: file, target }, context.runtime, false);
   });
   const use = configSubcommand(config, 'use', 'Make a profile the default', FILE_OPTIONS);
   completeProfiles(use.argument('<profile>', 'Profile name').option(...PROJECT_OPTION));

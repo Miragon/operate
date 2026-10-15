@@ -102,7 +102,29 @@ describe('OAuth provider: the cached login', () => {
       message: 'Not logged in: profile "p" has no OAuth login',
     });
     expect(error.exitCode).toBe(4);
-    expect(error.details.hint).toBe(HINT);
+    expect(error.details.hint).toBe(
+      `One login serves every OAuth profile of the same config file, project file or repository that stores the same issuer, client, audience and scopes. ${HINT}`,
+    );
+  });
+
+  it('names where to log in in dry-run notes and the hint of a rejected token', async () => {
+    const missing = await setup(null).provider({ projectDirectory: '/work/shop' }).preview?.();
+    expect(missing?.note).toContain(
+      'Run `operate auth login --profile p` in a terminal in /work/shop.',
+    );
+    const auth = setup().provider({ configFile: '/home/me/ci.json' });
+    expect(auth.rejectedHint?.(401)).toContain(
+      'run `operate auth login --config /home/me/ci.json --profile p` in a terminal.',
+    );
+  });
+
+  it('names the directory of the project file to log in in', async () => {
+    const error = await rejection(
+      setup(null).provider({ projectDirectory: '/work/shop' }).headers(),
+    );
+    expect(error.details.hint).toContain(
+      'Run `operate auth login --profile p` in a terminal in /work/shop: a person logs in once',
+    );
   });
 
   it('fails with LOGIN_REQUIRED for a cache of another identity or an unknown format', async () => {
@@ -111,7 +133,7 @@ describe('OAuth provider: the cached login', () => {
       'The OAuth login of profile "p" was made for another issuer, client, audience or scopes: client "operate-cli" (the configuration asks for "other")',
     );
     expect(other.details.hint).toBe(
-      `The login was made with other settings (the profile changed since, or OPERATE_OAUTH_* variables were set where the login ran). ${HINT}`,
+      `The login was made with other settings: OPERATE_OAUTH_* variables were set where the login ran (also through another profile that shares the login). ${HINT}`,
     );
     const garbage = await rejection(setup('{"version":1}').provider().headers());
     expect(garbage.message).toBe(`The token cache ${TOKEN_FILE} has an unknown format`);
@@ -577,7 +599,7 @@ describe('OAuth provider: dry-run preview', () => {
     await expect(
       setup().provider({ clientId: 'x', profile: undefined }).preview?.(),
     ).resolves.toMatchObject({
-      note: 'Not logged in with OAuth (no profile); the request would fail with LOGIN_REQUIRED. Run `operate auth login` in a terminal.',
+      note: 'Not logged in with OAuth (no profile); the request would fail with LOGIN_REQUIRED. Run `operate auth login` in a terminal with OPERATE_AUTH=oauth and the same OPERATE_OAUTH_* settings.',
     });
   });
 

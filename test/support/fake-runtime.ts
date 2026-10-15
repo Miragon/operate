@@ -40,6 +40,10 @@ export interface FakeRuntimeOptions {
   readonly dirs?: readonly string[];
   /** Paths that are neither files nor directories, e.g. symlinked directories. */
   readonly others?: readonly string[];
+  /** Paths another user owns (`ownedByUser` is false for them, and for missing paths). */
+  readonly foreign?: readonly string[];
+  /** The file system has no owners, like on Windows (`ownedByUser` is absent). */
+  readonly noOwners?: boolean;
   /** stdin content; without it, reading stdin fails like a terminal would. */
   readonly stdin?: string | Uint8Array;
   readonly stdoutTTY?: boolean;
@@ -267,6 +271,7 @@ function caseInsensitiveFs(fs: FileSystem): FileSystem {
     const entry = entries.find((candidate) => candidate.name.toLowerCase() === name.toLowerCase());
     return entry === undefined ? path : `${directory}/${entry.name}`;
   };
+  const owned = fs.ownedByUser?.bind(fs);
   return {
     readFile: async (path) => fs.readFile(await resolve(path)),
     writeFile: async (path, data, options) => {
@@ -279,7 +284,22 @@ function caseInsensitiveFs(fs: FileSystem): FileSystem {
     remove: async (path) => fs.remove(await resolve(path)),
     readdir: (path) => fs.readdir(path),
     kind: async (path) => fs.kind(await resolve(path)),
+    ...(owned === undefined ? {} : { ownedByUser: async (path) => owned(await resolve(path)) }),
   };
+}
+
+/**
+ * The owners of the fake file system (none with `noOwners`, else the user's but `foreign`) and the
+ * case of its names (`caseInsensitive`).
+ */
+function withOwners(fs: FileSystem, tree: FakeTree, options: FakeRuntimeOptions): FileSystem {
+  if (options.noOwners === true)
+    return options.caseInsensitive === true ? caseInsensitiveFs(fs) : fs;
+  const foreign = new Set<string>(options.foreign ?? []);
+  const ownedByUser = (path: string) =>
+    Promise.resolve(pathKind(tree, path) !== 'missing' && !foreign.has(path));
+  const owned = { ...fs, ownedByUser };
+  return options.caseInsensitive === true ? caseInsensitiveFs(owned) : owned;
 }
 
 /** Deterministic random bytes: each call gets bytes derived from a fresh counter value. */
@@ -421,12 +441,13 @@ export function fakeRuntime(options: FakeRuntimeOptions = {}): FakeRuntime {
   const randomRequests: number[] = [];
   const commandRuns: FakeRuntime['commandRuns'] = [];
   const random = options.randomBytes ?? counterBytes();
-  const fs = fakeFileSystem({ files, dirs, others, dirModes });
+  const tree = { files, dirs, others, dirModes };
+  const fs = withOwners(fakeFileSystem(tree), tree, options);
   const runtime: FakeRuntime = {
     ...streams(options),
     readStdin: fakeStdin(options.stdin),
     fetch: options.fetch ?? rejectFetch,
-    fs: options.caseInsensitive === true ? caseInsensitiveFs(fs) : fs,
+    fs,
     files,
     dirs,
     dirModes,

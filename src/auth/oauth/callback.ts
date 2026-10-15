@@ -112,7 +112,7 @@ function callbackError(
     return {
       error: loginFailed(
         `The login was denied (${text})`,
-        `The user cancelled the login or may not use client ${config.clientId}; run \`${loginCommand(config.profile)}\` again.`,
+        `The user cancelled the login or may not use client ${config.clientId}; run \`${loginCommand(config)}\` again.`,
       ),
       reason,
     };
@@ -127,10 +127,7 @@ function callbackError(
     };
   }
   return {
-    error: loginFailed(
-      `The login failed (${text})`,
-      `Run \`${loginCommand(config.profile)}\` again.`,
-    ),
+    error: loginFailed(`The login failed (${text})`, `Run \`${loginCommand(config)}\` again.`),
     reason,
   };
 }

@@ -102,7 +102,11 @@ operate config delete prod
 
 - `config set <profile>` creates or updates a profile; only the given values change, and the
   first profile becomes the default. `config unset <profile> <key...>` removes single settings,
-  `config delete <profile>` the profile with its cached OAuth login (without revoking it). Every
+  `config delete <profile>` the profile. An edit that changes or removes a profile's OAuth settings
+  also removes the cached login of the previous settings (without revoking it) unless another
+  profile of the file shares it; the login of a project file in a repository stays (another
+  worktree may use it, `operate auth logout` ends it), see
+  [shared logins](authentication.md#shared-logins). Every
   option and key: `operate config set --help`, `operate config unset --help`.
 - `config use <profile>` makes a profile the default; `--profile` or `OPERATE_PROFILE` pick another
   one per call.
@@ -146,8 +150,10 @@ before your home directory and at the file system root; the nearest file wins. A
   in the file and by `config set --project` (`config unset ... --project` removes them). The
   credentials come from the environment (`OPERATE_TOKEN`,
   [`OPERATE_TOKEN_COMMAND`](authentication.md#token-commands), `OPERATE_PASSWORD`,
-  `OPERATE_OAUTH_CLIENT_SECRET`), an OAuth login (`operate auth login --profile <profile>`) or a
-  profile of the same name in your own config file. So a project file can neither run code through
+  `OPERATE_OAUTH_CLIENT_SECRET`), an OAuth login (`operate auth login --profile <profile>`, one
+  for all profiles of the repository with the same OAuth settings, see
+  [shared logins](authentication.md#shared-logins)) or a profile of the same name in your own
+  config file. So a project file can neither run code through
   operate nor send a variable of its choice to the URL it names.
 - `operate config set|unset|use|delete --project` write the project file (a new one goes to the
   repository root, outside a repository to the working directory) with mode `0644`; without
@@ -166,6 +172,7 @@ operate config path --project
 
 Still, treat a project file like code: it decides where commands send your credentials from the
 environment (`OPERATE_TOKEN`, the token of `OPERATE_TOKEN_COMMAND`, `OPERATE_PASSWORD`) and the
-OAuth login of its profiles.
+OAuth login of its profiles. A login made for the profiles of one repository never serves those of
+another repository's project file.
 
 The same in short form: `operate guide config`.

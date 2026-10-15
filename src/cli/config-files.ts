@@ -5,10 +5,12 @@
  */
 
 import { configFilePath, explicitConfigPath, pathModule, readConfigFile } from '../config/file.js';
+import { configOrigin } from '../config/login-key.js';
 import {
   findProjectFile,
   mergeProject,
   type ProjectFile,
+  projectOrigin,
   readProjectFile,
 } from '../config/project.js';
 import type { ConfigFile, LoadedConfig, ProjectSource } from '../config/types.js';
@@ -44,17 +46,39 @@ export async function projectFileOf(
 
 async function projectOf(runtime: Runtime, path: string) {
   const file = await readProjectFile(runtime.fs, path);
-  const source: ProjectSource = { path, directory: pathModule(runtime.platform).dirname(path) };
+  const source: ProjectSource = {
+    path,
+    directory: pathModule(runtime.platform).dirname(path),
+    origin: await projectOrigin(runtime.fs, path, runtime),
+  };
   return { source, file };
+}
+
+/**
+ * The user's config file, or the one named by `--config` / OPERATE_CONFIG (`explicit`), with the
+ * origin of its profiles (design §16.5).
+ */
+function withOrigin(
+  runtime: Runtime,
+  path: string,
+  file: ConfigFile | undefined,
+  explicit: boolean,
+): LoadedConfig | undefined {
+  if (file === undefined) return undefined;
+  const origin = configOrigin(path, runtime.cwd, runtime.platform);
+  if (!explicit) return { ...file, origin };
+  return { ...file, origin, configFile: pathModule(runtime.platform).resolve(runtime.cwd, path) };
 }
 
 /** Reads the config file(s) of a command. */
 export async function loadConfig(runtime: Runtime, flag: string | undefined): Promise<LoadedFiles> {
   const path = configPath(runtime, flag);
-  const user: ConfigFile | undefined = await readConfigFile(
-    runtime.fs,
+  const explicit = isExplicit(runtime, flag);
+  const user = withOrigin(
+    runtime,
     path,
-    isExplicit(runtime, flag),
+    await readConfigFile(runtime.fs, path, explicit),
+    explicit,
   );
   const found = await projectFileOf(runtime, flag);
   if (found?.exists !== true) return { path, config: user };

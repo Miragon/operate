@@ -101,7 +101,7 @@ async function revoke(login: CachedLogin, target: LogoutTarget, deps: OAuthDeps)
     clientSecret: credential.secret,
     method: clientAuthOf(login),
     endpoint: { url: endpoint, source: target.source },
-    profile: target.profile,
+    who: { profile: target.profile },
   };
   const token = { value: login.refreshToken ?? login.accessToken, hint: `${kind}_token` } as const;
   const reason = await revokeToken(client, token, deps);
@@ -117,7 +117,7 @@ async function revoke(login: CachedLogin, target: LogoutTarget, deps: OAuthDeps)
 /** The login of the file; an unreadable one counts as none (the file is removed anyway). */
 async function storedLogin(path: string, deps: OAuthDeps, profile: string | undefined) {
   try {
-    return await readCache(path, deps, profile);
+    return await readCache(path, deps, { profile });
   } catch {
     return undefined;
   }

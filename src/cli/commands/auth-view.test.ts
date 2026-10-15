@@ -3,17 +3,19 @@ import { cachedLogin, oauthConfig, TOKEN_FILE } from '../../../test/support/oaut
 import { loginView, viewRows } from './auth-view.js';
 
 const T0 = 1_700_000_000_000;
+const USE = { tokenCache: TOKEN_FILE, profiles: ['p', 'billing'] };
 
 describe('loginView', () => {
   it('shows who is logged in, for what and until when, never a token', () => {
     const view = loginView(
       cachedLogin(T0, { refreshedAt: T0 + 1000, scope: 'openid  profile' }),
       oauthConfig(),
-      TOKEN_FILE,
+      USE,
       T0 + 2000,
     );
     expect(view).toEqual({
       profile: 'p',
+      profiles: ['p', 'billing'],
       issuer: 'https://login.example.com/realms/camunda',
       clientId: 'operate-cli',
       user: 'alice',
@@ -42,11 +44,12 @@ describe('loginView', () => {
     const view = loginView(
       login,
       oauthConfig({ issuer: undefined, profile: undefined }),
-      TOKEN_FILE,
+      { tokenCache: TOKEN_FILE, profiles: [] },
       T0,
     );
     expect(view).toMatchObject({
       profile: null,
+      profiles: [],
       issuer: null,
       user: null,
       subject: null,
@@ -58,15 +61,15 @@ describe('loginView', () => {
       refreshedAt: null,
     });
     expect(
-      loginView(cachedLogin(T0, { refreshExpiresAt: null }), oauthConfig(), TOKEN_FILE, T0)
+      loginView(cachedLogin(T0, { refreshExpiresAt: null }), oauthConfig(), USE, T0)
         .refreshTokenExpiresAt,
     ).toBeNull();
   });
 
   it('reports an expired access token', () => {
-    expect(
-      loginView(cachedLogin(T0), oauthConfig(), TOKEN_FILE, T0 + 300_000).accessTokenValid,
-    ).toBe(false);
+    expect(loginView(cachedLogin(T0), oauthConfig(), USE, T0 + 300_000).accessTokenValid).toBe(
+      false,
+    );
   });
 });
 
@@ -78,7 +81,8 @@ describe('viewRows', () => {
       { KEY: 'removed', VALUE: true },
       { KEY: 'revoked', VALUE: '' },
     ]);
-    const rows = viewRows(loginView(cachedLogin(T0), oauthConfig(), TOKEN_FILE, T0));
+    const rows = viewRows(loginView(cachedLogin(T0), oauthConfig(), USE, T0));
     expect(rows.find((row) => row.KEY === 'scopes')?.VALUE).toBe('openid offline_access');
+    expect(rows.find((row) => row.KEY === 'profiles')?.VALUE).toBe('p billing');
   });
 });

@@ -12,12 +12,14 @@ import type { AuthPreview, AuthProvider, Principal } from '../types.js';
 import { cachePath, isLockError, readCache } from './cache.js';
 import {
   checkUsable,
+  inTerminal,
   iso,
-  loginCommand,
+  type LoginOwner,
   notLoggedIn,
   otherIdentity,
   owner,
   profileNote,
+  statusCommand,
 } from './errors.js';
 import { canRefresh, isExpired, needsRefresh } from './expiry.js';
 import { identityOf, sameIdentity } from './identity.js';
@@ -44,10 +46,6 @@ function who(login: CachedLogin | undefined): string {
   return login?.user ?? login?.subject ?? 'an unknown user';
 }
 
-function statusCommand(profile: string | undefined): string {
-  return profile === undefined ? 'operate auth status' : `operate auth status --profile ${profile}`;
-}
-
 function rejectedHint(config: OAuthConfig, state: State, status: number): string | undefined {
   const user = `${who(state.current)} ${profileNote(config.profile)}`;
   if (status === 403) {
@@ -55,16 +53,12 @@ function rejectedHint(config: OAuthConfig, state: State, status: number): string
   }
   if (status !== 401) return undefined;
   const again = state.reactiveRefreshDone ? ', also after refreshing it' : '';
-  return `The engine (or the gateway in front of it) rejected the OAuth access token of ${user}${again}. The authorization server issued it, but it is not accepted here: the gateway must expect exactly the issuer operate logged in with (auth.issuer: ${config.issuer ?? 'not set'}; localhost and 127.0.0.1 are different issuers), and its clock must agree; \`${statusCommand(config.profile)}\` shows scopes and expiry. If the login was revoked, run \`${loginCommand(config.profile)}\` in a terminal.`;
+  return `The engine (or the gateway in front of it) rejected the OAuth access token of ${user}${again}. The authorization server issued it, but it is not accepted here: the gateway must expect exactly the issuer operate logged in with (auth.issuer: ${config.issuer ?? 'not set'}; localhost and 127.0.0.1 are different issuers), and its clock must agree; \`${statusCommand(config)}\` shows scopes and expiry. If the login was revoked, run ${inTerminal(config)}.`;
 }
 
-function previewNote(
-  login: CachedLogin,
-  now: number,
-  profile: string | undefined,
-): string | undefined {
+function previewNote(login: CachedLogin, now: number, who: LoginOwner): string | undefined {
   if (login.refreshRejected !== undefined) {
-    return `The authorization server rejected the refresh token at ${iso(login.refreshRejected.at)}: the request would fail with LOGIN_REQUIRED. Run \`${loginCommand(profile)}\` in a terminal.`;
+    return `The authorization server rejected the refresh token at ${iso(login.refreshRejected.at)}: the request would fail with LOGIN_REQUIRED. Run ${inTerminal(who)}.`;
   }
   if (!needsRefresh(now, login)) return undefined;
   const expired = isExpired(now, login.expiresAt);
@@ -73,7 +67,7 @@ function previewNote(
     return `The cached access token ${when}; operate would refresh it before sending.`;
   }
   return expired
-    ? `The cached access token ${when} and operate cannot refresh it: the request would fail with LOGIN_REQUIRED. Run \`${loginCommand(profile)}\` in a terminal.`
+    ? `The cached access token ${when} and operate cannot refresh it: the request would fail with LOGIN_REQUIRED. Run ${inTerminal(who)}.`
     : `The cached access token ${when} and operate cannot refresh it.`;
 }
 
@@ -89,7 +83,7 @@ class OAuthProvider implements AuthProvider {
     private readonly config: OAuthConfig,
     private readonly deps: OAuthDeps,
   ) {
-    this.loginStatusCommand = statusCommand(config.profile);
+    this.loginStatusCommand = statusCommand(config);
   }
 
   get principal(): Principal | undefined {
@@ -102,10 +96,9 @@ class OAuthProvider implements AuthProvider {
   /** The cached login, read once per process; LOGIN_REQUIRED without a usable one. */
   private async load(): Promise<CachedLogin> {
     if (this.current !== undefined) return this.current;
-    const { profile } = this.config;
     this.path ??= await cachePath(this.config, this.deps);
-    const login = await readCache(this.path, this.deps, profile);
-    if (login === undefined) throw notLoggedIn(profile);
+    const login = await readCache(this.path, this.deps, this.config);
+    if (login === undefined) throw notLoggedIn(this.config);
     if (!sameIdentity(login.identity, identityOf(this.config))) {
       throw otherIdentity(login.identity, this.config);
     }
@@ -147,7 +140,7 @@ class OAuthProvider implements AuthProvider {
     const now = this.deps.now();
     if (login.refreshRejected === undefined && !needsRefresh(now, login)) return bearer(login);
     if (canRefresh(login, now)) return bearer(await this.proactive(login));
-    checkUsable(login, now, this.config.profile);
+    checkUsable(login, now, this.config);
     return bearer(login);
   }
 
@@ -163,14 +156,13 @@ class OAuthProvider implements AuthProvider {
   async preview(): Promise<AuthPreview> {
     try {
       const login = await this.load();
-      const note = previewNote(login, this.deps.now(), this.config.profile);
+      const note = previewNote(login, this.deps.now(), this.config);
       return note === undefined ? { headers: bearer(login) } : { headers: bearer(login), note };
     } catch (error) {
       if (!(error instanceof OperateError) || error.code !== 'LOGIN_REQUIRED') throw error;
-      const { profile } = this.config;
       return {
         headers: {},
-        note: `Not logged in with OAuth ${profileNote(profile)}; the request would fail with LOGIN_REQUIRED. Run \`${loginCommand(profile)}\` in a terminal.`,
+        note: `Not logged in with OAuth ${profileNote(this.config.profile)}; the request would fail with LOGIN_REQUIRED. Run ${inTerminal(this.config)}.`,
       };
     }
   }

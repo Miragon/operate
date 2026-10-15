@@ -22,7 +22,7 @@ function cachedClient(config: OAuthConfig, login: CachedLogin): TokenClient {
     clientSecret: config.clientSecret,
     method: clientAuthOf(login),
     endpoint: { url: login.endpoints.token, source: endpointSource(config) },
-    profile: config.profile,
+    who: config,
   };
 }
 
@@ -53,8 +53,8 @@ function mergeRefresh(stored: CachedLogin, tokens: TokenResponse, now: number): 
 
 /** Re-reads the file under the lock with the checks of a first read; a missing file fails. */
 async function storedLogin(config: OAuthConfig, path: string, deps: OAuthDeps) {
-  const stored = await readCache(path, deps, config.profile);
-  if (stored === undefined) throw removedWhileRunning(config.profile);
+  const stored = await readCache(path, deps, config);
+  if (stored === undefined) throw removedWhileRunning(config);
   if (!sameIdentity(stored.identity, identityOf(config)))
     throw otherIdentity(stored.identity, config);
   return stored;
@@ -97,7 +97,7 @@ async function refreshOrRecord(
 ): Promise<TokenResponse> {
   const now = deps.now();
   if (stored.refreshToken === null || !canRefresh(stored, now)) {
-    throw cannotRefresh(stored, now, config.profile);
+    throw cannotRefresh(stored, now, config);
   }
   try {
     return await refreshTokens(cachedClient(config, stored), stored.refreshToken, deps);

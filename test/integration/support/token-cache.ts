@@ -17,7 +17,7 @@ export interface LoginIdentity {
   readonly scopes: readonly string[];
 }
 
-/** File format version 1 of `tokens/profile-<name>.json` and `tokens/env-<hash>.json`. */
+/** File format version 1 of `tokens/login-<hash>.json` and `tokens/env-<hash>.json`. */
 export interface CachedLogin {
   readonly version: 1;
   readonly identity: LoginIdentity;
@@ -48,22 +48,43 @@ export function tokenDirectory(configHome: string): string {
 }
 
 /**
- * Path of the cache file of a profile: every character outside `[a-z0-9._-]`, upper-case letters
- * included, percent-encoded with lower-case hex (`Prod` → `profile-%50rod.json`), so profiles
- * that differ only in case get different files also on case-insensitive file systems.
+ * What makes profiles share a login (design §16.5): where the profile comes from (`config:<path>`
+ * for a config file) and the OAuth settings it stores.
  */
-export function profileCacheFile(configHome: string, profile: string): string {
-  const encoded = profile.replace(/[^a-z0-9._-]/g, (char) => {
-    const code = char.charCodeAt(0);
-    const hex = code.toString(16);
-    return code < 0x100 ? `%${hex.padStart(2, '0')}` : `%u${hex.padStart(4, '0')}`;
-  });
-  return join(tokenDirectory(configHome), `profile-${encoded}.json`);
+export interface LoginKey {
+  readonly origin: string;
+  readonly issuer: string | null;
+  readonly tokenEndpoint: string | null;
+  readonly clientId: string | null;
+  readonly audience: string | null;
+  readonly scopes: readonly string[];
 }
 
-/** Path of the cache file operate 0.5.0 and earlier used for a profile (the name as it is). */
-export function legacyProfileCacheFile(configHome: string, profile: string): string {
-  return join(tokenDirectory(configHome), `profile-${profile}.json`);
+function text(auth: Readonly<Record<string, unknown>>, key: string): string | null {
+  const value = auth[key];
+  return typeof value === 'string' ? value : null;
+}
+
+/** The login key of a profile of the config file `configFile` with the stored settings `auth`. */
+export function loginKeyOf(configFile: string, auth: Readonly<Record<string, unknown>>): LoginKey {
+  const scopes = Array.isArray(auth.scopes)
+    ? (auth.scopes as string[])
+    : ['openid', 'offline_access'];
+  return {
+    origin: `config:${configFile}`,
+    issuer: text(auth, 'issuer'),
+    tokenEndpoint:
+      text(auth, 'authorizationEndpoint') === null ? null : text(auth, 'tokenEndpoint'),
+    clientId: text(auth, 'clientId'),
+    audience: text(auth, 'audience'),
+    scopes: [...new Set(scopes)].sort(),
+  };
+}
+
+/** Path of the cache file of a login: the first 32 hex characters of SHA-256 of the key JSON. */
+export function loginCacheFile(configHome: string, key: LoginKey): string {
+  const hash = createHash('sha256').update(JSON.stringify(key)).digest('hex');
+  return join(tokenDirectory(configHome), `login-${hash.slice(0, 32)}.json`);
 }
 
 /**
@@ -100,7 +121,7 @@ export async function writeCache(
 }
 
 /** Cache files only: no lock files, no temporary files of the atomic writer. */
-const CACHE_FILE = /^(?:profile|env)-.+\.json$/;
+const CACHE_FILE = /^(?:login|env)-.+\.json$/;
 
 async function readIfPresent(file: string): Promise<CachedLogin | undefined> {
   try {
