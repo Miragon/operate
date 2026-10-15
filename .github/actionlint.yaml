@@ -5,3 +5,8 @@ paths:
       # and made the deprecated app-id optional
       - 'input "client-id" is not defined in action "actions/create-github-app-token@v3"'
       - 'missing input "app-id" which is required by action "actions/create-github-app-token@v3"'
+  .github/workflows/publish-homebrew.yml:
+    ignore:
+      # the same as in release.yml
+      - 'input "client-id" is not defined in action "actions/create-github-app-token@v3"'
+      - 'missing input "app-id" which is required by action "actions/create-github-app-token@v3"'

@@ -39,10 +39,11 @@ command, and the CLI sends the requests. What you get:
 
 ## Install
 
-Requires Node.js 22.12+, or use the standalone executable or the container image (see below).
+Requires Node.js 22.12+, or use Homebrew, the standalone executable or the container image (see
+below).
 
 ```sh
-npm install -g @miragon/operate
+npm install -g @miragon/operate      # or, without Node.js: brew install miragon/tap/operate
 operate guide
 ```
 
@@ -131,7 +132,7 @@ The documentation is a website, [miragon.github.io/operate](https://miragon.gith
 built from the pages in [`docs/`](docs/):
 
 - [Getting started](docs/getting-started.md): a first triage, then your own engine, Claude Code or CI
-- [Installation](docs/installation.md): npm, standalone executable, container image, shell completion
+- [Installation](docs/installation.md): npm, Homebrew, standalone executable, container image, shell completion
 - [Quick start](docs/quick-start.md): one process from an empty engine to a finished instance
 - [Workflow commands](docs/workflow-commands.md): inspect, wait, advance, retry, deploy, status
 - [Command structure](docs/commands.md): names, arguments, variables, request bodies, files, dates

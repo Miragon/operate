@@ -1,8 +1,9 @@
 # Releases with release-please and publishes @miragon/operate to npm with trusted publishing (OIDC,
 # no npm token). Every push to main opens or updates the release pull request; merging it tags
 # v<version>, creates the GitHub release and publishes that tag to npm, attaches the standalone
-# executables (with SHA256SUMS and provenance attestations) to the release and pushes the
-# container image ghcr.io/miragon/operate (design §20).
+# executables and their .tar.xz archives (with SHA256SUMS and provenance attestations) to the
+# release, publishes them as the Homebrew formula miragon/tap/operate and pushes the container
+# image ghcr.io/miragon/operate (design §20).
 # The trusted publisher on npmjs.com names this file (release.yml) and the `npm` environment:
 # renaming either breaks publishing until the configuration on npmjs.com is recreated.
 name: Release
@@ -243,16 +244,26 @@ jobs:
       - run: npm run build:exe
       - name: Smoke test the binary
         run: bash scripts/smoke-test.sh "build/bin/${{ matrix.file }}"
+      # The macOS and Linux binaries also as <file>.tar.xz holding an executable `operate`, a fifth
+      # of the download, which the Homebrew formula takes. GNU tar passes XZ_OPT to xz.
+      - name: Pack the binary
+        if: runner.os != 'Windows'
+        env:
+          XZ_OPT: -T0
+        run: |
+          mkdir build/pack
+          install -m 0755 "build/bin/${{ matrix.file }}" build/pack/operate
+          tar -C build/pack -cJf "build/bin/${{ matrix.file }}.tar.xz" operate
       - uses: actions/upload-artifact@v7
         with:
           name: binary-${{ matrix.target }}
-          path: build/bin/${{ matrix.file }}
+          path: build/bin/${{ matrix.file }}*
           if-no-files-found: error
           retention-days: 7
 
-  # Attaches the binaries and SHA256SUMS to the GitHub release and attests their build provenance
-  # (`gh attestation verify <file> --repo Miragon/operate`). Runs no repository code. A re-run
-  # replaces the assets.
+  # Attaches the binaries, their archives and SHA256SUMS to the GitHub release and attests their
+  # build provenance (`gh attestation verify <file> --repo Miragon/operate`). Runs no repository
+  # code. A re-run replaces the assets.
   release-assets:
     name: attach binaries to ${{ needs.release-please.outputs.tag_name }}
     needs: [release-please, binaries]
@@ -275,12 +286,12 @@ jobs:
         working-directory: ${{ runner.temp }}/binaries
         run: |
           shopt -s failglob
-          binaries=(operate-*)
-          if [ "${#binaries[@]}" -ne 5 ]; then
-            echo "::error::Expected 5 binaries, got ${#binaries[@]}: ${binaries[*]}"
+          files=(operate-*)
+          if [ "${#files[@]}" -ne 9 ]; then
+            echo "::error::Expected 5 binaries and 4 archives, got ${#files[@]}: ${files[*]}"
             exit 1
           fi
-          sha256sum "${binaries[@]}" > SHA256SUMS
+          sha256sum "${files[@]}" > SHA256SUMS
           cat SHA256SUMS
       - uses: actions/attest@v4
         with:
@@ -290,6 +301,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" operate-* SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+
+  # Homebrew formula of the attached binaries (publish-homebrew.yml), not for prereleases: the tap
+  # has one formula, which follows the newest stable release.
+  homebrew:
+    name: homebrew formula ${{ needs.release-please.outputs.version }}
+    needs: [release-please, release-assets]
+    if: needs.release-please.outputs.release_created == 'true' && !contains(needs.release-please.outputs.version, '-')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/publish-homebrew.yml
+    with:
+      version: ${{ needs.release-please.outputs.version }}
+    secrets:
+      RELEASE_PLEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
 
   # Container image (design §20) after the npm publish: the standalone bundle of the build job on
   # distroless Node.js 24 (non-root), linux/amd64 and linux/arm64, tagged <version>, <major.minor>
