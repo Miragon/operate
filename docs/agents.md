@@ -89,22 +89,23 @@ If you copied `SKILL.md` into a skills directory before (see below), remove that
 example with `rm -r ~/.claude/skills/operate`: with both, Claude Code lists the skill twice
 (`operate` and `operate:operate`), one of them outdated, and `/operate` is the copy.
 
-The plugin lives in [`skills/operate`](../skills/operate) (manifest in `.claude-plugin/plugin.json`,
-command in `commands/`, evals in `evals/`);
-[`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json) at the repository root lists
-it. Adding the marketplace makes a shallow clone of the repository, and installing the plugin
-copies only the skill directory and installs no npm dependencies. The npm package ships the same
-directory without the evals, so
+The plugin lives in
+[`skills/operate`](https://github.com/Miragon/operate/tree/main/skills/operate) (manifest in
+`.claude-plugin/plugin.json`, command in `commands/`, evals in `evals/`);
+[`.claude-plugin/marketplace.json`](https://github.com/Miragon/operate/blob/main/.claude-plugin/marketplace.json)
+at the repository root lists it. Adding the marketplace makes a shallow clone of the repository,
+and installing the plugin copies only the skill directory and installs no npm dependencies. The
+npm package ships the same directory without the evals, so
 `claude --plugin-dir "$(npm root -g)/@miragon/operate/skills/operate"` loads the plugin of the
 installed version for one session.
 
 ## Claude Code skill without the plugin
 
-[`skills/operate/SKILL.md`](../skills/operate/SKILL.md) is the guide packaged as a Claude Code
-skill (YAML frontmatter plus the text of `operate guide`, the core guide; the topics come from
-`operate guide <topic>` of the installed CLI); it ships with the npm package and is the skill of
-the plugin. To use it without the plugin (not in addition to it), install it for all
-your projects or for one project:
+[`skills/operate/SKILL.md`](https://github.com/Miragon/operate/blob/main/skills/operate/SKILL.md)
+is the guide packaged as a Claude Code skill (YAML frontmatter plus the text of `operate guide`,
+the core guide; the topics come from `operate guide <topic>` of the installed CLI); it ships with
+the npm package and is the skill of the plugin. To use it without the plugin (not in addition to
+it), install it for all your projects or for one project:
 
 ```sh
 mkdir -p ~/.claude/skills/operate

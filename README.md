@@ -10,6 +10,8 @@ processes and decisions, start and follow instances, work on tasks, fix incident
 instances, look into the history and administer users and permissions. The agent says what should
 happen, and the CLI talks to the REST API.
 
+Documentation: [miragon.github.io/operate](https://miragon.github.io/operate/)
+
 ![One operate advance command completes the task an order process waits at](docs/assets/demo.gif)
 
 ## Why
@@ -24,16 +26,16 @@ way is slow, and every id it copies is a chance to hit the wrong instance.
 operate turns this around: the agent names what it means and what should happen, in one short
 command, and the CLI sends the requests. What you get:
 
-- **Fast, because the agent writes little.** One short command replaces a chain of requests.
-- **Cheap to read.** Answers contain what the next step needs, not everything the engine knows.
-- **No guessing.** The CLI lists its own commands and explains each one, so an agent looks things
-  up instead of inventing them.
-- **Safe on real engines.** Every change can be previewed, deleting needs an explicit yes, and an
-  engine can be marked as look-only.
-- **The whole engine.** Deployments, instances, tasks, incidents, migrations, history, decisions,
-  users and permissions: everything the REST API offers is a command.
-- **Made for scripts too.** It never asks questions, and both its answers and its errors are
-  easy for a program to read.
+- One short command replaces a chain of requests, so the agent writes little and works fast.
+- Answers contain what the next step needs, not everything the engine knows.
+- The CLI lists its own commands and explains each one, so an agent looks things up instead of
+  inventing them.
+- Every change can be previewed, deleting needs an explicit yes, and an engine can be marked as
+  look-only, so it is safe on real engines.
+- Everything the REST API offers is a command: deployments, instances, tasks, incidents,
+  migrations, history, decisions, users and permissions.
+- It never asks questions, and both its answers and its errors are easy for a program to read, so
+  scripts can use it too.
 
 ## Install
 
@@ -125,6 +127,10 @@ Details: [installation](docs/installation.md).
 
 ## Documentation
 
+The documentation is a website, [miragon.github.io/operate](https://miragon.github.io/operate/),
+built from the pages in [`docs/`](docs/):
+
+- [Getting started](docs/getting-started.md): a first triage, then your own engine, Claude Code or CI
 - [Installation](docs/installation.md): npm, standalone executable, container image, shell completion
 - [Quick start](docs/quick-start.md): one process from an empty engine to a finished instance
 - [Workflow commands](docs/workflow-commands.md): inspect, wait, advance, retry, deploy, status

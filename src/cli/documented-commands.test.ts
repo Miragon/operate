@@ -41,15 +41,17 @@ function operateSegments(words: readonly string[]): string[][] {
 }
 
 /**
- * `operate` commands in the shell code blocks (```sh) of markdown, split at shell operators.
- * Other blocks hold transcripts and syntax summaries.
+ * `operate` commands in the shell code blocks (```sh, or ```sh [label] in a VitePress code group)
+ * of markdown, split at shell operators. Other blocks hold transcripts and syntax summaries.
  */
 function fencedCommands(markdown: string): string[][] {
   const commands: string[][] = [];
   let fence: string | undefined;
   for (const line of markdown.split('\n')) {
     if (line.startsWith('```')) fence = fence === undefined ? line.slice(3) : undefined;
-    else if (fence === 'sh') commands.push(...operateSegments(shellWords(line)));
+    else if (fence !== undefined && /^sh(?: \[.*\])?$/.test(fence)) {
+      commands.push(...operateSegments(shellWords(line)));
+    }
   }
   return commands;
 }
@@ -180,6 +182,10 @@ describe('documented command lines run in the CLI', () => {
       ['operate', 'guide'],
       ['operate', 'ping', '-o', 'json'],
     ]);
+    const codeGroup =
+      '```sh [CI]\noperate status\n```\n```text [Claude Code]\n/operate:status\n```';
+    expect(fencedCommands(codeGroup)).toEqual([['operate', 'status']]);
+    expect(fencedCommands('```shell\noperate status\n```')).toEqual([]);
     expect(referencedFiles(['--body', '@a.json', 'b.bpmn', 'c.txt'])).toEqual({
       'a.json': '{}',
       'b.bpmn': processXml('b.bpmn'),
