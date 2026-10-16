@@ -123,26 +123,28 @@ jobs:
           repositories: homebrew-tap
           permission-contents: write
           permission-pull-requests: write
+      # The commit is made through the contents API, so GitHub signs it: the ruleset of the tap
+      # requires signed commits and an approval for unsigned ones. A re-run replaces the branch.
       - name: Open and squash-merge the pull request
         env:
           GH_TOKEN: ${{ steps.tap-token.outputs.token }}
+          TAP: Miragon/homebrew-tap
         run: |
-          git clone "https://x-access-token:${GH_TOKEN}@github.com/Miragon/homebrew-tap.git" tap
-          mkdir -p tap/Formula
-          cp "$RUNNER_TEMP/formula/operate.rb" tap/Formula/operate.rb
-          cd tap
-          git config user.name "miragon-release-please[bot]"
-          git config user.email "miragon-release-please[bot]@users.noreply.github.com"
+          formula="$RUNNER_TEMP/formula/operate.rb"
+          path=Formula/operate.rb
           branch="operate-${VERSION}"
-          git switch -c "$branch"
-          git add Formula/operate.rb
-          if git diff --cached --quiet; then
-            echo "::notice::Formula/operate.rb of Miragon/homebrew-tap is already at ${VERSION}"
+          current="$(gh api "repos/${TAP}/contents/${path}?ref=main" --jq .sha)" || current=""
+          if [ "$current" = "$(git hash-object "$formula")" ]; then
+            echo "::notice::${path} of ${TAP} is already at ${VERSION}"
             exit 0
           fi
-          git commit -m "chore: update operate to ${VERSION}"
-          git push --force origin "$branch"
-          gh pr create --repo Miragon/homebrew-tap --base main --head "$branch" \
+          main="$(gh api "repos/${TAP}/git/ref/heads/main" --jq .object.sha)"
+          gh api -X DELETE "repos/${TAP}/git/refs/heads/${branch}" 2>/dev/null || true
+          gh api "repos/${TAP}/git/refs" -f ref="refs/heads/${branch}" -f sha="$main" > /dev/null
+          gh api -X PUT "repos/${TAP}/contents/${path}" -f branch="$branch" \
+            -f message="chore: update operate to ${VERSION}" -f content="$(base64 -w0 "$formula")" \
+            ${current:+-f sha="$current"} > /dev/null
+          gh pr create --repo "$TAP" --base main --head "$branch" \
             --title "chore: update operate to ${VERSION}" \
             --body "Automated formula update for [operate ${VERSION}](https://github.com/Miragon/operate/releases/tag/v${VERSION})."
-          gh pr merge "$branch" --repo Miragon/homebrew-tap --squash --delete-branch
+          gh pr merge "$branch" --repo "$TAP" --squash --delete-branch
