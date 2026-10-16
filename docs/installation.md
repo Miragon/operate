@@ -1,7 +1,7 @@
 # Installation
 
-Three ways, the same CLI: the npm package (Node.js >= 22.12), a standalone executable for
-servers and machines without Node.js, or the container image.
+Four ways, the same CLI: the npm package (Node.js >= 22.12), Homebrew, a standalone executable
+for servers and machines without Node.js, or the container image.
 
 ## npm
 
@@ -15,6 +15,19 @@ Or run it without installing:
 ```sh
 npx @miragon/operate --help
 ```
+
+## Homebrew
+
+On macOS and Linux, from the [Miragon tap](https://github.com/Miragon/homebrew-tap):
+
+```sh
+brew install miragon/tap/operate
+operate --version
+```
+
+The formula installs the [standalone executable](#standalone-executable) of the newest stable
+release (a download of about 25 MB) and depends on nothing, not even Node.js. It also installs the
+[shell completion](#shell-completion) for bash, zsh and fish. `brew upgrade operate` updates it.
 
 ## Standalone executable
 
@@ -30,6 +43,9 @@ plus `SHA256SUMS`:
 | macOS (Apple silicon) | `operate-macos-arm64`     | macOS 13.5 or newer                                      |
 | macOS (Intel)         | `operate-macos-x64`       | macOS 13.5 or newer                                      |
 | Windows x64           | `operate-windows-x64.exe` | Windows 10 or Server 2016 or newer                       |
+
+Releases after 0.8.0 also have each macOS and Linux file as `<file>.tar.xz` (about 25 MB instead
+of 125 MB), holding the executable as `operate`, with its line in `SHA256SUMS`.
 
 Alpine and other musl based systems: use the container image or the npm package.
 

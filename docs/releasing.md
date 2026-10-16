@@ -17,10 +17,16 @@ no npm token exists.
    Prerelease versions get the `next` dist-tag, all others `latest`.
 4. In the same run, the standalone bundle is built once and smoke tested; five native runners
    (Linux x64 and arm64, macOS Intel and Apple silicon, Windows x64) turn it into executables and
-   smoke test each one. They are attached to the GitHub release with `SHA256SUMS` and a build
-   provenance attestation. After the npm publish, the container image is pushed to
-   `ghcr.io/miragon/operate` (`<version>`, `<major>.<minor>`, `latest`; prereleases only
-   `<version>`) with SBOM, provenance and an attestation.
+   smoke test each one. They are attached to the GitHub release, the macOS and Linux ones also as
+   `<file>.tar.xz`, with `SHA256SUMS` and a build provenance attestation. After the npm publish,
+   the container image is pushed to `ghcr.io/miragon/operate` (`<version>`, `<major>.<minor>`,
+   `latest`; prereleases only `<version>`) with SBOM, provenance and an attestation.
+5. After the binaries are attached, the `homebrew` job (`publish-homebrew.yml`, not for
+   prereleases) writes `Formula/operate.rb` for the `.tar.xz` archives from their `SHA256SUMS` with
+   `scripts/homebrew-formula.sh`, installs and tests it on macOS Apple silicon, macOS Intel and
+   Linux, and squash-merges a pull request with it into
+   [Miragon/homebrew-tap](https://github.com/Miragon/homebrew-tap). A manual run of
+   `Publish Homebrew formula` (with `dry-run` only to check) publishes an existing release again.
 
 | Commit type                                       | Changelog            | Version bump                    |
 | ------------------------------------------------- | -------------------- | ------------------------------- |
@@ -119,6 +125,10 @@ organization `miragon` with 2FA:
     organization or repository allows only selected actions, allow GitHub's own and
     `docker/login-action`, `docker/setup-buildx-action`, `docker/metadata-action` and
     `docker/build-push-action`.
+12. **Homebrew tap** needs the GitHub App of step 3 installed on `Miragon/homebrew-tap` with
+    Contents and Pull requests read and write; `miragon-release-please` is installed on every
+    repository of the organization. A `GITHUB_TOKEN` or the token `RELEASE_PLEASE_TOKEN` cannot
+    push there.
 
 Without the placeholder, the npm owner can instead publish 0.1.0 by hand (`npm publish` from the
 release pull request branch) before merging the release pull request; the workflow then skips

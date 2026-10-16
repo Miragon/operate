@@ -1,0 +1,148 @@
+# Publishes the Homebrew formula of operate to Miragon/homebrew-tap (`brew install
+# miragon/tap/operate`): the standalone executables of a GitHub release for macOS and Linux, without
+# dependencies. Called by the Release workflow after the binaries are attached; a manual run
+# publishes an existing release again or checks it with dry-run. The formula comes from
+# scripts/homebrew-formula.sh of the commit this workflow runs from, not of the release tag.
+name: Publish Homebrew formula
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+    secrets:
+      RELEASE_PLEASE_APP_PRIVATE_KEY:
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Released version without the v prefix (e.g. 0.8.0)
+        required: true
+        type: string
+      dry-run:
+        description: Build and test the formula without pushing it to the tap
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  formula:
+    name: formula ${{ inputs.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Write the formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/formula"
+          gh release download "v${VERSION}" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --dir "$RUNNER_TEMP"
+          scripts/homebrew-formula.sh "$VERSION" "$RUNNER_TEMP/SHA256SUMS" > "$RUNNER_TEMP/formula/operate.rb"
+          cat "$RUNNER_TEMP/formula/operate.rb"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: homebrew-formula
+          path: ${{ runner.temp }}/formula/operate.rb
+          if-no-files-found: error
+          retention-days: 7
+
+  # Installs the formula from a local tap on each platform with a preinstalled Homebrew and runs
+  # its test, the audit of homebrew/core and the smoke test against the installed binary.
+  verify:
+    name: verify on ${{ matrix.runner }}
+    needs: formula
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-latest, macos-26-intel, ubuntu-latest]
+    env:
+      EXPECTED_VERSION: ${{ inputs.version }}
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_FROM_API: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: homebrew-formula
+          path: ${{ runner.temp }}/formula
+      - name: Put Homebrew on the PATH (Linux)
+        if: runner.os == 'Linux'
+        run: echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+      - name: Install, test and audit the formula
+        run: |
+          brew tap-new --no-git miragon/verify
+          cp "$RUNNER_TEMP/formula/operate.rb" "$(brew --repository miragon/verify)/Formula/operate.rb"
+          brew install miragon/verify/operate
+          brew test miragon/verify/operate
+          brew audit --strict --online miragon/verify/operate
+      - name: Smoke test the installed binary
+        run: scripts/smoke-test.sh "$(brew --prefix)/bin/operate"
+
+  # Opens a pull request with the formula on Miragon/homebrew-tap and squash-merges it, with a token
+  # of the Miragon release-please app (vars.RELEASE_PLEASE_APP_CLIENT_ID +
+  # secrets.RELEASE_PLEASE_APP_PRIVATE_KEY), which is installed on every repository of the org.
+  publish:
+    name: publish ${{ inputs.version }} to Miragon/homebrew-tap
+    needs: verify
+    if: ${{ !inputs.dry-run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions: {}
+    concurrency:
+      group: homebrew-tap
+      cancel-in-progress: false
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: homebrew-formula
+          path: ${{ runner.temp }}/formula
+      - name: Create a GitHub App token
+        id: tap-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.RELEASE_PLEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
+          owner: Miragon
+          repositories: homebrew-tap
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Open and squash-merge the pull request
+        env:
+          GH_TOKEN: ${{ steps.tap-token.outputs.token }}
+        run: |
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/Miragon/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cp "$RUNNER_TEMP/formula/operate.rb" tap/Formula/operate.rb
+          cd tap
+          git config user.name "miragon-release-please[bot]"
+          git config user.email "miragon-release-please[bot]@users.noreply.github.com"
+          branch="operate-${VERSION}"
+          git switch -c "$branch"
+          git add Formula/operate.rb
+          if git diff --cached --quiet; then
+            echo "::notice::Formula/operate.rb of Miragon/homebrew-tap is already at ${VERSION}"
+            exit 0
+          fi
+          git commit -m "chore: update operate to ${VERSION}"
+          git push --force origin "$branch"
+          gh pr create --repo Miragon/homebrew-tap --base main --head "$branch" \
+            --title "chore: update operate to ${VERSION}" \
+            --body "Automated formula update for [operate ${VERSION}](https://github.com/Miragon/operate/releases/tag/v${VERSION})."
+          gh pr merge "$branch" --repo Miragon/homebrew-tap --squash --delete-branch
