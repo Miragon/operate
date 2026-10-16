@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.0](https://github.com/Miragon/operate/compare/v0.8.0...v0.9.0) (2026-10-16)
+
+
+### Features
+
+* install operate with Homebrew, without dependencies ([#38](https://github.com/Miragon/operate/issues/38)) ([8f7432b](https://github.com/Miragon/operate/commit/8f7432baeb8b5289e147192f0f965fad946e47a5))
+
+
+### Documentation
+
+* publish the docs as a VitePress site on GitHub Pages ([#34](https://github.com/Miragon/operate/issues/34)) ([0d208ee](https://github.com/Miragon/operate/commit/0d208eea144960ee8f50f5351d3f9421dbea0a55))
+
 ## [0.8.0](https://github.com/Miragon/operate/compare/v0.7.0...v0.8.0) (2026-10-15)
 
 
