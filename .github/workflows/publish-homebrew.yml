@@ -56,7 +56,8 @@ jobs:
           retention-days: 7
 
   # Installs the formula from a local tap on each platform with a preinstalled Homebrew and runs
-  # its test, the audit of homebrew/core and the smoke test against the installed binary.
+  # its test, the audit of homebrew/core and the smoke test against the installed binary. Homebrew
+  # reads homebrew/core from its API: the Linux runner cannot clone it as a tap.
   verify:
     name: verify on ${{ matrix.runner }}
     needs: formula
@@ -71,7 +72,6 @@ jobs:
     env:
       EXPECTED_VERSION: ${{ inputs.version }}
       HOMEBREW_NO_AUTO_UPDATE: '1'
-      HOMEBREW_NO_INSTALL_FROM_API: '1'
     steps:
       - uses: actions/checkout@v7
         with:
