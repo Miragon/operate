@@ -31,7 +31,6 @@ with [Vitest](https://vitest.dev/). It requires Node.js 24 (`.nvmrc`; the packag
 | `npm run test:mutation`       | Incremental StrykerJS run on the logic layers (`-- --force` re-tests every mutant) |
 | `npm run test:mutation:score` | Break threshold over the CI mutation shards (`--informational`: report only)       |
 | `npm run test:integration`    | Build, then run the Testcontainers tests against real engines                      |
-| `npm run demo`                | Redraw the README demo (`docs/assets/demo.gif`)                                    |
 | `npm run docs:dev`            | Serve the docs site with hot reload (`docs:build`, `docs:preview` build and serve) |
 
 `npm run check` is what a change has to pass; CI runs it on every pull request, together with the
@@ -47,9 +46,6 @@ Keycloak and an Envoy JWT gateway. `OPERATE_IT_ENGINES=operaton,camunda` selects
 subset (`operaton`, `cibseven`, `camunda`), and `OPERATE_IT_SKIP_PACK=1` skips the packed-tarball
 smoke test (`npm pack`, install, run). `OPERATE_IT_BINARY=<path>` runs the suites against a
 standalone executable instead of `dist/operate.js`.
-
-`npm run demo` runs the built CLI against a fresh engine at `OPERATE_URL` and needs
-[gifski](https://gif.ski/) on your PATH and network access for the Geist fonts.
 
 The docs site is a [VitePress](https://vitepress.dev/) package of its own in `docs/`, with its own
 `package-lock.json`: run `npm ci --prefix docs` once before the `docs:*` scripts. Its build fails
