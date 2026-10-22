@@ -62,6 +62,7 @@ is never readable under another mode); you can also edit it by hand:
     },
     "prod": {
       "url": "https://camunda.example.com/engine-rest",
+      "cockpitUrl": "https://camunda.example.com/operaton/app/cockpit/default/",
       "auth": {
         "type": "oauth",
         "issuer": "https://login.example.com/realms/camunda",
@@ -77,7 +78,7 @@ is never readable under another mode); you can also edit it by hand:
 }
 ```
 
-Profile keys: `url`, `engine`, `auth` (`type`, then either the Basic auth keys `username` and
+Profile keys: `url`, `cockpitUrl` (the Cockpit webapp, for links; only stored, never called), `engine`, `auth` (`type`, then either the Basic auth keys `username` and
 `passwordEnv` or `password`, the OAuth keys `issuer`, `authorizationEndpoint`, `tokenEndpoint`,
 `clientId`, `clientSecretEnv` or `clientSecret`, `scopes`, `audience`, `redirectPort`, or the
 bearer token keys `tokenEnv` or `token`; see [Authentication](authentication.md)), `output`,
@@ -92,6 +93,7 @@ header values with control characters and connection headers (`Connection`, `Tra
 ```sh
 operate config set local --url http://localhost:8080/engine-rest --default
 operate config set prod --url https://camunda.example.com/engine-rest --read-only
+operate config set prod --cockpit-url https://camunda.example.com/operaton/app/cockpit/default/
 operate config list
 operate config show --profile prod
 operate config use prod

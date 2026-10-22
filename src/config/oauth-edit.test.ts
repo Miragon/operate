@@ -259,6 +259,7 @@ describe('config list and show with OAuth', () => {
     );
     expect(Object.keys(view.values)).toEqual([
       'url',
+      'cockpitUrl',
       'engine',
       'auth',
       'username',

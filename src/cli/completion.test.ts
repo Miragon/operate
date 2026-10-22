@@ -188,6 +188,7 @@ describe('operate __complete', () => {
     // after the profile, unset completes the keys it removes, each once
     expect(await values(['config', 'unset', 'prod', ''], { files })).toEqual([
       'url',
+      'cockpitUrl',
       'engine',
       'auth',
       'output',

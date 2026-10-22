@@ -112,29 +112,33 @@ function parseUrl(url: string): URL {
 }
 
 /** Checks the REST API root URL and removes surrounding blanks and trailing slashes. */
-export function validateUrl(url: string): string {
+export function validateUrl(url: string, label = 'Engine URL', example = DEFAULT_URL): string {
   const trimmed = url.trim();
   const parsed = parseUrl(trimmed);
   // checked first, because the other messages repeat the URL and must never show credentials
   if (parsed.username !== '' || parsed.password !== '') {
     throw configError(
-      'Engine URL must not contain credentials',
+      `${label} must not contain credentials`,
       'Remove the user info from the URL and use Basic auth: --auth basic --auth-user <name> with the password from --auth-password-stdin or OPERATE_PASSWORD.',
     );
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw configError(
-      `Engine URL must start with http:// or https://, got "${redactUrl(trimmed)}"`,
-      `Example: ${DEFAULT_URL}`,
+      `${label} must start with http:// or https://, got "${redactUrl(trimmed)}"`,
+      `Example: ${example}`,
     );
   }
   if (/[?#]/.test(trimmed)) {
     throw configError(
-      `Engine URL must not contain a query string or fragment, got "${redactUrl(trimmed)}"`,
-      `Pass credentials as a header (-H, ${ENV.headers}) instead. Example URL: ${DEFAULT_URL}`,
+      `${label} must not contain a query string or fragment, got "${redactUrl(trimmed)}"`,
+      `Pass credentials as a header (-H, ${ENV.headers}) instead. Example URL: ${example}`,
     );
   }
   return trimmed.replace(/\/+$/, '');
+}
+
+export function validateCockpitUrl(url: string): string {
+  return validateUrl(url, 'Cockpit URL', 'http://localhost:8080/operaton/app/cockpit/default');
 }
 
 /** True for a usable engine name: not blank, not "." or ".." (they would leave /engine/{name}). */
@@ -227,9 +231,11 @@ export function resolveConfig(
 ): ResolvedConfig {
   const selected = selectProfile(flags, env, file);
   const { url, engine, output, timeout, readOnly, headers } = pickAll(flags, env, selected.profile);
+  const cockpitUrl = selected.profile?.cockpitUrl;
   const values = {
     ...compact({
       profile: selected.name,
+      cockpitUrl: cockpitUrl === undefined ? undefined : validateCockpitUrl(cockpitUrl),
       engine: engine.value === undefined ? undefined : validateEngine(engine.value),
       output: output.value === undefined ? undefined : validateOutput(output.value),
     }),

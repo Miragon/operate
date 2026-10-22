@@ -64,6 +64,7 @@ interface SetOptions {
   readonly timeout?: string;
   readonly header?: string[];
   readonly readOnly?: boolean;
+  readonly cockpitUrl?: string;
   readonly default?: boolean;
 }
 
@@ -124,6 +125,7 @@ function profileChanges(command: Command, secrets: SetSecrets): ProfileChanges {
     timeout: options.timeout,
     headers: options.header,
     readOnly: options.readOnly,
+    cockpitUrl: options.cockpitUrl,
     makeDefault: options.default === true ? true : undefined,
   });
 }
@@ -228,6 +230,7 @@ function registerSet(config: Command, context: CliContext): void {
     )
     .option('--read-only', 'Refuse every operation that is not a read')
     .option('--no-read-only', 'Allow operations that change the engine state')
+    .option('--cockpit-url <url>', 'Base URL of the Cockpit webapp, used for links')
     .option('--default', 'Make this the default profile')
     .option(...PROJECT_OPTION)
     .option('-o <format>', 'Output format of the printed profile: json or table');

@@ -9,6 +9,7 @@ const VIEW: ConfigView = {
   profileFile: null,
   values: {
     url: { value: 'http://h/rest', source: 'default' },
+    cockpitUrl: { value: null, source: 'default' },
     engine: { value: null, source: 'default' },
     auth: { value: 'basic', source: 'env' },
     username: { value: 'demo', source: 'env' },
@@ -101,6 +102,7 @@ describe('showRows and showHeader', () => {
   it('lists KEY VALUE SOURCE rows in order', () => {
     expect(showRows(VIEW)).toEqual([
       { KEY: 'url', VALUE: 'http://h/rest', SOURCE: 'default' },
+      { KEY: 'cockpitUrl', VALUE: null, SOURCE: 'default' },
       { KEY: 'engine', VALUE: null, SOURCE: 'default' },
       { KEY: 'auth', VALUE: 'basic', SOURCE: 'env' },
       { KEY: 'username', VALUE: 'demo', SOURCE: 'env' },
