@@ -1,17 +1,23 @@
 # Authentication
 
-`operate` supports [HTTP Basic authentication](#basic-auth), [OAuth 2.0](#oauth) with the
-authorization code flow and PKCE, for engines behind a gateway that checks tokens of Keycloak,
-Microsoft Entra ID, Auth0 or another OpenID Connect provider, [bearer tokens](#bearer-tokens)
-you get elsewhere (SSO tooling, a CI secret, `az`, `gcloud`) and [token commands](#token-commands)
-that operate runs to fetch one. Other schemes go into [headers](#other-headers).
+`operate` supports [Basic auth](#basic-auth), [OAuth 2.0](#oauth) (authorization code flow with
+PKCE, for Keycloak, Microsoft Entra ID, Auth0 or another OpenID Connect provider),
+[bearer tokens](#bearer-tokens) you get elsewhere, [token commands](#token-commands) that fetch
+one, and [headers](#other-headers) for other schemes.
+
+- The type comes from `--auth none|basic|oauth|bearer`, `OPERATE_AUTH` or the profile. Without one,
+  a username selects `basic` and a token selects `bearer`. OAuth is never implied.
+- Each value resolves on its own: flag > environment variable > profile. With `--url` or
+  `OPERATE_URL` set, the profile's credentials go to that URL: check `operate config show`.
+- Secrets are never plain flags and are masked (`***`) in output unless `--show-secrets`.
+
+The short form for agents: `operate guide auth`; every option: `operate auth <command> --help`.
 
 ## Basic auth
 
-Basic auth works e.g. with Camunda 7 Run with `camunda.bpm.run.auth.enabled=true`, CIB seven Run
-additionally with `camunda.bpm.run.auth.authentication=basic` (its default `pseudo` lets every
-request in), Operaton Run with `operaton.bpm.run.auth.enabled=true`, or a
-`ProcessEngineAuthenticationFilter` or proxy in front of `/engine-rest`.
+For Camunda 7 Run with `camunda.bpm.run.auth.enabled=true`, CIB seven Run with
+`camunda.bpm.run.auth.authentication=basic`, Operaton Run with `operaton.bpm.run.auth.enabled=true`,
+or a filter or proxy in front of `/engine-rest`.
 
 | Value    | Flag                    | Environment        | Profile (`auth` object)                     |
 | -------- | ----------------------- | ------------------ | ------------------------------------------- |
@@ -19,58 +25,28 @@ request in), Operaton Run with `operaton.bpm.run.auth.enabled=true`, or a
 | username | `--auth-user <name>`    | `OPERATE_USERNAME` | `username`                                  |
 | password | `--auth-password-stdin` | `OPERATE_PASSWORD` | `passwordEnv` (variable name) or `password` |
 
-- Each value is resolved on its own: flag > environment variable > profile. Without a type
-  anywhere, a username or `--auth-password-stdin` selects `basic`; `--auth none` or
-  `OPERATE_AUTH=none` switch Basic auth off even when the profile sets it.
-- Credentials follow URL overrides: with `--url` or `OPERATE_URL` set, the credentials of the
-  profile (and `OPERATE_USERNAME`/`OPERATE_PASSWORD`) go to that URL. Check `operate config show`
-  when a shell has a leftover `OPERATE_URL`, and use `https://` beyond `localhost`: Basic auth sends
-  the password readable to anyone on the path.
-- The password is never a plain flag (shell history, process list). `--auth-password-stdin`
-  reads the first line of stdin, so it cannot be combined with `--body -`. In a profile, prefer
-  `passwordEnv`, the name of an environment variable that holds the password; a literal
-  `password` is stored in plain text (the config file has mode `0600`, and `config set` warns).
-  `config set` also warns, without repeating it, when the variable given to
-  `--auth-password-env` is not set in its environment: pass the name, never the password. An
-  unset name that is not in the usual upper-case form (`--auth-password-env s3cret_pw` instead of
-  `CAMUNDA_PASSWORD`) is refused without being stored or repeated. Errors repeat the
-  `passwordEnv` of a profile only in that form, and the profile that `config set|unset|use`
-  print shows `***` for an unset name in another form (the same holds for
-  `--oauth-client-secret-env` / `clientSecretEnv` and `--auth-token-env` / `tokenEnv`).
-- Basic auth with a missing username or password fails with exit code 3 before any request is
-  sent, naming where each value was looked up. Usernames must not contain `:` (RFC 7617), and
-  neither value may contain control characters.
-- `operate ping` reports `"auth": "basic"` and `"user"`. `config show` lists `auth`, `username`
-  and `password` with their sources. The password and the `Authorization` header are masked
-  (`***`, `Basic ***`) in `config show`, `--verbose` and `--dry-run` output, including the curl
-  line, unless `--show-secrets` is given.
-- An HTTP 401 (exit code 4) says whether operate sent no credentials and why (for example
-  `OPERATE_AUTH=none`, or a password without a username), or which user the engine rejected and
-  where the credentials came from.
-- A mistyped password flag (`--auth-password=...`, a value after `--auth-password-stdin`) is a
-  usage error that never repeats the value.
-
 ```sh
 # per call: the password comes from stdin
 printf '%s\n' "$CAMUNDA_PASSWORD" | operate ping --auth basic --auth-user demo --auth-password-stdin
-# per shell or CI job: take the password from a secret, never type it into the command line
-export OPERATE_USERNAME=demo OPERATE_PASSWORD="$CAMUNDA_PASSWORD"
-# interactive shell: read it without echo and without shell history
+# per shell: read it without echo and without shell history
 read -rs OPERATE_PASSWORD && export OPERATE_PASSWORD
 operate task list --assignee demo
 # per profile: only the name of the variable is stored
 operate config set staging --url https://staging.example.com/engine-rest --auth basic --auth-user demo --auth-password-env CAMUNDA_PASSWORD
 ```
 
+- In a profile, store the variable name with `--auth-password-env`; a literal `password` is plain
+  text in the `0600` config file (`config set` warns). Pass the name, never the password.
+- A missing username or password exits 3. A 401 (exit 4) names the rejected user or the reason
+  no credentials were sent.
+- Use `https://` beyond `localhost`: Basic auth sends the password readable.
+
 ## OAuth
 
-A person logs in once with `operate auth login` in a terminal; every other command reads the
-cached tokens, sends `Authorization: Bearer <token>` and refreshes the token on its own. No
-command except `auth login` ever starts a login: without a usable login a command fails with
-`LOGIN_REQUIRED` (exit code 4) and a hint naming the command a person runs, so agents never end up
-waiting for a browser. Client credentials and the device flow are not supported.
-
-Configure the profile (or the `OPERATE_OAUTH_*` variables), then log in:
+A person logs in once with `operate auth login` in a terminal; other commands use and refresh the
+cached tokens. Without a usable login they fail with `LOGIN_REQUIRED` (exit 4) and name the command
+to run, so agents never wait for a browser. Client credentials and the device flow are not
+supported.
 
 ```sh
 operate config set sso --url https://camunda.example.com/engine-rest --auth oauth --oauth-issuer https://login.example.com/realms/camunda --oauth-client-id operate-cli --oauth-audience engine-rest
@@ -78,270 +54,119 @@ operate config set sso --url https://camunda.example.com/engine-rest --auth oaut
 
 ```text
 $ operate auth login --profile sso
-Logging in to https://login.example.com/realms/camunda as client operate-cli (profile "sso").
 Open this URL in a browser to log in:
   https://login.example.com/realms/camunda/protocol/openid-connect/auth?response_type=code&client_id=operate-cli&redirect_uri=...
-Opened the system browser.
-Waiting up to 300 s for the login at http://127.0.0.1:53682/callback (Ctrl+C cancels).
 Logged in as alice (profile "sso").
-{"profile":"sso","profiles":["sso"],"issuer":"https://login.example.com/realms/camunda","clientId":"operate-cli","user":"alice","subject":"27c6dbd7-...","scopes":["openid","offline_access","profile","email"],"accessTokenExpiresAt":"2026-10-09T12:05:00.000Z","accessTokenValid":true,"refreshTokenExpiresAt":"2026-11-08T12:00:00.000Z","canRefresh":true,"loggedInAt":"2026-10-09T12:00:00.000Z","refreshedAt":null,"tokenCache":"/home/me/.config/operate/tokens/login-5d41402abc4b2a76b9719d911017c592.json"}
 
 $ operate process-instance list --profile sso
 ```
 
-| Value         | Environment                                                            | Profile (`auth` object) / `config set` option                                           |
-| ------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| type          | `OPERATE_AUTH=oauth` (or `--auth oauth`)                               | `type: "oauth"` / `--auth oauth`; OAuth is never implied                                |
-| issuer        | `OPERATE_OAUTH_ISSUER`                                                 | `issuer` / `--oauth-issuer <url>`; the endpoints come from OpenID Connect discovery     |
-| endpoints     | `OPERATE_OAUTH_AUTHORIZATION_ENDPOINT`, `OPERATE_OAUTH_TOKEN_ENDPOINT` | `authorizationEndpoint`, `tokenEndpoint` (both or neither) / `--oauth-*-endpoint <url>` |
-| client id     | `OPERATE_OAUTH_CLIENT_ID`                                              | `clientId` / `--oauth-client-id <id>`                                                   |
-| client secret | `OPERATE_OAUTH_CLIENT_SECRET`                                          | `clientSecretEnv` (variable name) or `clientSecret` / `--oauth-client-secret-env <VAR>` |
-| scopes        | `OPERATE_OAUTH_SCOPES` (spaces or commas)                              | `scopes` / `--oauth-scopes <scopes>`; default `openid offline_access`                   |
-| audience      | `OPERATE_OAUTH_AUDIENCE`                                               | `audience` / `--oauth-audience <audience>` (sent as `audience` parameter, Auth0 style)  |
-| redirect port | `OPERATE_OAUTH_REDIRECT_PORT`                                          | `redirectPort` / `--oauth-redirect-port <port>`; default 0 = any free port              |
+| Value         | Environment                                                            | `config set` option                                        |
+| ------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
+| type          | `OPERATE_AUTH=oauth`                                                   | `--auth oauth`                                             |
+| issuer        | `OPERATE_OAUTH_ISSUER`                                                 | `--oauth-issuer <url>` (endpoints from discovery)          |
+| endpoints     | `OPERATE_OAUTH_AUTHORIZATION_ENDPOINT`, `OPERATE_OAUTH_TOKEN_ENDPOINT` | `--oauth-authorization-endpoint`, `--oauth-token-endpoint` |
+| client id     | `OPERATE_OAUTH_CLIENT_ID`                                              | `--oauth-client-id <id>`                                   |
+| client secret | `OPERATE_OAUTH_CLIENT_SECRET`                                          | `--oauth-client-secret-env <VAR>` (confidential client)    |
+| scopes        | `OPERATE_OAUTH_SCOPES`                                                 | `--oauth-scopes <scopes>`, default `openid offline_access` |
+| audience      | `OPERATE_OAUTH_AUDIENCE`                                               | `--oauth-audience <audience>` (Auth0 style parameter)      |
+| redirect port | `OPERATE_OAUTH_REDIRECT_PORT`                                          | `--oauth-redirect-port <port>`, default 0 (any free port)  |
 
-- The issuer, or both endpoints, from the environment replace those of the profile as a group;
-  every other value resolves on its own (environment > profile > default). URLs must use
-  `https://` (`http://` only for `localhost`, `127.0.0.1` and `[::1]`). A public client (no
-  secret) with PKCE is the normal case; `--oauth-client-secret-stdin` stores a literal secret
-  (with a warning); a client secret given to `--oauth-client-secret-env` in place of the name of
-  its variable is refused like a password (see Basic auth). OAuth together with an
-  `Authorization` header, or with `--auth-password-stdin`, is a configuration error, and so is a
-  missing issuer or client id.
-- `operate auth login [--no-browser] [--login-timeout <ms>]` uses the authorization code flow
-  with PKCE (`S256`) and a random `state`, and listens on `127.0.0.1` only while it waits for
-  the redirect (RFC 8252). It prints the URL before it starts the system browser (`BROWSER`, else
-  `open`, `xdg-open` with a display, or the Windows URL handler), so it also works over SSH:
-  set a fixed `--oauth-redirect-port 8765`, forward it with `ssh -L 8765:127.0.0.1:8765 host` and
-  open the URL in your local browser. A login always replaces the cached one.
-- `operate auth status` shows user, scopes and the expiry of the access and refresh token without
-  network access and exits with 4 (`LOGIN_REQUIRED`) when no command could run without a new
-  login. Tokens are never printed. It reads only the cache: a session revoked at the server is
-  noticed by the next command that refreshes, which records the refusal (`invalid_grant`) in the
-  cache, so `auth status` and later commands then fail with `LOGIN_REQUIRED` at once.
-- `operate auth logout` revokes the refresh token (when the server supports RFC 7009) and removes
-  the cached login. An access token issued before stays valid until it expires at gateways that
-  check tokens offline (JWT gateways such as Envoy); `logout` says until when. Without a
-  revocation endpoint (explicit endpoints, or a provider whose discovery document lists none,
-  such as Microsoft Entra ID) nothing is revoked and `logout` warns: end the session at the
-  provider. A confidential client's login is revoked only with the client secret of the same
-  issuer and client.
-- Tokens are cached in `$XDG_CONFIG_HOME/operate/tokens` (default `~/.config/operate/tokens`,
-  Windows `%APPDATA%\operate\tokens`), one file per login (`login-<hash>.json`, see
-  [shared logins](#shared-logins); without a profile `env-<hash>.json`), written atomically with
-  mode `0600` in a `0700` directory, never next to a config file named by `--config`. A login is
-  kept for the issuer, client, audience and scopes it was made for; changing them needs a new
-  login (`LOGIN_REQUIRED` names what differs and which `OPERATE_OAUTH_*` variable of the
-  environment causes it). The `profile-<name>.json` logins of operate 0.7.0 and earlier are no
-  longer used: log in once more. `auth logout --profile <name>` of an OAuth profile revokes and
-  removes the old file of the profile, too (`oldTokenCaches`), `config delete` removes that of
-  the deleted profile; delete others by hand.
-- Refreshes happen 60 s before the access token expires (at most half its lifetime) and once
-  after a 401; rotated refresh tokens are stored. Commands running in parallel share one refresh
-  through a lock file, so a refresh token is never sent twice (Keycloak ends the session when one
-  is reused). With strict rotation a refresh answer lost on the way (timeout, dropped connection)
-  ends the login, too: run `auth login` again.
-- The gateway must expect exactly the issuer operate logs in with: `http://localhost:8180/realms/x`
-  and `http://127.0.0.1:8180/realms/x` are different issuers to a JWT gateway, and Keycloak issues
-  tokens for the host name the browser and operate used. `UNAUTHORIZED` or `FORBIDDEN` after a
-  successful login are gateway (issuer, audience, clock) or permission problems, not login
-  problems; the hints say what to check, and a 403 never triggers a refresh.
-- `--dry-run` shows the cached token as `Bearer ***` and notes on stderr when there is no usable
-  login; `--verbose` traces token requests too (client credentials always masked) and says
-  when a failed refresh falls back to the still valid token;
-  `--show-secrets` reveals only the Bearer token. `operate ping` reports `"auth": "oauth"` and the
-  user. `config show` lists the OAuth values with their sources (the client secret masked).
+- `auth login [--no-browser] [--login-timeout <ms>]` prints the URL, opens the browser and waits
+  on `127.0.0.1`. Over SSH: set `--oauth-redirect-port 8765`, run
+  `ssh -L 8765:127.0.0.1:8765 host` and open the URL locally.
+- `auth status` shows user, scopes and expiry without network access; exit 4 when a new login is
+  needed. `auth logout` revokes the refresh token (if the provider supports it) and removes the
+  login.
+- Tokens are cached in `~/.config/operate/tokens` (mode `0600`). Changing issuer, client, audience
+  or scopes needs a new login.
+- `UNAUTHORIZED` or `FORBIDDEN` after a successful login are gateway (issuer, audience, clock) or
+  permission problems, not login problems. The gateway must expect exactly the issuer URL operate
+  logs in with (`localhost` and `127.0.0.1` differ).
+- URLs must use `https://` (`http://` only for loopback).
 
 ### Shared logins
 
-One `operate auth login` serves every OAuth profile of the same origin that stores the same
-issuer (or explicit token endpoint), client id, audience and scopes, so a repository with an
-engine per service needs one login, not one per profile:
+One `operate auth login` serves every OAuth profile of the same origin that stores the same issuer
+(or token endpoint), client id, audience and scopes. A repository with an engine per service needs
+one login, not one per profile.
 
-```text
-$ operate auth login --profile orders
-...
-Logged in as alice (profile "orders").
-The login also serves 2 other profiles with the same issuer, client, audience and scopes:
-  billing   http://localhost:8113/engine-rest
-  invoices  http://localhost:8114/engine-rest
-```
-
-- The origin is your config file, a config file named by `--config` or `OPERATE_CONFIG`, or the
-  repository of a [project file](configuration.md#project-file): every project file below the
-  repository root, tracked or not, and every worktree of the repository (a worktree counts when
-  its git directory links back to it, as `git worktree add` writes it). Separate clones, a
-  submodule, a copied `.git` file and a project file outside a repository are origins of their
-  own. Like git's `safe.directory`, a `.git` of another user or in a file system root makes no
-  repository (Windows has no owners operate can compare: there only the drive root is refused). A
-  profile of your config file that overrides a project profile of the same name uses the logins of
-  your config file.
-- Only the stored settings decide which login a profile uses; values from `OPERATE_OAUTH_*`
-  variables must still fit the login. A profile with another audience or other scopes has a login
-  of its own, and so has a profile that gets OAuth only from `OPERATE_AUTH=oauth` (no stored
-  `type: "oauth"`). The profiles refresh through one cache file and one lock, so they never send a
-  refresh token twice.
-- `auth login` lists the other profiles the login serves, with their URLs, and `auth status` and
-  `auth logout` name them (`profiles`): those of the files in effect. In a repository, project
-  files elsewhere and other worktrees with the same settings use the login, too, and `logout`
-  ends it for all of them. `config set` says which other profiles share the profile's login.
-  `LOGIN_REQUIRED`, the notes of `--dry-run` and the hint of a 401 name where to log in: the
-  directory of a project file, or `--config` with the config file it names.
-- `config set|unset|delete` remove the login of a profile's previous OAuth settings (without
-  revoking it) when no other OAuth profile of the file uses it any more. The login of a repository
-  stays, with a note: other worktrees and project files of the repository may still use it.
-- A login belongs to the file or repository at its path, so run `auth logout` before you delete a
-  repository whose login is still valid. A login whose settings change outside `operate config`
-  (a pull of the project file, an edit by hand) is no longer found and stays in the token
-  directory, its refresh token valid until it expires: log out before, or delete the file (its
-  `identity` names issuer, client, audience and scopes).
-
-Security notes:
-
-- Use `https://` for the engine URL: operate warns on stderr when it sends the access token over
-  plain `http://` to a host other than `localhost`, `127.0.0.1` or `[::1]` (RFC 6750 §5.3).
-- A login only serves the profiles of the origin it was made for: another repository's project
-  file or a config file named by `--config` never gets it, also not with a profile of the same
-  name, issuer and client. Within its origin it goes wherever the profiles' URLs point, so treat a
-  project file like code, and `--url` or `OPERATE_URL` send the login of the selected profile to
-  that URL. Each value resolves on its own, so `OPERATE_OAUTH_CLIENT_SECRET` also goes to the
-  token endpoint of whatever issuer the profile or `OPERATE_OAUTH_ISSUER` names. Point operate
-  (and agents) only at config files and variables you trust.
-- operate rejects a login response whose `iss` (RFC 9207) names another issuer, and requires
-  `iss` when the provider advertises it. A provider that sends no `iss` (Microsoft Entra ID) gives
-  no such mix-up protection: log in only to issuers you trust.
+- The origin is your config file, a file named by `--config` or `OPERATE_CONFIG`, or the
+  repository of a [project file](configuration.md#project-file), including all its worktrees.
+  Separate clones and submodules are origins of their own.
+- `auth login`, `status` and `logout` name the profiles a login serves; `logout` ends it for all.
+- A login never serves another origin. Within its origin it goes wherever the profiles' URLs
+  point: treat a project file like code.
+- Run `auth logout` before you delete a repository whose login is still valid.
 
 Client registration:
 
-- **Keycloak**: a client with Client authentication off (public), Standard flow on, Direct access
-  grants off, Valid redirect URIs `http://127.0.0.1/callback` (Keycloak accepts any port for
-  loopback redirects) and, under Advanced, the PKCE method `S256`. Users need the
-  `offline_access` role (part of the default roles) for refresh tokens that outlive the browser
-  session. Keycloak ignores the `audience` parameter: add an Audience mapper to the client's
-  dedicated scope so the access token carries the audience the gateway expects.
-- **Microsoft Entra ID**: register a "Mobile and desktop applications" redirect URI
-  `http://127.0.0.1/callback` (Entra ignores the port of loopback redirect URIs; the `http`
-  loopback URI currently has to be added in the application manifest), issuer
-  `https://login.microsoftonline.com/<tenant-id>/v2.0`, and request the API by scope, e.g.
-  `--oauth-scopes 'openid offline_access api://<app-id>/.default'` instead of an audience.
-- **Auth0**: the issuer is `https://<tenant>.auth0.com/` with the trailing slash (operate compares
-  it with the discovery document exactly), the API identifier goes into `--oauth-audience`;
-  register `http://127.0.0.1:8765/callback` with a fixed `--oauth-redirect-port 8765`.
+- **Keycloak**: a public client, Standard flow on, redirect URI `http://127.0.0.1/callback`, PKCE
+  method `S256`. Users need `offline_access`. Keycloak ignores `audience`: add an Audience mapper.
+- **Microsoft Entra ID**: a "Mobile and desktop applications" redirect URI
+  `http://127.0.0.1/callback`, issuer `https://login.microsoftonline.com/<tenant-id>/v2.0`, and the
+  API as a scope, e.g. `--oauth-scopes 'openid offline_access api://<app-id>/.default'`.
+- **Auth0**: issuer `https://<tenant>.auth0.com/` with the trailing slash, the API identifier as
+  `--oauth-audience`, redirect URI `http://127.0.0.1:8765/callback` with
+  `--oauth-redirect-port 8765`.
 
 ## Bearer tokens
 
-When you already get an access token elsewhere (company SSO tooling, a CI secret,
-`az account get-access-token`, `gcloud auth print-access-token`, a token copied from another tool)
-because the OAuth login of `operate auth login` is not possible or not wanted, `--auth bearer`
-sends it as `Authorization: Bearer <token>` and does nothing else: no login, no refresh, no cache.
+When you already get an access token elsewhere (SSO tooling, a CI secret, `az`, `gcloud`),
+`--auth bearer` sends it as `Authorization: Bearer <token>`. No login, no refresh, no cache.
 
-| Value | Flag                 | Environment     | Profile (`auth` object) / `config set` option                                            |
-| ----- | -------------------- | --------------- | ---------------------------------------------------------------------------------------- |
-| type  | `--auth bearer`      | `OPERATE_AUTH`  | `type: "bearer"` / `--auth bearer`                                                       |
-| token | `--auth-token-stdin` | `OPERATE_TOKEN` | `tokenEnv` (variable name) / `--auth-token-env <VAR>`, or `token` / `--auth-token-stdin` |
+| Value | Flag                 | Environment     | Profile (`auth` object) / `config set` option         |
+| ----- | -------------------- | --------------- | ----------------------------------------------------- |
+| type  | `--auth bearer`      | `OPERATE_AUTH`  | `type: "bearer"` / `--auth bearer`                    |
+| token | `--auth-token-stdin` | `OPERATE_TOKEN` | `tokenEnv` (variable name) / `--auth-token-env <VAR>` |
 
 ```sh
-# Microsoft Entra ID: a token for the app registration of the API the engine's gateway expects
-# (without --resource, az returns a token for Azure Resource Manager, whose audience a gateway rejects)
+# Microsoft Entra ID: a token for the API the engine's gateway expects
 export OPERATE_TOKEN=$(az account get-access-token --resource api://<engine-api-app-id> --query accessToken -o tsv)
 operate process-instance list
 # Google Cloud
 export OPERATE_TOKEN=$(gcloud auth print-access-token)
-# CI job: the token is the secret CI_ENGINE_TOKEN; the profile stores only the variable name
+# CI job: the profile stores only the variable name
 operate config set ci --url https://camunda.example.com/engine-rest --auth bearer --auth-token-env CI_ENGINE_TOKEN
 ```
 
-- The token comes from `--auth-token-stdin` (the first line of stdin, e.g.
-  `gcloud auth print-access-token | operate task list --auth-token-stdin`; not together with
-  `--body -` or `--auth-password-stdin`), else `OPERATE_TOKEN`, else the variable named by the
-  profile's `tokenEnv` (it must be set), else the profile's `token`. It is never a plain flag.
-- Without an auth type anywhere, `OPERATE_TOKEN` or `--auth-token-stdin` selects `bearer`, as a
-  username selects `basic`; both at once is a configuration error asking for an explicit `--auth`.
-  An explicit type always wins: `--auth none` switches the token off, and with `basic` or `oauth`
-  (also the type a profile made by `config set` always stores) `OPERATE_TOKEN` is ignored:
-  `config show` lists it as unused, and the hints of `LOGIN_REQUIRED`, 401/403 and configuration
-  errors say to add `--auth bearer` or `OPERATE_AUTH=bearer`. A token never selects OAuth.
-- A pasted `Bearer ` prefix and surrounding blanks are dropped; the rest must be an RFC 6750
-  token (letters, digits, `-._~+/`, trailing `=`), otherwise exit 3 without repeating it. In a
-  profile prefer `--auth-token-env <VAR>`; a token stored with `config set --auth-token-stdin` is
-  plain text in the `0600` config file (`config set` warns), and an unset variable gets a warning
-  that does not repeat its "name" (it may be the token itself). An unset name that is not in the
-  usual upper-case form (`--auth-token-env "$CI_TOKEN"` instead of `CI_TOKEN`) is refused without
-  being stored or repeated.
-- JWTs: operate reads `exp`, `sub`, `preferred_username`, `iss` and `aud` without checking the
-  signature (the engine or its gateway does). A JWT whose `exp` lies more than 30 s in the past
-  fails before any request with `TOKEN_EXPIRED` (exit 4): fetch a new token (a
-  [token command](#token-commands) runs again instead). Opaque tokens are sent as they are.
-- `operate auth status` shows where the token comes from and, for a JWT, subject, user, issuer,
-  audience and expiry (exit 4 when it expired), also for a piped token (`--auth-token-stdin`;
-  with a Basic or OAuth profile add `OPERATE_AUTH=bearer`, `auth` commands have no `--auth`); it
-  never prints the token. `auth login` and `auth logout` do not apply: operate neither fetches nor
-  stores such tokens (a [token command](#token-commands) lets operate fetch them).
-- A 401 names the token's source and, for a JWT, the expiry, issuer and audience to check; a 403
-  points to missing roles or scopes. operate never retries a rejected token.
-- The token is masked as `Bearer ***` in `--dry-run`, curl, `--verbose` and `config show` unless
-  `--show-secrets`; usage errors never repeat a word typed after `--auth bearer`,
-  `--auth-token-stdin` or `operate auth` (`--auth bearer $TOKEN` is a mistake: `--auth` takes only
-  the type). `operate ping` reports `"auth": "bearer"` and, for a JWT, `user` and
-  `subject`. A bearer token together with an `Authorization` header is a configuration error, and
-  operate warns when it sends the token over plain `http://` beyond `localhost`.
+- `OPERATE_TOKEN` or `--auth-token-stdin` select `bearer` when no type is set. An explicit `basic`
+  or `oauth` type wins: add `--auth bearer` or `OPERATE_AUTH=bearer`.
+- A JWT whose `exp` has passed fails before any request with `TOKEN_EXPIRED` (exit 4). Fetch a new
+  token, or use a [token command](#token-commands). Opaque tokens are sent as they are.
+- `operate auth status` shows the token's source and, for a JWT, its claims and expiry.
 
 ## Token commands
 
-With short-lived tokens (a local Keycloak dev realm, corporate SSO tooling) someone has to fetch a
-new token before nearly every call. `OPERATE_TOKEN_COMMAND` does it for operate: a command line that
-prints a bearer token on the first line of its stdout. operate runs it when it needs a token. A
-repository sets it for agents in the `env` of its `.claude/settings.json` (Claude Code applies it
-once you trusted the folder), people in their shell or in direnv's `.envrc`.
+`OPERATE_TOKEN_COMMAND` is a command line that prints a bearer token on the first line of its
+stdout. operate runs it when it needs a token, which suits short-lived tokens such as a local
+Keycloak dev realm. A repository sets it for agents in the `env` of its `.claude/settings.json`,
+people in their shell or in direnv's `.envrc`.
 
 ```sh
-# a local Keycloak dev realm: the password grant of a test user (only for local test realms)
 export OPERATE_TOKEN_COMMAND="$PWD/scripts/dev-token.sh"
 operate task list
 ```
 
-- The token sources in order: `--auth-token-stdin`, `OPERATE_TOKEN`, `OPERATE_TOKEN_COMMAND`, then
-  the profile's `tokenEnv` or `token`. Like `OPERATE_TOKEN`, `OPERATE_TOKEN_COMMAND` selects bearer
-  auth without an auth type; an explicit other type leaves it unused (`config show` says so).
-- The shell runs the command (`sh -c`, `cmd.exe` on Windows) in the working directory with stdin
-  closed, so it must not wait for input; the request timeout (`--timeout`) bounds it. The first
-  line of its stdout is the token (a leading `Bearer ` is dropped, the rest must be a token, not a
-  JSON answer: use e.g. `jq -r .access_token`). Name a script by its absolute path, or use a
-  command without a path (`curl ... | jq -r .access_token`): a relative one such as
-  `./scripts/dev-token.sh` runs the script of whatever directory operate runs in, also of a
-  repository you just cloned.
-- A JWT with `exp` is cached in the token directory (`command-<hash>.json`, mode `0600`) and
-  reused, also by later and parallel commands, until 60 s before it expires (at most half its
-  lifetime), so a long `operate wait` keeps a valid token. There is one cached token per command
-  line and project (the directory of the [project file](configuration.md#project-file) in effect,
-  else the working directory). An opaque token is fetched once per call. A JWT the command prints
-  is sent even when it expired: after a 401 operate runs the command once more and retries the
-  request with the new token before it reports the error.
-- A command that cannot start, fails, times out or prints no token fails with `LOGIN_FAILED`
-  (exit 4); the message quotes the end of its stderr. Error messages never show the token, nor the
-  command line (`operate config show` and `operate auth status` print it): keep secrets out of the
-  command line and let the command read them from a file or a variable.
-- `operate auth status` runs the command (or uses its cached token) and shows the command and the
-  claims of the token; `operate auth logout` removes the cached token. `--dry-run` never runs it:
-  it shows a cached token, else a note.
+- Token sources in order: `--auth-token-stdin`, `OPERATE_TOKEN`, `OPERATE_TOKEN_COMMAND`, then
+  the profile's `tokenEnv` or `token`.
+- It runs in the working directory with stdin closed and must print the token, not JSON (use
+  e.g. `jq -r .access_token`). Use an absolute path or no path: a relative one runs the script of
+  whatever directory operate runs in.
+- A JWT is cached until shortly before it expires, also for later and parallel calls. After a 401
+  operate runs the command once more and retries.
+- A failing command exits 4 with `LOGIN_FAILED` and the end of its stderr. `auth status` runs it
+  and shows the claims, `auth logout` removes the cached token.
 
 Only the environment sets a token command, never a profile or a
-[project file](configuration.md#project-file): a project file cannot make operate run code. The
-files that set the environment for you, `.claude/settings.json` and `.envrc`, have trust steps of
-their own.
+[project file](configuration.md#project-file): a project file cannot make operate run code.
 
 ## Other headers
 
-Other schemes, such as API keys or gateway specific headers, are passed as headers: per call with
-`-H`, in the environment with `OPERATE_HEADERS` (keeps the credential out of the command line and
-shell history), or stored in a profile. A bearer token can still go into an `Authorization` header,
-but [`--auth bearer`](#bearer-tokens) also checks its syntax and expiry and explains a 401. Headers
-merge per name: profile, then `OPERATE_HEADERS`, then `-H`. An `Authorization` header together
-with Basic auth, OAuth or a bearer token is a configuration error; in a profile, `config set` with
-auth options replaces a stored `Authorization` header (with a notice on stderr), and `--auth none`
-keeps the header and switches the auth off. `Authorization` and other secret headers (cookies,
-names containing `token`, `secret`, `password`, `api-key`) are masked as `***` in dry-run, verbose
-and config output unless `--show-secrets` is given.
+API keys and gateway specific headers go into headers: `-H` per call, `OPERATE_HEADERS` in the
+environment, or `--header` in a profile. They merge per name: profile, then `OPERATE_HEADERS`,
+then `-H`. An `Authorization` header together with Basic auth, OAuth or a bearer token is a
+configuration error. Secret headers are masked unless `--show-secrets`.
 
 ```sh
 export OPERATE_HEADERS='X-API-Key: k-7f3a...'

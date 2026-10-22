@@ -45,6 +45,11 @@ cat > order.bpmn <<'EOF'
 EOF
 ```
 
+<figure class="diagram">
+  <img src="/shots/quick-start-order.svg" alt="The order process: start event, user task Review order, end event" />
+  <figcaption>order.bpmn as a diagram</figcaption>
+</figure>
+
 Deploy it, start an instance, and work on the task:
 
 ```sh

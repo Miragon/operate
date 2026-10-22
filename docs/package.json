@@ -8,12 +8,14 @@
     "dev": "vitepress dev",
     "build": "vitepress build",
     "preview": "vitepress preview",
-    "check:kit": "node .vitepress/miragon/check.mjs"
+    "check:kit": "node .vitepress/miragon/check.mjs",
+    "shots": "sh shots/order.sh"
   },
   "devDependencies": {
     "@braintree/sanitize-url": "7.1.2",
     "@fontsource-variable/geist": "5.3.0",
     "@fontsource-variable/geist-mono": "5.3.0",
+    "@miragon/bpmn-cli": "0.8.0",
     "cytoscape": "3.34.3",
     "cytoscape-cose-bilkent": "4.1.0",
     "dayjs": "1.11.23",
