@@ -4,9 +4,10 @@
  * one retry less), so every error is checked against the job itself.
  */
 
+import type { EnginePort } from '../engine-port/engine-port.js';
 import { OperateError } from '../errors.js';
 import { compact } from '../util.js';
-import type { EnginePort } from './engine.js';
+
 import { type Rec, records, str } from './records.js';
 import { rootCause } from './root-cause.js';
 

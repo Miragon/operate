@@ -2,8 +2,8 @@
 
 import { noAuth } from '../../src/auth/none.js';
 import type { AuthProvider } from '../../src/auth/types.js';
-import { loadCatalog } from '../../src/catalog/catalog.js';
-import { type EnginePort, enginePort } from '../../src/workflow/engine.js';
+import type { EnginePort } from '../../src/engine-port/engine-port.js';
+import { camunda7 } from '../../src/engines/camunda7/adapter.js';
 import type { WaitDeps } from '../../src/workflow/wait.js';
 import { BASE_URL } from './fake-fetch.js';
 
@@ -18,7 +18,7 @@ export function portOf(fetch: typeof globalThis.fetch, options: PortOptions = {}
     headers: {},
     ...(options.engine === undefined ? {} : { engine: options.engine }),
   };
-  return enginePort(loadCatalog(), target, {
+  return camunda7.port(target, {
     fetch,
     auth: options.auth ?? noAuth(),
     timeoutMs: 5000,

@@ -4,9 +4,10 @@
  * per incident what happened.
  */
 
+import type { EnginePort } from '../engine-port/engine-port.js';
 import { OperateError, usageError } from '../errors.js';
 import { compact, mapLimit } from '../util.js';
-import { type EnginePort, isMissing, PARALLEL } from './engine.js';
+import { isMissing, PARALLEL } from './engine.js';
 import { instanceMissing, loadView } from './inspect.js';
 import { executeJob } from './jobs.js';
 import { type JobFailure, jobFailedError } from './outcomes.js';

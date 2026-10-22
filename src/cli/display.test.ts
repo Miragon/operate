@@ -4,13 +4,13 @@ import {
   fakeRuntime,
   type FakeRuntimeOptions,
 } from '../../test/support/fake-runtime.js';
-import { loadCatalog } from '../catalog/catalog.js';
+import { camunda7 } from '../engines/camunda7/adapter.js';
 import { OperateError } from '../errors.js';
 import type { CliContext } from './context.js';
 import { displayOf } from './display.js';
 
 function contextOf(options: FakeRuntimeOptions = {}): CliContext {
-  return { runtime: fakeRuntime(options), catalog: loadCatalog(), state: {} };
+  return { runtime: fakeRuntime(options), engine: camunda7, catalog: camunda7.catalog, state: {} };
 }
 
 const TABLE_PROFILE = JSON.stringify({

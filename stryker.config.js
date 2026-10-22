@@ -41,9 +41,12 @@ export const thresholds = { high: 95, low: 93, break: 92 };
  * The coverage gate still measures all of them.
  */
 const MUTATE = [
+  'src/api/**/*.ts',
   'src/auth/**/*.ts',
   'src/catalog/**/*.ts',
   'src/config/**/*.ts',
+  'src/engine-port/**/*.ts',
+  'src/engines/**/*.ts',
   'src/http/**/*.ts',
   'src/operation/**/*.ts',
   'src/output/**/*.ts',

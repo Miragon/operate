@@ -4,10 +4,9 @@
  * of the auth provider (§16.8, e.g. that there is no OAuth login) for stderr.
  */
 
+import type { EnginePort, PlannedRequest } from '../engine-port/engine-port.js';
 import { curlCommand, maskHeaders, maskUrl } from '../output/secrets.js';
 import { compact } from '../util.js';
-import type { EnginePort } from './engine.js';
-import type { PlannedRequest } from './types.js';
 
 interface DryRunRequest {
   readonly summary?: string;

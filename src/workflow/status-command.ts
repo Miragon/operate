@@ -4,10 +4,11 @@
  * incident group shown; the findings name the next command.
  */
 
+import type { EnginePort, PlannedRequest, Query } from '../engine-port/engine-port.js';
 import { maskUrl } from '../output/secrets.js';
 import { compact, mapLimit } from '../util.js';
 import { EXECUTABLE } from './conditions.js';
-import { type EnginePort, json, PARALLEL, pageQuery, type Query, queryInput } from './engine.js';
+import { json, PARALLEL, pageQuery, queryInput } from './engine.js';
 import { checkFailure, engineStatus, type Finding, findings, type Severity } from './findings.js';
 import { incidentCause } from './inspect.js';
 import { amount, countOf, engineFormat, type Rec, records, str } from './records.js';
@@ -22,7 +23,7 @@ import {
   topicStatus,
   unknownKeys,
 } from './status.js';
-import type { PlannedRequest, WorkflowResult } from './types.js';
+import type { WorkflowResult } from './types.js';
 
 export interface StatusOptions {
   readonly keys: readonly string[];

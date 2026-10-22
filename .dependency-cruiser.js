@@ -9,7 +9,8 @@
 const TEST_CODE = ['[.]test[.]ts$', '^test/'];
 
 /** Layers that must stay pure (no Node built-ins; WebCrypto and timers are globals). */
-const PURE_LAYERS = '^src/(?:auth|catalog|docs|output|workflow)/|^src/(?:errors|util)[.]ts$';
+const PURE_LAYERS =
+  '^src/(?:api|auth|catalog|docs|engine-port|engines|output|workflow)/|^src/(?:errors|util)[.]ts$';
 
 /** The interactive OAuth login: loopback server, browser, callback pages. */
 const INTERACTIVE_LOGIN = '^src/auth/oauth/(?:login|callback|pages)[.]ts$';
@@ -106,7 +107,7 @@ export default {
       name: 'pure-layers-no-builtins',
       severity: 'error',
       comment:
-        'auth, catalog, docs, output, workflow, errors and util are pure: no Node built-in modules.',
+        'api, auth, catalog, docs, engine-port, engines, output, workflow, errors and util are pure: no Node built-in modules.',
       from: { path: PURE_LAYERS, pathNot: TEST_CODE },
       to: { dependencyTypes: ['core'] },
     },
@@ -165,8 +166,52 @@ export default {
       name: 'workflow-only-from-cli',
       severity: 'error',
       comment: 'Only the CLI layer (src/cli) uses the workflow commands; output and docs never do.',
-      from: { path: '^src/', pathNot: ['^src/(?:cli|workflow)/', ...TEST_CODE] },
+      from: { path: '^src/', pathNot: ['^src/(?:cli|workflow|api)/', ...TEST_CODE] },
       to: { path: '^src/workflow/' },
+    },
+    {
+      name: 'api-only-workflow-engine',
+      severity: 'error',
+      comment:
+        'An API (src/api) builds its engine port on src/workflow/engine.ts and uses no other workflow module.',
+      from: { path: '^src/api/', pathNot: TEST_CODE },
+      to: { path: '^src/workflow/', pathNot: '^src/workflow/engine[.]ts$' },
+    },
+    {
+      name: 'workflow-only-engine-port',
+      severity: 'error',
+      comment:
+        'The workflow commands know the engine port (src/engine-port), never an engine adapter or an API.',
+      from: { path: '^src/workflow/' },
+      to: { path: '^src/(?:engines|api)/' },
+    },
+    {
+      name: 'engine-port-types-only',
+      severity: 'error',
+      comment: 'src/engine-port holds interfaces only: it imports types, nothing else.',
+      from: { path: '^src/engine-port/', pathNot: TEST_CODE },
+      to: { dependencyTypesNot: ['type-only'] },
+    },
+    {
+      name: 'api-only-from-adapters',
+      severity: 'error',
+      comment: 'Only the engine adapters (src/engines/<name>/adapter.ts) use an API (src/api).',
+      from: { pathNot: ['^src/api/', '^src/engines/[^/]+/adapter[.]ts$'] },
+      to: { path: '^src/api/' },
+    },
+    {
+      name: 'api-not-to-other-api',
+      severity: 'error',
+      comment: 'An API (src/api/<a>) never imports another API (src/api/<b>).',
+      from: { path: '^src/api/([^/]+)/' },
+      to: { path: '^src/api/', pathNot: '^src/api/$1/' },
+    },
+    {
+      name: 'engines-not-to-each-other',
+      severity: 'error',
+      comment: 'An engine adapter (src/engines/<a>) never imports another one (src/engines/<b>).',
+      from: { path: '^src/engines/([^/]+)/' },
+      to: { path: '^src/engines/', pathNot: '^src/engines/$1/' },
     },
     {
       name: 'http-not-to-config-cli-operation',
@@ -176,11 +221,20 @@ export default {
       to: { path: '^src/(?:config|cli|operation)/' },
     },
     {
-      name: 'generated-catalog-only-via-catalog-ts',
+      name: 'generated-catalog-only-via-catalog-ts-or-adapters',
       severity: 'error',
-      comment: 'The generated catalog JSON is accessed only through src/catalog/catalog.ts.',
-      from: { pathNot: '^src/catalog/catalog[.]ts$' },
+      comment:
+        'The generated catalogs are read only by src/catalog/catalog.ts and the engine adapters.',
+      from: { pathNot: ['^src/catalog/catalog[.]ts$', '^src/engines/[^/]+/adapter[.]ts$'] },
       to: { path: '^src/generated/' },
+    },
+    {
+      name: 'adapter-reads-its-own-catalog',
+      severity: 'error',
+      comment:
+        'An engine adapter (src/engines/<name>) reads only src/generated/catalog.<name>.json.',
+      from: { path: '^src/engines/([^/]+)/adapter[.]ts$' },
+      to: { path: '^src/generated/', pathNot: '^src/generated/catalog[.]$1[.]json$' },
     },
     {
       name: 'output-only-operation-result',

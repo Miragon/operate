@@ -332,7 +332,7 @@ describe('config show and list with OAuth', () => {
     const result = await execute(run, ['config', 'show', '-o', 'table'], runtime);
     expect(result.stdout).toMatch(/\nscopes\s+openid offline_access\s+default\n/);
     expect(result.stdout).toMatch(/\nclientSecret\s+default\n/);
-    expect(reads).toEqual([CONFIG_PATH]);
+    expect(reads).toEqual([CONFIG_PATH, CONFIG_PATH]);
   });
 
   it('lists oauth profiles', async () => {
@@ -376,7 +376,7 @@ describe('config unset with OAuth settings', () => {
       files: { [CONFIG_PATH]: oauthProfiles() },
     });
     expect(errorOf(unknown.stderr).hint).toBe(
-      'Valid keys: url, cockpitUrl, engine, auth, output, timeout, headers, readOnly; OAuth settings: issuer, endpoints, clientId, clientSecret, scopes, audience, redirectPort; bearer token: token, tokenEnv.',
+      'Valid keys: url, cockpitUrl, engine, platform, auth, output, timeout, headers, readOnly; OAuth settings: issuer, endpoints, clientId, clientSecret, scopes, audience, redirectPort; bearer token: token, tokenEnv.',
     );
   });
 });

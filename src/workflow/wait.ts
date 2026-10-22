@@ -4,6 +4,7 @@
  * instance view (the state at the end, also for the errors of exit code 9).
  */
 
+import type { EnginePort } from '../engine-port/engine-port.js';
 import type { OperateError } from '../errors.js';
 import { formatDuration } from '../operation/durations.js';
 import { compact } from '../util.js';
@@ -16,7 +17,7 @@ import {
   type Probe,
   type Verdict,
 } from './conditions.js';
-import { type EnginePort, listByIds } from './engine.js';
+import { listByIds } from './engine.js';
 import { type InspectOptions, instanceMissing, loadView } from './inspect.js';
 import { executeJob } from './jobs.js';
 import {

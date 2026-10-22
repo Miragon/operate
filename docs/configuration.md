@@ -9,7 +9,8 @@ The short form for agents: `operate guide config`; every option: `operate config
 ## Global options
 
 These work on every API command, `api` and `ping`, after the command path
-(`operate task list -o table`): target (`--url`, `--engine`, `--profile`, `--config`), output
+(`operate task list -o table`): target (`--url`, `--engine`, `--platform`, `--profile`,
+`--config`), output
 (`-o`, `--fields`, `--pretty`, `--out-file`, `--verbose`), guards (`--dry-run`, `--yes`,
 `--read-only`), requests (`--timeout`, `-H`) and [authentication](authentication.md). The list with
 meanings and variables: `operate ping --help`.
@@ -20,6 +21,7 @@ meanings and variables: `operate ping --help`.
 | ----------------------- | ------------------------------------------------------------------------------------------ |
 | `OPERATE_URL`           | REST API root                                                                              |
 | `OPERATE_ENGINE`        | Named process engine                                                                       |
+| `OPERATE_PLATFORM`      | Engine product: `operaton`, `cibseven` or `camunda7` (default), see [Engines](#engines)    |
 | `OPERATE_PROFILE`       | Profile to use instead of the default profile                                              |
 | `OPERATE_CONFIG`        | Config file location; the file must exist, and no project file is used                     |
 | `OPERATE_OUTPUT`        | `json` or `table`                                                                          |
@@ -70,10 +72,26 @@ it by hand:
 }
 ```
 
-- Profile keys: `url`, `cockpitUrl` (for links only, never called), `engine`, `auth` (see
+- Profile keys: `url`, `cockpitUrl` (for links only, never called), `engine`, `platform`, `auth` (see
   [Authentication](authentication.md)), `output`, `timeout`, `headers`, `readOnly`.
 - Profile names use letters, digits, `.`, `_` and `-` and start with a letter or digit.
 - URLs with credentials or a query string are rejected.
+
+## Engines
+
+`platform` says which product runs behind the URL: `operaton`, `cibseven` or `camunda7`. It
+selects the engine adapter and with it the commands, help and `describe`. Without it operate uses
+`camunda7`, which works for all three today. `engine` stays what it was: the name of a process
+engine (`/engine/{name}`).
+
+```sh
+operate config set local --platform operaton
+OPERATE_PLATFORM=cibseven operate ping
+operate ping --platform camunda7
+```
+
+An unknown value is an error that lists the known engines. Versions of operate before `platform`
+existed reject a config file that contains it.
 
 ## Profiles
 

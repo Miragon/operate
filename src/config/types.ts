@@ -3,6 +3,11 @@
 export const OUTPUT_FORMATS = ['json', 'table'] as const;
 export type OutputFormat = (typeof OUTPUT_FORMATS)[number];
 
+/** The engines operate has an adapter for (`platform`); without one it uses `camunda7`. */
+export const PLATFORMS = ['operaton', 'cibseven', 'camunda7'] as const;
+export type Platform = (typeof PLATFORMS)[number];
+export const DEFAULT_PLATFORM: Platform = 'camunda7';
+
 export const AUTH_TYPES = ['none', 'basic', 'oauth', 'bearer'] as const;
 export type AuthType = (typeof AUTH_TYPES)[number];
 
@@ -204,6 +209,7 @@ export interface Profile {
   readonly url?: string;
   readonly cockpitUrl?: string;
   readonly engine?: string;
+  readonly platform?: Platform;
   readonly auth?: ProfileAuth;
   readonly output?: OutputFormat;
   readonly timeout?: number;
@@ -216,6 +222,7 @@ export const PROFILE_KEYS = [
   'url',
   'cockpitUrl',
   'engine',
+  'platform',
   'auth',
   'output',
   'timeout',
@@ -283,6 +290,7 @@ export interface LoadedConfig extends ConfigFile {
 export interface ConfigFlags {
   readonly url?: string;
   readonly engine?: string;
+  readonly platform?: string;
   readonly profile?: string;
   readonly output?: string;
   readonly timeout?: string;
@@ -304,6 +312,7 @@ export interface ResolvedConfig {
   readonly profile?: string;
   readonly url: string;
   readonly engine?: string;
+  readonly platform: Platform;
   /** `sources.auth` is where the auth type came from; credentials carry their own sources. */
   readonly auth: AuthConfig;
   /** Undefined means: choose by terminal (table on a TTY, JSON otherwise). */
@@ -319,7 +328,8 @@ export interface ResolvedConfig {
   readonly project?: ProjectSource;
 }
 
-type ResolvedKey = 'url' | 'engine' | 'auth' | 'output' | 'timeout' | 'headers' | 'readOnly';
+type ResolvedKey =
+  'url' | 'engine' | 'platform' | 'auth' | 'output' | 'timeout' | 'headers' | 'readOnly';
 
 export const DEFAULT_URL = 'http://localhost:8080/engine-rest';
 export const DEFAULT_TIMEOUT_MS = 30_000;
@@ -327,6 +337,7 @@ export const DEFAULT_TIMEOUT_MS = 30_000;
 export const ENV = {
   url: 'OPERATE_URL',
   engine: 'OPERATE_ENGINE',
+  platform: 'OPERATE_PLATFORM',
   profile: 'OPERATE_PROFILE',
   config: 'OPERATE_CONFIG',
   output: 'OPERATE_OUTPUT',

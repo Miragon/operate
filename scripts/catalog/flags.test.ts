@@ -59,6 +59,7 @@ describe('flag lists', () => {
     expect(GLOBAL_FLAGS).toEqual([
       'url',
       'engine',
+      'platform',
       'profile',
       'config',
       'output',

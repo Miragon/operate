@@ -31,17 +31,20 @@ OPERATE_IT_BINARY="$PWD/build/bin/operate-macos-arm64" OPERATE_IT_ENGINES=operat
 
 The command surface is data, not hand-written code:
 
-1. `spec/operaton-rest-api.json` is the vendored OpenAPI spec of the Camunda 7 / Operaton REST API.
-2. `spec/patches.json` corrects it with RFC 6902 JSON patches (each with a `test` guard and a
-   `reason`).
-3. `npm run generate` (`scripts/generate-catalog.ts`, `scripts/catalog/*`) turns it into
-   `src/generated/catalog.json`: operations with group, command name, aliases, effect, parameters,
+1. `spec/camunda7-rest/api.json` is the vendored OpenAPI spec of the Camunda 7 / Operaton REST
+   API.
+2. `spec/camunda7-rest/patches.json` corrects it with RFC 6902 JSON patches (each with a `test`
+   guard and a `reason`). `spec/engines/<engine>.patches.json` hold the differences of one engine;
+   today they are empty.
+3. `npm run generate` (`scripts/generate-catalog.ts`, `scripts/catalog/*`) turns it into one
+   catalog per engine, `src/generated/catalog.<engine>.json`: operations with group, command name, aliases, effect, parameters,
    body and response descriptions, plus the referenced schemas. Naming overrides live in
    `scripts/catalog/overrides.ts`, summaries in `scripts/catalog/summaries.ts`, effects in
    `scripts/catalog/effects.ts`. The generator fails on unresolvable `$ref`s, unknown HTTP methods
    and command names or summaries that are not unique in their group.
-4. The catalog is committed; `npm run generate:check` (part of `npm run check`) fails when it is
-   out of date.
+4. The catalogs are committed; `npm run generate:check` (part of `npm run check`) fails when one
+   is out of date. A test checks that the catalogs are identical while the engine patches are
+   empty; an engine that diverges on purpose leaves that test.
 
 At runtime the same catalog drives command registration, help, `describe`, input building and
 body validation, so help, docs and behavior cannot drift apart. Unit tests also run every command
@@ -55,6 +58,9 @@ src/bin/        entry point and the Node runtime (I/O, timers, loopback server, 
 src/cli/        commander wiring and the utility commands; the only layer that imports commander
 src/operation/  input building, variables, dates, guards, request building, execution, pagination
 src/workflow/   the workflow commands: engine access, instance views, waiting, plans (pure)
+src/engine-port/ what operate needs from an engine: EnginePort and EngineAdapter (types only)
+src/engines/    one adapter per engine (operaton, cibseven, camunda7) and the list of them (pure)
+src/api/        one folder per engine API; camunda7-rest builds catalog and port for the adapters (pure)
 src/docs/       commands, describe, examples, workflow docs, completion and the agent guide (pure)
 src/catalog/    catalog access, schema helpers, body validation (pure)
 src/config/     config resolution and profile editing (pure), file store, project files
@@ -65,12 +71,17 @@ scripts/        catalog generator, standalone executable build, packaging smoke 
 test/           fakes for unit tests, Testcontainers integration tests
 ```
 
+The overview with diagrams is in [Architecture](architecture.md), the decisions in
+[Architecture decisions](adr/).
+
 dependency-cruiser enforces the layering: no cycles or orphans, only `src/bin` imports `src/cli`,
 only `src/cli` imports commander and `src/workflow`, the pure layers import no Node builtins, `http`
 does not depend on `config`, `cli` or `operation`, `config` does not depend on `auth`, `workflow`
-does not depend on `cli`, `config`, `auth` or `bin`, only `operate auth login` can reach the
-interactive login (loopback server, browser), and the generated catalog is only read through
-`src/catalog/catalog.ts`.
+does not depend on `cli`, `config`, `auth` or `bin` and knows engines only through
+`src/engine-port`, only the adapters (`src/engines/<name>/adapter.ts`) import `src/api`, adapters
+and APIs do not import each other, `src/engine-port` holds types only, only `operate auth login` can reach the
+interactive login (loopback server, browser), and the generated catalogs are only read through
+`src/catalog/catalog.ts` and the engine adapters, each adapter its own.
 
 ## Quality gates
 
@@ -84,8 +95,8 @@ interactive login (loopback server, browser), and the generated catalog is only 
 - **fast-check** property tests for naming, patches, variable parsing, dates, query building,
   projection, table width, config and auth precedence, the Basic auth header, PKCE, token expiry,
   the token cache, body validation and secret masking (also of every OAuth token and secret).
-- **StrykerJS** mutation testing of the logic layers (`src/auth`, `catalog`, `config`, `http`,
-  `operation`, `output`, `workflow`, `errors.ts`, `util.ts`) and the catalog generator
+- **StrykerJS** mutation testing of the logic layers (`src/api`, `auth`, `catalog`, `config`,
+  `engine-port`, `engines`, `http`, `operation`, `output`, `workflow`, `errors.ts`, `util.ts`) and the catalog generator
   (`scripts/catalog` without its data tables); the CLI wiring (`src/cli`), help and guide texts
   (`src/docs`) and the packaging scripts are left to the command line and integration tests. It
   runs in four parallel shards; on every push to `main` and in the weekly run their combined score

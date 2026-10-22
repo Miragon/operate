@@ -5,7 +5,13 @@
  */
 
 import { type Command, Option } from 'commander';
-import { AUTH_TYPES, type ConfigFlags, OUTPUT_FORMATS } from '../config/types.js';
+import {
+  AUTH_TYPES,
+  type ConfigFlags,
+  DEFAULT_PLATFORM,
+  OUTPUT_FORMATS,
+  PLATFORMS,
+} from '../config/types.js';
 import { compact } from '../util.js';
 import { type OptionCompletion, setOptionCompletion } from './completion-meta.js';
 import { collect } from './options.js';
@@ -33,6 +39,11 @@ export const GLOBAL_OPTIONS: readonly GlobalOptionSpec[] = [
     long: 'engine',
     value: '<name>',
     description: 'Named process engine, adds /engine/<name> to the path (env OPERATE_ENGINE)',
+  },
+  {
+    long: 'platform',
+    value: '<name>',
+    description: `Engine product: ${PLATFORMS.join(', ')}; default ${DEFAULT_PLATFORM} (env OPERATE_PLATFORM)`,
   },
   {
     long: 'profile',
@@ -106,6 +117,7 @@ export const GLOBAL_OPTION_FLAGS: readonly string[] = GLOBAL_OPTIONS.map((spec) 
 export interface GlobalOptions {
   readonly url?: string;
   readonly engine?: string;
+  readonly platform?: string;
   readonly profile?: string;
   readonly config?: string;
   readonly output?: string;
@@ -135,6 +147,7 @@ export function optionFlags(spec: GlobalOptionSpec): string {
 /** What the values of global options complete to (design §17.10). */
 const COMPLETIONS: Readonly<Record<string, OptionCompletion>> = {
   output: { values: OUTPUT_FORMATS },
+  platform: { values: PLATFORMS },
   auth: { values: AUTH_TYPES },
   profile: { profiles: true },
   config: { path: 'files' },
@@ -182,6 +195,7 @@ export function readGlobals(command: Command): GlobalOptions {
     ...compact({
       url: text('url'),
       engine: text('engine'),
+      platform: text('platform'),
       profile: text('profile'),
       config: text('config'),
       output: text('output'),
@@ -214,6 +228,7 @@ export function configFlags(globals: GlobalOptions, secrets: StdinSecrets = {}):
   return compact({
     url: globals.url,
     engine: globals.engine,
+    platform: globals.platform,
     profile: globals.profile,
     output: globals.output,
     timeout: globals.timeout,

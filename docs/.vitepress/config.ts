@@ -38,7 +38,11 @@ export default miragonDocs({
       link: '/workflow-commands',
       activeMatch: '^/(workflow-commands|commands|recipes|output-and-errors|safety)',
     },
-    { text: 'Setup', link: '/configuration', activeMatch: '^/(configuration|authentication)' },
+    {
+      text: 'Setup',
+      link: '/configuration',
+      activeMatch: '^/(configuration|authentication|engines)',
+    },
     { text: 'AI agents', link: '/agents', activeMatch: '^/agents' },
   ],
 
@@ -67,6 +71,7 @@ export default miragonDocs({
       items: [
         { text: 'Configuration', link: '/configuration' },
         { text: 'Authentication', link: '/authentication' },
+        { text: 'Engines', link: '/engines' },
       ],
     },
     {
@@ -76,7 +81,11 @@ export default miragonDocs({
     {
       text: 'Contributing',
       collapsed: true,
-      items: [{ text: 'Development', link: '/development' }],
+      items: [
+        { text: 'Development', link: '/development' },
+        { text: 'Architecture', link: '/architecture' },
+        { text: 'Architecture decisions', link: '/adr/' },
+      ],
     },
   ],
 });

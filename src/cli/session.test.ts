@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CONFIG_PATH, fakeRuntime } from '../../test/support/fake-runtime.js';
-import { loadCatalog } from '../catalog/catalog.js';
+import { camunda7 } from '../engines/camunda7/adapter.js';
 import type { ResolvedConfig } from '../config/types.js';
 import { configPath, isExplicit } from './config-files.js';
 import type { CliContext } from './context.js';
@@ -27,13 +27,14 @@ const NONE: GlobalOptions = {
 };
 
 function context(runtime = fakeRuntime()): CliContext {
-  return { runtime, catalog: loadCatalog(), state: {} };
+  return { runtime, engine: camunda7, catalog: camunda7.catalog, state: {} };
 }
 
 function config(sources: Partial<ResolvedConfig['sources']>, profile?: string): ResolvedConfig {
   return {
     ...(profile === undefined ? {} : { profile }),
     url: 'http://h/engine-rest',
+    platform: 'camunda7',
     auth: { type: 'none' },
     timeoutMs: 1000,
     headers: {},
@@ -41,6 +42,7 @@ function config(sources: Partial<ResolvedConfig['sources']>, profile?: string): 
     sources: {
       url: 'default',
       engine: 'default',
+      platform: 'default',
       auth: 'default',
       output: 'default',
       timeout: 'default',

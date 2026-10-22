@@ -3,13 +3,14 @@
  * (finished or deleted), and fails fast when its failed jobs keep it from finishing.
  */
 
+import type { EnginePort, PlannedRequest } from '../engine-port/engine-port.js';
 import { OperateError } from '../errors.js';
 import { formatDuration } from '../operation/durations.js';
 import { compact } from '../util.js';
-import { type EnginePort, json, queryInput } from './engine.js';
+import { json, queryInput } from './engine.js';
 import { poll } from './poll.js';
 import { amount, field, num, type Rec, records, str } from './records.js';
-import type { PlannedRequest, Waited, WorkflowResult } from './types.js';
+import type { Waited, WorkflowResult } from './types.js';
 import { type WaitDeps, waitingNotice } from './wait.js';
 
 interface BatchSummary {

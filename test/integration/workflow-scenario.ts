@@ -108,7 +108,11 @@ export function registerWorkflowScenario(engineName: EngineName): void {
       await mkdir(join(workdir, 'other'));
       await writeFile(join(workdir, 'other', 'workflow.bpmn'), FOREIGN_BPMN);
       engine = await startEngine(engineName);
-      cli = bindCli({ url: engine.url, configFile, env: { XDG_CONFIG_HOME: workdir } });
+      cli = bindCli({
+        url: engine.url,
+        configFile,
+        env: { XDG_CONFIG_HOME: workdir, OPERATE_PLATFORM: engine.platform },
+      });
     }, ENGINE_START_TIMEOUT_MS);
 
     afterAll(async () => {

@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { CONFIG_PATH, fakeRuntime } from '../../test/support/fake-runtime.js';
 import { loadCatalog } from '../catalog/catalog.js';
+import { camunda7 } from '../engines/camunda7/adapter.js';
 import type { CompletionCommand } from '../docs/completion.js';
 import { completionContext } from './completion-model.js';
 import type { CliContext } from './context.js';
@@ -10,7 +11,7 @@ import type { CliContext } from './context.js';
 const catalog = loadCatalog();
 
 function cliContext(files: Record<string, string> = {}): CliContext {
-  return { runtime: fakeRuntime({ files }), catalog, state: {} };
+  return { runtime: fakeRuntime({ files }), engine: camunda7, catalog, state: {} };
 }
 
 const HELP = {

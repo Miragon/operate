@@ -4,6 +4,7 @@
  * instance afterwards (optionally after waiting).
  */
 
+import type { EnginePort } from '../engine-port/engine-port.js';
 import { OperateError } from '../errors.js';
 import { compact } from '../util.js';
 import {
@@ -15,7 +16,7 @@ import {
   checkSuspended,
   chooseWait,
 } from './advance-plan.js';
-import type { EnginePort } from './engine.js';
+
 import { loadInstance, loadView } from './inspect.js';
 import { executeJob } from './jobs.js';
 import { type JobFailure, jobFailedError } from './outcomes.js';

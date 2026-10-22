@@ -6,10 +6,11 @@
  * tree, an XML it cannot read) skips the check.
  */
 
+import type { EnginePort } from '../engine-port/engine-port.js';
 import { OperateError, usageError } from '../errors.js';
 import { closeNames } from '../util.js';
 import type { Condition } from './conditions.js';
-import type { EnginePort } from './engine.js';
+
 import { definitionKeyOf, records, str } from './records.js';
 import { activeTree } from './tree.js';
 
