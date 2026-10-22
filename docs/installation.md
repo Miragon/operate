@@ -96,17 +96,8 @@ docker run --rm -it --user "$(id -u):$(id -g)" -v "$HOME/.config/operate:/config
 
 ## Compatibility
 
-`operate` targets the Camunda 7 REST API as implemented by:
-
-| Engine    | Tested in CI with                         |
-| --------- | ----------------------------------------- |
-| Operaton  | `operaton/operaton:2.1.5`                 |
-| CIB seven | `cibseven/cibseven:run-2.2.0`             |
-| Camunda 7 | `camunda/camunda-bpm-platform:run-7.24.0` |
-
-Commands for features an engine does not offer fail with the engine's error. Property names that
-differ between the engines are both accepted (`operatonFormRef`, `camundaFormRef`). Camunda 8 is
-not supported (it has a different API).
+operate works with Operaton, CIB seven and Camunda 7. The tested versions and how to choose the
+engine: [Engines](engines.md).
 
 ## Shell completion
 

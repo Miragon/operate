@@ -71,6 +71,9 @@ scripts/        catalog generator, standalone executable build, packaging smoke 
 test/           fakes for unit tests, Testcontainers integration tests
 ```
 
+The overview with diagrams is in [Architecture](architecture.md), the decisions in
+[Architecture decisions](adr/).
+
 dependency-cruiser enforces the layering: no cycles or orphans, only `src/bin` imports `src/cli`,
 only `src/cli` imports commander and `src/workflow`, the pure layers import no Node builtins, `http`
 does not depend on `config`, `cli` or `operation`, `config` does not depend on `auth`, `workflow`

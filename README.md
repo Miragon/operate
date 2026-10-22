@@ -116,7 +116,7 @@ Details: [using operate from AI agents](docs/agents.md).
 operate works with Operaton, CIB seven and Camunda 7, and is tested against all three on every
 change. Camunda 8 is not supported: it has a different API.
 
-Details: [compatibility](docs/installation.md#compatibility).
+Details: [engines](docs/engines.md).
 
 ## Without Node.js
 
@@ -141,6 +141,8 @@ built from the pages in [`docs/`](docs/):
 - [Safety](docs/safety.md): previews, confirmation, read-only mode
 - [Recipes](docs/recipes.md): command lines for everyday tasks
 - [Using operate from AI agents](docs/agents.md): the guide, the Claude Code plugin and skill
+- [Engines](docs/engines.md): compatibility, choosing the engine, adding a difference or an engine
+- [Architecture](docs/architecture.md): engine port, adapters, catalog generation; [decisions](docs/adr/index.md)
 - [Development](docs/development.md) and [releasing](docs/releasing.md)
 
 ## Contributing
