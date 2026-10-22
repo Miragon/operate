@@ -1,0 +1,13 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+[scripts]
+setup = "npm ci && npm ci --prefix docs"
+run_mode = "concurrent"
+
+[scripts.run.docs]
+command = "npm run docs:dev -- --port $CONDUCTOR_PORT --strictPort"
+icon = "book-open"
+
+[scripts.run.docs-preview]
+command = "npm run docs:build && npm run docs:preview -- --port $CONDUCTOR_PORT --strictPort"
+icon = "globe"
