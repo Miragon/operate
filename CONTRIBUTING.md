@@ -19,19 +19,19 @@ with [Vitest](https://vitest.dev/). It requires Node.js 24 (`.nvmrc`; the packag
 
 ## Scripts (the quality gate)
 
-| Script                        | What it does                                                                       |
-| ----------------------------- | ---------------------------------------------------------------------------------- |
-| `npm run build`               | Bundle `dist/operate.js` with tsdown                                               |
-| `npm run build:standalone`    | Bundle `build/standalone/operate.cjs` with every dependency inlined                |
-| `npm run build:exe`           | Standalone executable of this platform in `build/bin` (after `build:standalone`)   |
-| `npm run generate`            | Regenerate `src/generated/catalog.json` from the spec (`generate:check` for drift) |
-| `npm run check`               | Every fast gate: typecheck, lint, format, architecture, knip, catalog, coverage    |
-| `npm test`                    | Unit and property tests (vitest)                                                   |
-| `npm run test:coverage`       | Unit tests with v8 coverage thresholds                                             |
-| `npm run test:mutation`       | Incremental StrykerJS run on the logic layers (`-- --force` re-tests every mutant) |
-| `npm run test:mutation:score` | Break threshold over the CI mutation shards (`--informational`: report only)       |
-| `npm run test:integration`    | Build, then run the Testcontainers tests against real engines                      |
-| `npm run docs:dev`            | Serve the docs site with hot reload (`docs:build`, `docs:preview` build and serve) |
+| Script                        | What it does                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| `npm run build`               | Bundle `dist/operate.js` with tsdown                                                        |
+| `npm run build:standalone`    | Bundle `build/standalone/operate.cjs` with every dependency inlined                         |
+| `npm run build:exe`           | Standalone executable of this platform in `build/bin` (after `build:standalone`)            |
+| `npm run generate`            | Regenerate `src/generated/catalog.<engine>.json` from the spec (`generate:check` for drift) |
+| `npm run check`               | Every fast gate: typecheck, lint, format, architecture, knip, catalog, coverage             |
+| `npm test`                    | Unit and property tests (vitest)                                                            |
+| `npm run test:coverage`       | Unit tests with v8 coverage thresholds                                                      |
+| `npm run test:mutation`       | Incremental StrykerJS run on the logic layers (`-- --force` re-tests every mutant)          |
+| `npm run test:mutation:score` | Break threshold over the CI mutation shards (`--informational`: report only)                |
+| `npm run test:integration`    | Build, then run the Testcontainers tests against real engines                               |
+| `npm run docs:dev`            | Serve the docs site with hot reload (`docs:build`, `docs:preview` build and serve)          |
 
 `npm run check` is what a change has to pass; CI runs it on every pull request, together with the
 integration tests and the packaging jobs.
@@ -56,7 +56,8 @@ on a dead link between the pages. The `Docs` workflow builds it on every pull re
 
 - `src/`: the CLI in layers, from `src/bin` (entry point) and `src/cli` (commander wiring) down to
   the pure layers. `src/docs` is the source of `operate guide`, `operate describe` and `--help`.
-- `src/generated/catalog.json`: the command surface, generated from the OpenAPI spec in `spec/`.
+- `src/generated/catalog.<engine>.json`: the command surface of each engine, generated from the
+  OpenAPI spec in `spec/camunda7-rest/` and the patches in `spec/engines/`.
 - `scripts/`: catalog generator, standalone executable build, packaging smoke test, demo.
 - `test/`: fakes for the unit tests and the Testcontainers integration tests.
 - `docs/`: the documentation, published as the docs site; `docs/.vitepress/config.ts` holds its
@@ -81,7 +82,7 @@ described in [docs/development.md](docs/development.md).
 - **Documented commands are tested.** The unit tests run every `operate` line of a ` ```sh ` block
   in the README and in `docs/` against a fake engine. Write such blocks without a `$` prompt, and
   put transcripts with output into ` ```text ` blocks.
-- **The catalog is generated.** Do not edit `src/generated/catalog.json` by hand; change the spec
+- **The catalog is generated.** Do not edit `src/generated/catalog.<engine>.json` by hand; change the spec
   patches or the generator and run `npm run generate`.
 
 ## Before opening a PR

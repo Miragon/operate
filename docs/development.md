@@ -31,17 +31,20 @@ OPERATE_IT_BINARY="$PWD/build/bin/operate-macos-arm64" OPERATE_IT_ENGINES=operat
 
 The command surface is data, not hand-written code:
 
-1. `spec/operaton-rest-api.json` is the vendored OpenAPI spec of the Camunda 7 / Operaton REST API.
-2. `spec/patches.json` corrects it with RFC 6902 JSON patches (each with a `test` guard and a
-   `reason`).
-3. `npm run generate` (`scripts/generate-catalog.ts`, `scripts/catalog/*`) turns it into
-   `src/generated/catalog.json`: operations with group, command name, aliases, effect, parameters,
+1. `spec/camunda7-rest/api.json` is the vendored OpenAPI spec of the Camunda 7 / Operaton REST
+   API.
+2. `spec/camunda7-rest/patches.json` corrects it with RFC 6902 JSON patches (each with a `test`
+   guard and a `reason`). `spec/engines/<engine>.patches.json` hold the differences of one engine;
+   today they are empty.
+3. `npm run generate` (`scripts/generate-catalog.ts`, `scripts/catalog/*`) turns it into one
+   catalog per engine, `src/generated/catalog.<engine>.json`: operations with group, command name, aliases, effect, parameters,
    body and response descriptions, plus the referenced schemas. Naming overrides live in
    `scripts/catalog/overrides.ts`, summaries in `scripts/catalog/summaries.ts`, effects in
    `scripts/catalog/effects.ts`. The generator fails on unresolvable `$ref`s, unknown HTTP methods
    and command names or summaries that are not unique in their group.
-4. The catalog is committed; `npm run generate:check` (part of `npm run check`) fails when it is
-   out of date.
+4. The catalogs are committed; `npm run generate:check` (part of `npm run check`) fails when one
+   is out of date. A test checks that the catalogs are identical while the engine patches are
+   empty; an engine that diverges on purpose leaves that test.
 
 At runtime the same catalog drives command registration, help, `describe`, input building and
 body validation, so help, docs and behavior cannot drift apart. Unit tests also run every command
@@ -74,8 +77,8 @@ does not depend on `config`, `cli` or `operation`, `config` does not depend on `
 does not depend on `cli`, `config`, `auth` or `bin` and knows engines only through
 `src/engine-port`, only the adapters (`src/engines/<name>/adapter.ts`) import `src/api`, adapters
 and APIs do not import each other, `src/engine-port` holds types only, only `operate auth login` can reach the
-interactive login (loopback server, browser), and the generated catalog is only read through
-`src/catalog/catalog.ts`.
+interactive login (loopback server, browser), and the generated catalogs are only read through
+`src/catalog/catalog.ts` and the engine adapters, each adapter its own.
 
 ## Quality gates
 

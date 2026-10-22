@@ -221,11 +221,20 @@ export default {
       to: { path: '^src/(?:config|cli|operation)/' },
     },
     {
-      name: 'generated-catalog-only-via-catalog-ts',
+      name: 'generated-catalog-only-via-catalog-ts-or-adapters',
       severity: 'error',
-      comment: 'The generated catalog JSON is accessed only through src/catalog/catalog.ts.',
-      from: { pathNot: '^src/catalog/catalog[.]ts$' },
+      comment:
+        'The generated catalogs are read only by src/catalog/catalog.ts and the engine adapters.',
+      from: { pathNot: ['^src/catalog/catalog[.]ts$', '^src/engines/[^/]+/adapter[.]ts$'] },
       to: { path: '^src/generated/' },
+    },
+    {
+      name: 'adapter-reads-its-own-catalog',
+      severity: 'error',
+      comment:
+        'An engine adapter (src/engines/<name>) reads only src/generated/catalog.<name>.json.',
+      from: { path: '^src/engines/([^/]+)/adapter[.]ts$' },
+      to: { path: '^src/generated/', pathNot: '^src/generated/catalog[.]$1[.]json$' },
     },
     {
       name: 'output-only-operation-result',
