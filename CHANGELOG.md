@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/Miragon/operate/compare/v0.9.0...v0.10.0) (2026-10-22)
+
+
+### Features
+
+* **config:** add optional cockpitUrl to profiles ([#48](https://github.com/Miragon/operate/issues/48)) ([c5956b2](https://github.com/Miragon/operate/commit/c5956b27c2348c00a314b896b9db11917145225c))
+
 ## [0.9.0](https://github.com/Miragon/operate/compare/v0.8.0...v0.9.0) (2026-10-16)
 
 
