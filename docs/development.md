@@ -55,6 +55,9 @@ src/bin/        entry point and the Node runtime (I/O, timers, loopback server, 
 src/cli/        commander wiring and the utility commands; the only layer that imports commander
 src/operation/  input building, variables, dates, guards, request building, execution, pagination
 src/workflow/   the workflow commands: engine access, instance views, waiting, plans (pure)
+src/engine-port/ what operate needs from an engine: EnginePort and EngineAdapter (types only)
+src/engines/    one adapter per engine (operaton, cibseven, camunda7) and the list of them (pure)
+src/api/        one folder per engine API; camunda7-rest builds catalog and port for the adapters (pure)
 src/docs/       commands, describe, examples, workflow docs, completion and the agent guide (pure)
 src/catalog/    catalog access, schema helpers, body validation (pure)
 src/config/     config resolution and profile editing (pure), file store, project files
@@ -68,7 +71,9 @@ test/           fakes for unit tests, Testcontainers integration tests
 dependency-cruiser enforces the layering: no cycles or orphans, only `src/bin` imports `src/cli`,
 only `src/cli` imports commander and `src/workflow`, the pure layers import no Node builtins, `http`
 does not depend on `config`, `cli` or `operation`, `config` does not depend on `auth`, `workflow`
-does not depend on `cli`, `config`, `auth` or `bin`, only `operate auth login` can reach the
+does not depend on `cli`, `config`, `auth` or `bin` and knows engines only through
+`src/engine-port`, only the adapters (`src/engines/<name>/adapter.ts`) import `src/api`, adapters
+and APIs do not import each other, `src/engine-port` holds types only, only `operate auth login` can reach the
 interactive login (loopback server, browser), and the generated catalog is only read through
 `src/catalog/catalog.ts`.
 
@@ -84,8 +89,8 @@ interactive login (loopback server, browser), and the generated catalog is only 
 - **fast-check** property tests for naming, patches, variable parsing, dates, query building,
   projection, table width, config and auth precedence, the Basic auth header, PKCE, token expiry,
   the token cache, body validation and secret masking (also of every OAuth token and secret).
-- **StrykerJS** mutation testing of the logic layers (`src/auth`, `catalog`, `config`, `http`,
-  `operation`, `output`, `workflow`, `errors.ts`, `util.ts`) and the catalog generator
+- **StrykerJS** mutation testing of the logic layers (`src/api`, `auth`, `catalog`, `config`,
+  `engine-port`, `engines`, `http`, `operation`, `output`, `workflow`, `errors.ts`, `util.ts`) and the catalog generator
   (`scripts/catalog` without its data tables); the CLI wiring (`src/cli`), help and guide texts
   (`src/docs`) and the packaging scripts are left to the command line and integration tests. It
   runs in four parallel shards; on every push to `main` and in the weekly run their combined score

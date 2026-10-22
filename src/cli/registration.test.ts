@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { describe, expect, it } from 'vitest';
 import { fakeRuntime } from '../../test/support/fake-runtime.js';
 import { loadCatalog, operationsInGroup } from '../catalog/catalog.js';
+import { camunda7 } from '../engines/camunda7/adapter.js';
 import type { OperationSpec } from '../catalog/types.js';
 import { type OptionDoc, operationOptions, usageLine } from '../docs/options.js';
 import type { FlagValue } from '../operation/input.js';
@@ -13,7 +14,7 @@ import { addOperationOptions, commandValues } from './options.js';
 import { createProgram } from './program.js';
 
 const catalog = loadCatalog();
-const context: CliContext = { runtime: fakeRuntime(), catalog, state: {} };
+const context: CliContext = { runtime: fakeRuntime(), engine: camunda7, catalog, state: {} };
 
 /** Command line tokens that give every option once (repeatables twice) and the expected values. */
 function everyOption(docs: readonly OptionDoc[]) {

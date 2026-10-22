@@ -3,8 +3,9 @@
  * needs per poll, and the order in which a poll decides.
  */
 
+import type { EnginePort } from '../engine-port/engine-port.js';
 import { usageError } from '../errors.js';
-import { countByIds, type EnginePort } from './engine.js';
+import { countByIds } from './engine.js';
 
 export type Condition =
   | { readonly kind: 'idle' | 'ended' | 'incident' }

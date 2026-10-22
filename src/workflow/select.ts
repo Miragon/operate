@@ -4,9 +4,10 @@
  * and runtime.
  */
 
+import type { EnginePort, PlannedRequest } from '../engine-port/engine-port.js';
 import { OperateError, usageError } from '../errors.js';
 import { compact } from '../util.js';
-import { type EnginePort, json, queryInput } from './engine.js';
+import { json, queryInput } from './engine.js';
 import {
   compareText,
   definitionKeyOf,
@@ -17,7 +18,6 @@ import {
   str,
   yes,
 } from './records.js';
-import type { PlannedRequest } from './types.js';
 
 export interface Selection {
   readonly id?: string;

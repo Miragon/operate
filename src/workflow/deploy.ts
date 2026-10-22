@@ -6,6 +6,7 @@
 
 import { findByOperationId } from '../catalog/catalog.js';
 import type { Catalog, MultipartBodySpec } from '../catalog/types.js';
+import type { EnginePort, PlannedRequest } from '../engine-port/engine-port.js';
 import { OperateError, usageError } from '../errors.js';
 import { readInputFile } from '../operation/files.js';
 import type { Resource } from '../operation/multipart.js';
@@ -15,16 +16,10 @@ import type { TypedValue } from '../operation/variables.js';
 import type { FileSystem } from '../runtime.js';
 import { compact } from '../util.js';
 import { type DeployResult, resourceViews } from './deploy-view.js';
-import { type EnginePort, json, queryInput } from './engine.js';
+import { json, queryInput } from './engine.js';
 import { loadView } from './inspect.js';
 import { engineTime, type Rec, records, str } from './records.js';
-import type {
-  EndedInstance,
-  InstanceView,
-  PlannedRequest,
-  Waited,
-  WorkflowResult,
-} from './types.js';
+import type { EndedInstance, InstanceView, Waited, WorkflowResult } from './types.js';
 import { type WaitDeps, type WaitResult, type WaitSettings, waitAndInspect } from './wait.js';
 
 const DEPLOYMENT_SOURCE = 'operate';

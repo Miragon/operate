@@ -3,8 +3,8 @@
  * absent values are left out, empty lists are kept. Types only.
  */
 
+import type { PlannedRequest } from '../engine-port/engine-port.js';
 import type { OperateError } from '../errors.js';
-import type { OperationInput } from '../operation/request.js';
 import type { Rec } from './records.js';
 
 export type InstanceState =
@@ -163,12 +163,6 @@ export interface EndedInstance {
 }
 
 /** One request of a `--dry-run`: `summary` names the writes. */
-export interface PlannedRequest {
-  readonly summary?: string;
-  readonly operationId: string;
-  readonly input: OperationInput;
-}
-
 /** A write of a workflow command, previewed by `--dry-run`. */
 export interface PlannedWrite extends PlannedRequest {
   readonly summary: string;

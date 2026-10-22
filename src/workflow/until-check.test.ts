@@ -1,9 +1,10 @@
+import type { EnginePort } from '../engine-port/engine-port.js';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { portOf } from '../../test/support/engine-port.js';
 import { engineError, fakeServer, json } from '../../test/support/fake-fetch.js';
 import type { Condition } from './conditions.js';
-import type { EnginePort } from './engine.js';
+
 import { checkUntil, parseBpmn } from './until-check.js';
 
 const PARENT_XML = `<?xml version="1.0"?>

@@ -3,9 +3,10 @@
  * requests (instance, tree, wait states, root causes) and assembles the instance view.
  */
 
+import type { EnginePort, PlannedRequest } from '../engine-port/engine-port.js';
 import { OperateError } from '../errors.js';
 import { compact, isRecord, mapLimit } from '../util.js';
-import { type EnginePort, isMissing, json, listByIds, PARALLEL } from './engine.js';
+import { isMissing, json, listByIds, PARALLEL } from './engine.js';
 import { field, type Rec, records, str } from './records.js';
 import { rootCause } from './root-cause.js';
 import { checkSelection, type Selection, selectInstance, selectionRequests } from './select.js';
@@ -16,7 +17,6 @@ import type {
   IncidentCause,
   InstanceData,
   InstanceView,
-  PlannedRequest,
   WorkflowResult,
 } from './types.js';
 import { historicVariableMap } from './variables.js';

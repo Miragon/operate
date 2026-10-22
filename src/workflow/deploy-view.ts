@@ -3,10 +3,11 @@
  * deployed now, and the definitions in effect for every resource.
  */
 
+import type { EnginePort } from '../engine-port/engine-port.js';
 import type { Resource } from '../operation/multipart.js';
 import { isBpmn, isDmn } from '../operation/resources.js';
 import { compact, isRecord } from '../util.js';
-import { type EnginePort, json } from './engine.js';
+import { json } from './engine.js';
 import { amount, compareText, field, type Rec, records, str } from './records.js';
 
 type DefinitionType = 'process' | 'decision' | 'drd';

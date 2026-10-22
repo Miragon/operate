@@ -7,6 +7,12 @@
 
 import { findByOperationId } from '../catalog/catalog.js';
 import type { Catalog, OperationSpec } from '../catalog/types.js';
+import type {
+  AuthorizedPreview,
+  EnginePort,
+  PlannedRequest,
+  Query,
+} from '../engine-port/engine-port.js';
 import { OperateError } from '../errors.js';
 import type { ClientOptions } from '../http/client.js';
 import { commandRef } from '../operation/command-ref.js';
@@ -18,43 +24,10 @@ import {
   type OperationInput,
   type Target,
 } from '../operation/request.js';
-import type { OperationResult, RequestPreview } from '../operation/result.js';
+import type { OperationResult } from '../operation/result.js';
 import { sendRequest } from '../operation/send.js';
 import { mapLimit } from '../util.js';
 import { countOf, type Rec, records } from './records.js';
-import type { PlannedRequest } from './types.js';
-
-export type Query = Readonly<Record<string, string | undefined>>;
-
-/** A request preview and the note of the auth provider, if any. */
-interface AuthorizedPreview {
-  readonly request: RequestPreview;
-  readonly note?: string;
-}
-
-interface ListResult {
-  readonly items: readonly Rec[];
-  /** True when the engine has more than the `cap` items that were loaded. */
-  readonly truncated: boolean;
-}
-
-export interface EnginePort {
-  /** Sends the catalog operation; HTTP errors as in §2.7 with the command of that operation. */
-  call(operationId: string, input: OperationInput): Promise<OperationResult>;
-  /** The JSON value of `call`; an engine 404 (a missing resource) gives undefined. */
-  find(operationId: string, input: OperationInput): Promise<unknown>;
-  /** The objects of a paginated list operation, all pages (500 per page), at most `cap`. */
-  list(operationId: string, query: Query, cap?: number): Promise<ListResult>;
-  /** A text response (stacktraces, error details); 404, 204 or an empty text give undefined. */
-  text(operationId: string, pathArgs: readonly string[]): Promise<string | undefined>;
-  /**
-   * The `--dry-run` preview of a request with the auth headers known without network access, plus
-   * the auth provider's note (e.g. that there is no OAuth login).
-   */
-  preview(request: PlannedRequest): Promise<AuthorizedPreview>;
-  /** `METHOD /path` relative to the REST root, as the `Done:` line shows it. */
-  route(operationId: string, input: OperationInput): string;
-}
 
 /** Most parallel requests of one round. */
 export const PARALLEL = 8;

@@ -1,7 +1,8 @@
-/** What every command action of the CLI gets: the runtime, the catalog and the run state. */
+/** What every command action of the CLI gets: the runtime, the engine, its catalog and the run state. */
 
 import type { Catalog } from '../catalog/types.js';
 import type { OutputFormat } from '../config/types.js';
+import type { EngineAdapter } from '../engine-port/engine-adapter.js';
 import type { Runtime } from '../runtime.js';
 
 /**
@@ -16,6 +17,7 @@ export interface CliState {
 
 export interface CliContext {
   readonly runtime: Runtime;
+  readonly engine: EngineAdapter;
   readonly catalog: Catalog;
   readonly state: CliState;
 }

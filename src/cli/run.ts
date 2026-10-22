@@ -3,7 +3,7 @@
  * exit code. Errors are rendered to stderr by `renderError` (design §2.7), never printed directly.
  */
 
-import { loadCatalog } from '../catalog/catalog.js';
+import { ENGINES } from '../engines/index.js';
 import { EXIT_CODES } from '../errors.js';
 import type { Runtime } from '../runtime.js';
 import { normalizeArgv } from './argv.js';
@@ -14,7 +14,8 @@ import { createProgram, hasSubcommands } from './program.js';
 
 /** Runs `operate <argv...>` and resolves to the exit code. Never rejects. */
 export async function run(argv: readonly string[], runtime: Runtime): Promise<number> {
-  const context: CliContext = { runtime, catalog: loadCatalog(), state: { argv } };
+  const engine = ENGINES.camunda7;
+  const context: CliContext = { runtime, engine, catalog: engine.catalog, state: { argv } };
   if (argv[0] === COMPLETE_COMMAND) {
     await runComplete(argv.slice(1), context);
     return EXIT_CODES.ok;

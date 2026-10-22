@@ -8,11 +8,11 @@ import type { Command } from 'commander';
 import type { Effect } from '../../catalog/types.js';
 import { argumentSyntax } from '../../docs/options.js';
 import { type WorkflowDoc, workflowDescription } from '../../docs/workflow.js';
+import type { EnginePort } from '../../engine-port/engine-port.js';
 import type { CommandValues } from '../../operation/command-values.js';
 import { checkEffect } from '../../operation/guards.js';
 import type { Runtime } from '../../runtime.js';
 import { dryRunOutput, dryRunText } from '../../workflow/dry-run.js';
-import { type EnginePort, enginePort } from '../../workflow/engine.js';
 import type { WorkflowResult } from '../../workflow/types.js';
 import type { WaitDeps } from '../../workflow/wait.js';
 import { subcommand } from '../command.js';
@@ -74,7 +74,7 @@ async function start(
   const values = commandValues(command, registered);
   const session = await openSession(context, readGlobals(command));
   const { runtime } = context;
-  const port = enginePort(context.catalog, targetOf(session), clientOf(session, runtime));
+  const port = context.engine.port(targetOf(session), clientOf(session, runtime));
   const deps: WaitDeps = {
     port,
     now: () => runtime.now(),
