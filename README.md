@@ -3,14 +3,13 @@
 [![npm version](https://img.shields.io/npm/v/@miragon/operate.svg)](https://www.npmjs.com/package/@miragon/operate)
 [![CI](https://github.com/Miragon/operate/actions/workflows/ci.yml/badge.svg)](https://github.com/Miragon/operate/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Documentation](https://img.shields.io/badge/docs-miragon.github.io%2Foperate-blue.svg)](https://miragon.github.io/operate/)
 
 A command line tool that lets an AI agent (or a human at a shell) **operate a Camunda 7 process
 engine**: [Operaton](https://operaton.org), [CIB seven](https://cibseven.org) and Camunda 7. Deploy
 processes and decisions, start and follow instances, work on tasks, fix incidents, migrate running
 instances, look into the history and administer users and permissions. The agent says what should
 happen, and the CLI talks to the REST API.
-
-Documentation: [miragon.github.io/operate](https://miragon.github.io/operate/)
 
 ![One operate advance command completes the task an order process waits at](docs/assets/demo.gif)
 
