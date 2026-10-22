@@ -20,6 +20,7 @@ import {
   findProfile,
   missingProfileError,
   parseTimeout,
+  validateCockpitUrl,
   validateEngine,
   validateOutput,
   validateUrl,
@@ -40,6 +41,7 @@ import {
 
 export interface ProfileChanges extends OAuthChanges, BearerChanges {
   readonly url?: string;
+  readonly cockpitUrl?: string;
   readonly engine?: string;
   /** Auth type: none, basic, oauth or bearer. */
   readonly auth?: string;
@@ -114,6 +116,7 @@ export interface ConfigView {
   readonly profileFile: string | null;
   readonly values: {
     readonly url: ConfigValue<string>;
+    readonly cockpitUrl: ConfigValue<string | null>;
     readonly engine: ConfigValue<string | null>;
     readonly auth: ConfigValue<string>;
     readonly username: ConfigValue<string | null>;
@@ -131,6 +134,7 @@ export interface ConfigView {
 /** Accepted spellings for `config unset` besides the profile keys themselves. */
 const KEY_ALIASES: Readonly<Record<string, ProfileKey>> = {
   'read-only': 'readOnly',
+  'cockpit-url': 'cockpitUrl',
   header: 'headers',
 };
 
@@ -161,6 +165,7 @@ function changedHeaders(
 function changedValues(existing: Profile | undefined, changes: ProfileChanges): Profile {
   return compact({
     url: ifGiven(changes.url, validateUrl),
+    cockpitUrl: ifGiven(changes.cockpitUrl, validateCockpitUrl),
     engine: ifGiven(changes.engine, validateEngine),
     auth: changedAuth(existing?.auth, changes),
     output: ifGiven(changes.output, validateOutput),
@@ -362,6 +367,7 @@ export function showConfig(
     profileFile,
     values: {
       url: { value: resolved.url, source: sources.url },
+      cockpitUrl: optionalValue(resolved.cockpitUrl, 'profile'),
       engine: { value: resolved.engine ?? null, source: sources.engine },
       auth: { value: auth.type, source: sources.auth },
       ...credentialValues(auth),

@@ -193,6 +193,7 @@ describe('listProfiles and showConfig with a bearer token', () => {
     expect(view.values.username).toEqual({ value: null, source: 'default' });
     expect(Object.keys(view.values)).toEqual([
       'url',
+      'cockpitUrl',
       'engine',
       'auth',
       'username',

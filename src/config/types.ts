@@ -202,6 +202,7 @@ export interface UnusedToken {
 
 export interface Profile {
   readonly url?: string;
+  readonly cockpitUrl?: string;
   readonly engine?: string;
   readonly auth?: ProfileAuth;
   readonly output?: OutputFormat;
@@ -213,6 +214,7 @@ export interface Profile {
 /** Keys a profile may contain, in the order they are written to the config file. */
 export const PROFILE_KEYS = [
   'url',
+  'cockpitUrl',
   'engine',
   'auth',
   'output',
@@ -309,6 +311,7 @@ export interface ResolvedConfig {
   readonly timeoutMs: number;
   readonly headers: Readonly<Record<string, string>>;
   readonly readOnly: boolean;
+  readonly cockpitUrl?: string;
   readonly sources: Readonly<Record<ResolvedKey, Source>>;
   /** A bearer token that is set but not used by the resolved auth type. */
   readonly unusedToken?: UnusedToken;

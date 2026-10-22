@@ -84,6 +84,8 @@ operate ping --profile prod
 
 - \`operate ping\` prints \`{url, engine, reachable, version, engines, latencyMs, auth}\` (\`user\` too).
 - Precedence for every setting: flag > environment variable > profile > default.
+- Links to Cockpit: take \`values.cockpitUrl\` from \`operate config show -o json\`; when it is null,
+  ask the user for the Cockpit URL instead of guessing it from the engine URL.
 - Profiles, project files, environment variables, named engines and headers:
   \`operate guide config\`. Basic auth, bearer tokens, token commands and OAuth logins:
   \`operate guide auth\`.

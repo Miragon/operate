@@ -210,9 +210,16 @@ describe('parseConfigFile', () => {
     );
   });
 
+  it('accepts a cockpit URL and rejects a blank one', () => {
+    expect(
+      parseConfigFile(JSON.stringify({ profiles: { p: { cockpitUrl: 'http://ops' } } }), PATH),
+    ).toEqual({ profiles: { p: { cockpitUrl: 'http://ops' } } });
+    expect(profileFailure({ cockpitUrl: ' ' })).toContain('invalid cockpitUrl');
+  });
+
   it('rejects unknown profile keys', () => {
     expect(profileFailure({ url: 'http://x', user: 'demo' })).toBe(
-      `Invalid config file ${PATH}: unknown key(s) user in profile "prod" (allowed: url, engine, auth, output, timeout, headers, readOnly)`,
+      `Invalid config file ${PATH}: unknown key(s) user in profile "prod" (allowed: url, cockpitUrl, engine, auth, output, timeout, headers, readOnly)`,
     );
   });
 

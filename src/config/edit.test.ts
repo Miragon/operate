@@ -137,6 +137,28 @@ describe('setProfile', () => {
     });
   });
 
+  it('stores a cockpit URL after the engine URL, without trailing slashes', () => {
+    const result = setProfile({ profiles: { a: { readOnly: true } } }, 'a', {
+      cockpitUrl: ' https://ops.example.com/operaton/app/cockpit/default/ ',
+      url: 'http://x',
+    });
+    expect(result.profiles.a).toEqual({
+      url: 'http://x',
+      cockpitUrl: 'https://ops.example.com/operaton/app/cockpit/default',
+      readOnly: true,
+    });
+    expect(Object.keys(result.profiles.a ?? {})).toEqual(['url', 'cockpitUrl', 'readOnly']);
+  });
+
+  it('rejects a cockpit URL that is not http(s) or contains credentials', () => {
+    const set = (cockpitUrl: string) => () => setProfile(TWO, 'prod', { cockpitUrl });
+    expect(set('ftp://ops')).toThrow('Cockpit URL must start with http:// or https://');
+    expect(failure(set('ftp://ops')).details.hint).toBe(
+      'Example: http://localhost:8080/operaton/app/cockpit/default',
+    );
+    expect(set('https://u:p@ops')).toThrow('Cockpit URL must not contain credentials');
+  });
+
   it('writes the profile keys in canonical order', () => {
     const result = setProfile({ profiles: { a: { readOnly: true } } }, 'a', {
       headers: ['A: b'],
@@ -267,7 +289,7 @@ describe('unsetProfileKeys', () => {
     expect(error.code).toBe('CONFIG');
     expect(error.message).toBe('Unknown profile key "user"');
     expect(error.details.hint).toBe(
-      'Valid keys: url, engine, auth, output, timeout, headers, readOnly; OAuth settings: issuer, endpoints, clientId, clientSecret, scopes, audience, redirectPort; bearer token: token, tokenEnv.',
+      'Valid keys: url, cockpitUrl, engine, auth, output, timeout, headers, readOnly; OAuth settings: issuer, endpoints, clientId, clientSecret, scopes, audience, redirectPort; bearer token: token, tokenEnv.',
     );
   });
 
@@ -442,6 +464,7 @@ describe('showConfig', () => {
       profileFile: '/home/me/.config/operate/config.json',
       values: {
         url: { value: 'http://localhost:8080/engine-rest', source: 'profile' },
+        cockpitUrl: { value: null, source: 'default' },
         engine: { value: null, source: 'default' },
         auth: { value: 'none', source: 'default' },
         username: { value: null, source: 'default' },
@@ -452,6 +475,12 @@ describe('showConfig', () => {
         readOnly: { value: false, source: 'profile' },
       },
     });
+  });
+
+  it('shows the cockpit URL of the profile', () => {
+    const file: ConfigFile = { profiles: { p: { cockpitUrl: 'http://ops/cockpit' } } };
+    const view = showConfig(resolveConfig({ profile: 'p' }, {}, file), 'c.json');
+    expect(view.values.cockpitUrl).toEqual({ value: 'http://ops/cockpit', source: 'profile' });
   });
 
   it('uses null for values that are not set', () => {

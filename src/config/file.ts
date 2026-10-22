@@ -121,6 +121,10 @@ type Check = readonly [check: (value: unknown) => boolean, expected: string];
 /** Checks of the plain profile values; the auth object has its own (`profileAuthProblem`). */
 const PROFILE_CHECKS: Readonly<Record<Exclude<ProfileKey, 'auth'>, Check>> = {
   url: [isNonEmptyString, 'a URL such as http://localhost:8080/engine-rest'],
+  cockpitUrl: [
+    isNonEmptyString,
+    'a URL such as http://localhost:8080/operaton/app/cockpit/default/',
+  ],
   engine: [isEngineName, 'a process engine name, not "." or ".."'],
   output: [
     (value) => OUTPUT_FORMATS.some((format) => format === value),
