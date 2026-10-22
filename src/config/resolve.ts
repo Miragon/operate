@@ -15,15 +15,19 @@ import { authorizationConflict, resolveAuth } from './resolve-auth.js';
 import {
   type ConfigFlags,
   DEFAULT_TIMEOUT_MS,
+  DEFAULT_PLATFORM,
   DEFAULT_URL,
   ENV,
   type LoadedConfig,
   OUTPUT_FORMATS,
   type OutputFormat,
+  PLATFORMS,
+  type Platform,
   type Profile,
   type ProjectSource,
   type ResolvedConfig,
   type SelectedProfile,
+  type Source,
 } from './types.js';
 
 /** Largest delay a Node.js timer supports (2^31 - 1 ms, about 24.8 days). */
@@ -166,6 +170,31 @@ export function validateEngine(engine: string): string {
   return trimmed;
 }
 
+export function isPlatform(value: unknown): value is Platform {
+  return PLATFORMS.some((platform) => platform === value);
+}
+
+export function validatePlatform(platform: string): Platform {
+  const trimmed = platform.trim();
+  if (!isPlatform(trimmed)) {
+    throw configError(`Unknown platform "${trimmed}"`, `Use one of: ${PLATFORMS.join(', ')}`);
+  }
+  return trimmed;
+}
+
+/** The platform of flag, environment or profile with its source; `camunda7` by default. */
+export function resolvePlatform(
+  flags: ConfigFlags,
+  env: Env,
+  profile: Profile | undefined,
+): { readonly value: Platform; readonly source: Source } {
+  const platform = pick(nonEmpty(flags.platform), nonEmpty(env[ENV.platform]), profile?.platform);
+  return {
+    value: validatePlatform(platform.value ?? DEFAULT_PLATFORM),
+    source: platform.source,
+  };
+}
+
 export function validateOutput(output: string): OutputFormat {
   const format = OUTPUT_FORMATS.find((candidate) => candidate === output);
   if (format === undefined) {
@@ -231,6 +260,7 @@ export function resolveConfig(
 ): ResolvedConfig {
   const selected = selectProfile(flags, env, file);
   const { url, engine, output, timeout, readOnly, headers } = pickAll(flags, env, selected.profile);
+  const platform = resolvePlatform(flags, env, selected.profile);
   const cockpitUrl = selected.profile?.cockpitUrl;
   const values = {
     ...compact({
@@ -240,6 +270,7 @@ export function resolveConfig(
       output: output.value === undefined ? undefined : validateOutput(output.value),
     }),
     url: validateUrl(url.value ?? DEFAULT_URL),
+    platform: platform.value,
     timeoutMs: timeout.value === undefined ? DEFAULT_TIMEOUT_MS : parseTimeout(timeout.value),
     headers: headers.value,
     readOnly: readOnly.value ?? false,
@@ -259,6 +290,7 @@ export function resolveConfig(
     sources: {
       url: url.source,
       engine: engine.source,
+      platform: platform.source,
       auth: auth.source,
       output: output.source,
       timeout: timeout.source,

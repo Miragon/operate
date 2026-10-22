@@ -39,6 +39,7 @@ describe('global options', () => {
     expect(GLOBAL_OPTIONS.map(optionFlags)).toEqual([
       '--url <url>',
       '--engine <name>',
+      '--platform <name>',
       '--profile <name>',
       '--config <path>',
       '-o, --output <format>',

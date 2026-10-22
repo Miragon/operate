@@ -18,13 +18,15 @@ import {
   parseReadOnly,
   parseTimeout,
   resolveConfig,
+  resolvePlatform,
   selectProfile,
   validateEngine,
   validateOutput,
+  validatePlatform,
   validateUrl,
 } from './resolve.js';
 import { redactUrl } from './redact.js';
-import type { ConfigFile, ConfigFlags, Profile } from './types.js';
+import { type ConfigFile, type ConfigFlags, PLATFORMS, type Profile } from './types.js';
 
 function failure(action: () => unknown): OperateError {
   try {
@@ -43,6 +45,7 @@ function file(profile: Profile, name = 'p'): ConfigFile {
 const DEFAULT_SOURCES = {
   url: 'default',
   engine: 'default',
+  platform: 'default',
   auth: 'default',
   output: 'default',
   timeout: 'default',
@@ -54,6 +57,7 @@ describe('resolveConfig defaults', () => {
   it('resolves the defaults without flags, environment or file', () => {
     expect(resolveConfig({}, {}, undefined)).toEqual({
       url: 'http://localhost:8080/engine-rest',
+      platform: 'camunda7',
       auth: { type: 'none' },
       timeoutMs: 30000,
       headers: {},
@@ -66,13 +70,14 @@ describe('resolveConfig defaults', () => {
     const env = {
       OPERATE_URL: ' ',
       OPERATE_ENGINE: '',
+      OPERATE_PLATFORM: ' ',
       OPERATE_OUTPUT: '',
       OPERATE_TIMEOUT: ' ',
       OPERATE_AUTH: '',
       OPERATE_READ_ONLY: '',
       OPERATE_PROFILE: '',
     };
-    const flags: ConfigFlags = { url: '', engine: ' ', output: '', profile: '' };
+    const flags: ConfigFlags = { url: '', engine: ' ', platform: '', output: '', profile: '' };
     expect(resolveConfig(flags, env, undefined).sources).toEqual(DEFAULT_SOURCES);
   });
 
@@ -92,6 +97,7 @@ describe('resolveConfig precedence', () => {
   const profile: Profile = {
     url: 'http://profile:8080/engine-rest',
     engine: 'profile-engine',
+    platform: 'operaton',
     auth: { type: 'none' },
     output: 'table',
     timeout: 3000,
@@ -101,6 +107,7 @@ describe('resolveConfig precedence', () => {
   const env = {
     OPERATE_URL: 'http://env:8080/engine-rest',
     OPERATE_ENGINE: 'env-engine',
+    OPERATE_PLATFORM: 'cibseven',
     OPERATE_OUTPUT: 'json',
     OPERATE_TIMEOUT: '2000',
     OPERATE_AUTH: 'none',
@@ -109,6 +116,7 @@ describe('resolveConfig precedence', () => {
   const flags: ConfigFlags = {
     url: 'http://flag:8080/engine-rest/',
     engine: 'flag-engine',
+    platform: 'camunda7',
     output: 'table',
     timeout: '1000',
     headers: ['X-Flag: f'],
@@ -121,6 +129,7 @@ describe('resolveConfig precedence', () => {
       profile: 'p',
       url: 'http://profile:8080/engine-rest',
       engine: 'profile-engine',
+      platform: 'operaton',
       auth: { type: 'none', off: 'Basic auth is switched off by the auth.type of profile "p"' },
       output: 'table',
       timeoutMs: 3000,
@@ -129,6 +138,7 @@ describe('resolveConfig precedence', () => {
       sources: {
         url: 'profile',
         engine: 'profile',
+        platform: 'profile',
         auth: 'profile',
         output: 'profile',
         timeout: 'profile',
@@ -287,12 +297,14 @@ describe('resolveConfig precedence', () => {
     const urls = fc.constantFrom('http://a:1/engine-rest', 'https://b/rest', 'http://c');
     const engines = fc.stringMatching(/^[a-z][a-z0-9-]{0,8}$/);
     const outputs = fc.constantFrom('json' as const, 'table' as const);
+    const platforms = fc.constantFrom(...PLATFORMS);
     const timeouts = fc.integer({ min: 1, max: MAX_TIMEOUT_MS });
     fc.assert(
       fc.property(
         fc.record({
           url: choice(urls),
           engine: choice(engines),
+          platform: choice(platforms),
           output: choice(outputs),
           timeout: choice(timeouts),
           readOnly: choice(fc.boolean()),
@@ -302,6 +314,7 @@ describe('resolveConfig precedence', () => {
           const flags = {
             url: c.url[0],
             engine: c.engine[0],
+            platform: c.platform[0],
             output: c.output[0],
             timeout: c.timeout[0]?.toString(),
             readOnly: c.readOnly[0],
@@ -309,6 +322,7 @@ describe('resolveConfig precedence', () => {
           const env = {
             OPERATE_URL: c.url[1],
             OPERATE_ENGINE: c.engine[1],
+            OPERATE_PLATFORM: c.platform[1],
             OPERATE_OUTPUT: c.output[1],
             OPERATE_TIMEOUT: c.timeout[1]?.toString(),
             OPERATE_READ_ONLY: c.readOnly[1]?.toString(),
@@ -317,6 +331,7 @@ describe('resolveConfig precedence', () => {
           const profile = {
             url: c.url[2],
             engine: c.engine[2],
+            platform: c.platform[2],
             output: c.output[2],
             timeout: c.timeout[2],
             readOnly: c.readOnly[2],
@@ -329,18 +344,21 @@ describe('resolveConfig precedence', () => {
           );
           const url = expected(c.url, 'http://localhost:8080/engine-rest');
           const engine = expected(c.engine, undefined);
+          const platform = expected(c.platform, 'camunda7');
           const output = expected(c.output, undefined);
           const timeout = expected(c.timeout, 30000);
           const readOnly = expected(c.readOnly, false);
           const auth = expected([undefined, c.auth[1] || undefined, c.auth[2] || undefined], false);
           expect(resolved.url).toBe(url.value);
           expect(resolved.engine).toBe(engine.value);
+          expect(resolved.platform).toBe(platform.value);
           expect(resolved.output).toBe(output.value);
           expect(resolved.timeoutMs).toBe(timeout.value);
           expect(resolved.readOnly).toBe(readOnly.value);
           expect(resolved.sources).toEqual({
             url: url.source,
             engine: engine.source,
+            platform: platform.source,
             auth: auth.source,
             output: output.source,
             timeout: timeout.source,
@@ -537,6 +555,38 @@ describe('validateOutput', () => {
     const error = failure(() => validateOutput('JSON'));
     expect(error.message).toBe('Unknown output format "JSON"');
     expect(error.details.hint).toBe('Use one of: json, table');
+  });
+});
+
+describe('validatePlatform', () => {
+  it('accepts every engine with an adapter, trimmed', () => {
+    for (const platform of PLATFORMS) expect(validatePlatform(` ${platform} `)).toBe(platform);
+  });
+
+  it('rejects other values with the list of known engines', () => {
+    const error = failure(() => validatePlatform('camunda8'));
+    expect(error.code).toBe('CONFIG');
+    expect(error.message).toBe('Unknown platform "camunda8"');
+    expect(error.details.hint).toBe('Use one of: operaton, cibseven, camunda7');
+  });
+});
+
+describe('resolvePlatform', () => {
+  it('takes the flag, then OPERATE_PLATFORM, then the profile, else camunda7', () => {
+    const env = { OPERATE_PLATFORM: 'cibseven' };
+    const profile: Profile = { platform: 'operaton' };
+    expect(resolvePlatform({ platform: 'camunda7' }, env, profile)).toEqual({
+      value: 'camunda7',
+      source: 'flag',
+    });
+    expect(resolvePlatform({}, env, profile)).toEqual({ value: 'cibseven', source: 'env' });
+    expect(resolvePlatform({}, {}, profile)).toEqual({ value: 'operaton', source: 'profile' });
+    expect(resolvePlatform({}, {}, undefined)).toEqual({ value: 'camunda7', source: 'default' });
+  });
+
+  it('fails on an unknown value of the environment', () => {
+    const error = failure(() => resolvePlatform({}, { OPERATE_PLATFORM: 'zeebe' }, undefined));
+    expect(error.message).toBe('Unknown platform "zeebe"');
   });
 });
 

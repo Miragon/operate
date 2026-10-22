@@ -61,16 +61,18 @@ operate config path --project
 
 ## Environment
 
-- Variables: \`OPERATE_URL\`, \`OPERATE_ENGINE\`, \`OPERATE_PROFILE\`, \`OPERATE_CONFIG\`,
-  \`OPERATE_OUTPUT\`, \`OPERATE_TIMEOUT\`, \`OPERATE_READ_ONLY\`, \`OPERATE_AUTH\`, \`OPERATE_USERNAME\`,
-  \`OPERATE_PASSWORD\`, \`OPERATE_TOKEN\`, \`OPERATE_TOKEN_COMMAND\`, \`OPERATE_OAUTH_*\`,
-  \`OPERATE_HEADERS\`.
+- Variables: \`OPERATE_URL\`, \`OPERATE_ENGINE\`, \`OPERATE_PLATFORM\`, \`OPERATE_PROFILE\`,
+  \`OPERATE_CONFIG\`, \`OPERATE_OUTPUT\`, \`OPERATE_TIMEOUT\`, \`OPERATE_READ_ONLY\`, \`OPERATE_AUTH\`,
+  \`OPERATE_USERNAME\`, \`OPERATE_PASSWORD\`, \`OPERATE_TOKEN\`, \`OPERATE_TOKEN_COMMAND\`,
+  \`OPERATE_OAUTH_*\`, \`OPERATE_HEADERS\`.
 - Each value is resolved on its own, so with \`--url\` or \`OPERATE_URL\` set the credentials of the
   profile go to that URL: check \`operate config show\` when a shell has a leftover \`OPERATE_URL\`.
 
 ## Engines, headers and timeouts
 
 - \`--engine <name>\` addresses a named process engine (\`/engine/{name}/...\`); \`ping\` checks it.
+- \`--platform <name>\` (\`OPERATE_PLATFORM\`, profile key \`platform\`) names the product:
+  \`operaton\`, \`cibseven\` or \`camunda7\` (default). It selects the commands of that engine.
 - \`-H 'Name: value'\` (repeatable), \`OPERATE_HEADERS\` (one per line) or the headers of a profile
   (\`config set --header\`) add request headers such as an API key; they merge per name: profile,
   then \`OPERATE_HEADERS\`, then \`-H\`. Secret headers are masked unless \`--show-secrets\`.

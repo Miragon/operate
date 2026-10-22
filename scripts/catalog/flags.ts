@@ -11,6 +11,7 @@ import { flagName } from './naming.js';
 export const GLOBAL_FLAGS: readonly string[] = [
   'url',
   'engine',
+  'platform',
   'profile',
   'config',
   'output',

@@ -26,6 +26,7 @@ import { maskedView, showHeader, showRows } from './config-view.js';
 const SHOW_OPTIONS = [
   'url',
   'engine',
+  'platform',
   'profile',
   'config',
   'output',

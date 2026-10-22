@@ -23,6 +23,7 @@ import {
   validateCockpitUrl,
   validateEngine,
   validateOutput,
+  validatePlatform,
   validateUrl,
 } from './resolve.js';
 import {
@@ -43,6 +44,7 @@ export interface ProfileChanges extends OAuthChanges, BearerChanges {
   readonly url?: string;
   readonly cockpitUrl?: string;
   readonly engine?: string;
+  readonly platform?: string;
   /** Auth type: none, basic, oauth or bearer. */
   readonly auth?: string;
   /** Basic auth username. */
@@ -118,6 +120,7 @@ export interface ConfigView {
     readonly url: ConfigValue<string>;
     readonly cockpitUrl: ConfigValue<string | null>;
     readonly engine: ConfigValue<string | null>;
+    readonly platform: ConfigValue<ResolvedConfig['platform']>;
     readonly auth: ConfigValue<string>;
     readonly username: ConfigValue<string | null>;
     readonly password: ConfigValue<string | null>;
@@ -167,6 +170,7 @@ function changedValues(existing: Profile | undefined, changes: ProfileChanges): 
     url: ifGiven(changes.url, validateUrl),
     cockpitUrl: ifGiven(changes.cockpitUrl, validateCockpitUrl),
     engine: ifGiven(changes.engine, validateEngine),
+    platform: ifGiven(changes.platform, validatePlatform),
     auth: changedAuth(existing?.auth, changes),
     output: ifGiven(changes.output, validateOutput),
     timeout: ifGiven(changes.timeout, parseTimeout),
@@ -369,6 +373,7 @@ export function showConfig(
       url: { value: resolved.url, source: sources.url },
       cockpitUrl: optionalValue(resolved.cockpitUrl, 'profile'),
       engine: { value: resolved.engine ?? null, source: sources.engine },
+      platform: { value: resolved.platform, source: sources.platform },
       auth: { value: auth.type, source: sources.auth },
       ...credentialValues(auth),
       ...tokenValue(resolved),

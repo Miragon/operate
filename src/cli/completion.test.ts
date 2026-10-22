@@ -190,6 +190,7 @@ describe('operate __complete', () => {
       'url',
       'cockpitUrl',
       'engine',
+      'platform',
       'auth',
       'output',
       'timeout',

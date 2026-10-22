@@ -64,7 +64,7 @@ export function registerScenario(engineName: EngineName): void {
         url: engine.url,
         configFile,
         // keep the real user config out of reach even if OPERATE_CONFIG is removed
-        env: { XDG_CONFIG_HOME: workdir },
+        env: { XDG_CONFIG_HOME: workdir, OPERATE_PLATFORM: engine.platform },
       });
     }, ENGINE_START_TIMEOUT_MS);
 
