@@ -11,7 +11,7 @@ processes and decisions, start and follow instances, work on tasks, fix incident
 instances, look into the history and administer users and permissions. The agent says what should
 happen, and the CLI talks to the REST API.
 
-![One operate advance command completes the task an order process waits at](docs/assets/demo.gif)
+![operate finds the incident of an order with an expired card, fixes the variable and retries the job, and the order moves on to shipping](docs/assets/demo.gif)
 
 ## Why
 
