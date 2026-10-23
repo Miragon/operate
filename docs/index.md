@@ -1,6 +1,7 @@
 ---
 layout: page
-title: Miragon operate
+title: operate | Miragon
+titleTemplate: false
 sidebar: false
 aside: false
 editLink: false
