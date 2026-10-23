@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.11.0](https://github.com/Miragon/operate/compare/v0.10.0...v0.11.0) (2026-10-23)
+
+
+### Features
+
+* engines as adapters behind an engine port ([#54](https://github.com/Miragon/operate/issues/54)) ([a780bb2](https://github.com/Miragon/operate/commit/a780bb27b8ba2e232c4d92901f4426b3a5295db6))
+
+
+### Bug Fixes
+
+* **docs:** fit the landing page on one screen and rename the tab title ([#57](https://github.com/Miragon/operate/issues/57)) ([c0c9ba2](https://github.com/Miragon/operate/commit/c0c9ba253bf200815c50e2e477746c4f2a055b48))
+
+
+### Documentation
+
+* **readme:** show the documentation link as a badge ([#51](https://github.com/Miragon/operate/issues/51)) ([550726d](https://github.com/Miragon/operate/commit/550726d00e4c1f2595417c73fca44a5c649a6110))
+* rework the docs site into a compact, picture-led manual ([#50](https://github.com/Miragon/operate/issues/50)) ([b4879c0](https://github.com/Miragon/operate/commit/b4879c0205789f4ffd59d0ba4abc120b3a3bc6f3))
+* show an incident repair in the README demo GIF ([#58](https://github.com/Miragon/operate/issues/58)) ([ab83e6e](https://github.com/Miragon/operate/commit/ab83e6e084a3dcc96b73b21de31cd84d23255ecf))
+
 ## [0.10.0](https://github.com/Miragon/operate/compare/v0.9.0...v0.10.0) (2026-10-22)
 
 
