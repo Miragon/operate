@@ -62,9 +62,8 @@ async function copyInstall() {
           <h1>operate</h1>
           <p class="slogan">What is stuck on your engine, in one command.</p>
           <p class="lede">
-            A command line tool for Camunda 7, CIB seven and Operaton, for you at a shell, your
-            coding agent or a CI job. Every REST operation is a command, and the questions you ask
-            most take one.
+            A CLI for Camunda 7, CIB seven and Operaton. The questions you ask most take one
+            command.
           </p>
 
           <div class="install">
@@ -119,9 +118,8 @@ async function copyInstall() {
           <div class="point">
             <h2>Why</h2>
             <p>
-              Through the REST API, the step in the demo takes 4 requests: 491 characters of curl,
-              1,535 bytes of JSON to read and two ids to copy from one answer into the next. As a
-              command it is 59 characters, and the answer shows the result.
+              With the REST API, one step means several requests and copied ids. With operate it is
+              one short command, and the answer already shows what changed.
             </p>
           </div>
           <div class="point">
@@ -503,21 +501,31 @@ h1 {
     min-height: calc(100dvh - var(--vp-nav-height) - 53px);
   }
   .pitch {
-    padding-top: 20px;
-    padding-bottom: 20px;
+    padding-top: 12px;
+    padding-bottom: 12px;
   }
   h1 {
-    font-size: clamp(48px, 7vh, 72px);
+    font-size: clamp(44px, 6vh, 72px);
   }
   .slogan,
   .lede {
     margin-top: 10px;
   }
   .install {
-    margin-top: 20px;
+    margin-top: 16px;
   }
   .start {
-    margin-top: 16px;
+    margin-top: 12px;
+  }
+  .point {
+    padding-top: 10px;
+    padding-bottom: 12px;
+  }
+  .step {
+    padding-bottom: 16px;
+  }
+  .step h3 {
+    margin: 0 0 6px;
   }
   .stage {
     container-type: size;

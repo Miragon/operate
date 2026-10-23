@@ -7,7 +7,7 @@ export default miragonDocs({
   repo: 'Miragon/operate',
   // The product name (corporate design: a tool is "Miragon" plus its name); the npm package keeps
   // its name @miragon/operate. The wordmark reads MIRAGON, the name next to it "operate".
-  title: 'Miragon operate',
+  title: 'operate | Miragon',
   siteTitle: 'operate',
   description:
     'operate is a command line tool for Camunda 7, CIB seven and Operaton that lets you, your coding agent or a CI job work with a process engine in short commands.',
