@@ -6,7 +6,7 @@
 #   docker build -t operate .
 #   docker run --rm operate --version
 # Dependabot updates the digest; release.yml builds linux/amd64 and linux/arm64.
-FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:59c479c9b8c123e66047315c968aa2d35e31ae5149c856e4110a79c8b3563f0b
+FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:78f07ef1b5ea71ad7c055df15d0dd8997f2d288f9158623c4d4ae3d765b7d50d
 
 # GHCR links the package to the repository through image.source; release.yml adds version,
 # revision and creation time and repeats these as annotations of the multi-platform index.
