@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>operate is now Pulse CLI</title>
+    <script>
+      // GitHub Pages serves this page for every address under /operate/ that has no file of its
+      // own: /operate/<path>, with or without .html, goes to /pulse/cli/<path>, hash kept.
+      (function () {
+        var path = location.pathname
+          .replace(/^\/operate(?=\/|$)/, '')
+          .replace(/(.)\/$/, '$1')
+          .replace(/\.html$/, '')
+          .replace(/(^|\/)index$/, '$1');
+        if (path === '') path = '/';
+        location.replace('https://miragon.github.io/pulse/cli' + path + location.hash);
+      })();
+    </script>
+  </head>
+  <body>
+    <p>
+      operate is now Pulse CLI. Its docs are at
+      <a href="https://miragon.github.io/pulse/cli/">miragon.github.io/pulse/cli</a>.
+    </p>
+  </body>
+</html>
