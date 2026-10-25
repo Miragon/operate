@@ -371,8 +371,8 @@ describe('docs/agents.md', () => {
 });
 
 describe('README', () => {
-  it('points agents to the guide and to docs/agents.md', () => {
-    expectAll(README, ['`operate guide`', '(docs/agents.md)']);
+  it('points to Pulse CLI, the new home of operate', () => {
+    expectAll(README, ['`@miragon/pulse-cli`', 'https://miragon.github.io/pulse/cli/']);
   });
 });
 
